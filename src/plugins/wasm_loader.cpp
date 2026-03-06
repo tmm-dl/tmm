@@ -12,11 +12,9 @@
 #include <ttm/plugins/abi.h>
 
 #include <atomic>
-#include <cstdio>
 #include <cstring>
+#include <expected>
 #include <fstream>
-#include <iterator>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -33,7 +31,7 @@ namespace {
 std::atomic<int> g_wamr_refcount{0};
 } // namespace
 
-void wasm_loader_init()
+std::expected<void, std::string> wasm_loader_init()
 {
     if (g_wamr_refcount.fetch_add(1, std::memory_order_acq_rel) == 0) {
         RuntimeInitArgs args{};
@@ -41,9 +39,10 @@ void wasm_loader_init()
 
         if (!wasm_runtime_full_init(&args)) {
             g_wamr_refcount.fetch_sub(1, std::memory_order_acq_rel);
-            throw std::runtime_error("wasm_loader_init: wasm_runtime_full_init failed");
+            return std::unexpected("wasm_loader_init: wasm_runtime_full_init failed");
         }
     }
+    return {};
 }
 
 void wasm_loader_destroy()
@@ -57,22 +56,24 @@ void wasm_loader_destroy()
  * String helpers
  * ====================================================================== */
 
-void wasm_push_string(wasm_module_inst_t inst,
-                      std::string_view str,
-                      uint32_t& out_wasm_ptr,
-                      uint32_t& out_len)
+std::expected<void, std::string>
+wasm_push_string(wasm_module_inst_t inst,
+                 std::string_view str,
+                 uint32_t& out_wasm_ptr,
+                 uint32_t& out_len)
 {
     const auto len = static_cast<uint32_t>(str.size());
     void* native_ptr = nullptr;
     const uint32_t wasm_ptr = wasm_runtime_module_malloc(inst, len, &native_ptr);
     if (wasm_ptr == 0) {
-        throw std::runtime_error(
+        return std::unexpected(
             "wasm_push_string: failed to allocate " + std::to_string(len)
             + " bytes in WASM linear memory");
     }
     std::memcpy(native_ptr, str.data(), len);
     out_wasm_ptr = wasm_ptr;
     out_len      = len;
+    return {};
 }
 
 /* =========================================================================
@@ -147,15 +148,16 @@ static NativeSymbol ttm_native_symbols[] = {
  * Load / unload
  * ====================================================================== */
 
-void wasm_loader_load(const std::filesystem::path& path,
-                      std::string_view config_json,
-                      const ttm_host_api& host_api,
-                      Plugin& plugin)
+std::expected<void, std::string>
+wasm_loader_load(const std::filesystem::path& path,
+                 std::string_view config_json,
+                 const ttm_host_api& host_api,
+                 Plugin& plugin)
 {
     /* 1. Read file bytes ------------------------------------------------- */
     std::ifstream file(path, std::ios::binary);
     if (!file) {
-        throw std::runtime_error("wasm_loader_load: cannot open '" + path.string() + "'");
+        return std::unexpected("wasm_loader_load: cannot open '" + path.string() + "'");
     }
     const std::vector<uint8_t> bytes(
         (std::istreambuf_iterator<char>(file)),
@@ -167,7 +169,7 @@ void wasm_loader_load(const std::filesystem::path& path,
             ttm_native_symbols,
             sizeof(ttm_native_symbols) / sizeof(ttm_native_symbols[0])))
     {
-        throw std::runtime_error("wasm_loader_load: failed to register host symbols");
+        return std::unexpected("wasm_loader_load: failed to register host symbols");
     }
 
     /* 3. Load (compile) module ------------------------------------------- */
@@ -177,93 +179,108 @@ void wasm_loader_load(const std::filesystem::path& path,
         static_cast<uint32_t>(bytes.size()),
         error_buf, sizeof(error_buf));
     if (!plugin.module) {
-        throw std::runtime_error(
+        return std::unexpected(
             std::string("wasm_loader_load: wasm_runtime_load failed: ") + error_buf);
     }
 
-    /* 4. Instantiate ------------------------------------------------------- */
-    constexpr uint32_t STACK_SIZE = 512 * 1024;  /* 512 KB */
+    /* 4. Instantiate ----------------------------------------------------- */
+    constexpr uint32_t STACK_SIZE = 512 * 1024;     /* 512 KB */
     constexpr uint32_t HEAP_SIZE  = 4 * 1024 * 1024; /* 4 MB */
     plugin.inst = wasm_runtime_instantiate(
         plugin.module, STACK_SIZE, HEAP_SIZE, error_buf, sizeof(error_buf));
     if (!plugin.inst) {
         wasm_runtime_unload(plugin.module);
         plugin.module = nullptr;
-        throw std::runtime_error(
+        return std::unexpected(
             std::string("wasm_loader_load: instantiate failed: ") + error_buf);
     }
 
-    /* 5. Create execution environment ------------------------------------- */
+    /* 5. Create execution environment ------------------------------------ */
     plugin.env = wasm_runtime_create_exec_env(plugin.inst, STACK_SIZE);
     if (!plugin.env) {
         wasm_runtime_deinstantiate(plugin.inst);
         wasm_runtime_unload(plugin.module);
         plugin.inst   = nullptr;
         plugin.module = nullptr;
-        throw std::runtime_error("wasm_loader_load: failed to create exec env");
+        return std::unexpected("wasm_loader_load: failed to create exec env");
     }
 
     /* Attach host API pointer so host callbacks can retrieve it */
     wasm_runtime_set_user_data(plugin.env,
         const_cast<ttm_host_api*>(&host_api));
 
-    /* 6. Verify ABI version ----------------------------------------------- */
+    /* 6. Verify ABI version ---------------------------------------------- */
     auto* fn_info = wasm_runtime_lookup_function(plugin.inst, "ttm_plugin_get_info");
     if (!fn_info) {
-        throw std::runtime_error(
+        wasm_loader_unload(plugin);
+        return std::unexpected(
             "wasm_loader_load: '" + path.string()
             + "' does not export ttm_plugin_get_info");
     }
     uint32_t info_args[1] = {};
     if (!wasm_runtime_call_wasm(plugin.env, fn_info, 0, info_args)) {
-        throw std::runtime_error(
+        wasm_loader_unload(plugin);
+        return std::unexpected(
             "wasm_loader_load: ttm_plugin_get_info call failed: "
             + std::string(wasm_runtime_get_exception(plugin.inst)));
     }
-    /* info_args[0] is the WASM pointer to ttm_plugin_info */
-    auto* info = static_cast<const ttm_plugin_info*>(
+    const auto* info = static_cast<const ttm_plugin_info*>(
         wasm_runtime_addr_app_to_native(plugin.inst, info_args[0]));
     if (!info) {
-        throw std::runtime_error("wasm_loader_load: ttm_plugin_get_info returned null");
+        wasm_loader_unload(plugin);
+        return std::unexpected("wasm_loader_load: ttm_plugin_get_info returned null");
     }
-    if (info->abi_version != TTM_ABI_VERSION) {
-        throw std::runtime_error(
+    if (info->abiVersion != TTM_ABI_VERSION) {
+        wasm_loader_unload(plugin);
+        return std::unexpected(
             "wasm_loader_load: plugin ABI version mismatch (plugin="
-            + std::to_string(info->abi_version)
+            + std::to_string(info->abiVersion)
             + ", host=" + std::to_string(TTM_ABI_VERSION) + ")");
     }
 
     /* 7. Call ttm_plugin_init -------------------------------------------- */
     auto* fn_init = wasm_runtime_lookup_function(plugin.inst, "ttm_plugin_init");
     if (!fn_init) {
-        throw std::runtime_error(
+        wasm_loader_unload(plugin);
+        return std::unexpected(
             "wasm_loader_load: '" + path.string()
             + "' does not export ttm_plugin_init");
     }
 
     /* Push config JSON into WASM linear memory */
     uint32_t config_wasm_ptr = 0, config_len = 0;
-    wasm_push_string(plugin.inst, config_json, config_wasm_ptr, config_len);
+    if (auto r = wasm_push_string(plugin.inst, config_json, config_wasm_ptr, config_len); !r) {
+        wasm_loader_unload(plugin);
+        return std::unexpected(r.error());
+    }
 
     /* Push host_api struct into WASM linear memory */
     void* api_native_ptr = nullptr;
     const uint32_t api_wasm_ptr = wasm_runtime_module_malloc(
         plugin.inst, sizeof(ttm_host_api), &api_native_ptr);
     if (!api_wasm_ptr) {
-        throw std::runtime_error("wasm_loader_load: failed to allocate host_api in WASM heap");
+        wasm_runtime_module_free(plugin.inst, config_wasm_ptr);
+        wasm_loader_unload(plugin);
+        return std::unexpected("wasm_loader_load: failed to allocate host_api in WASM heap");
     }
     std::memcpy(api_native_ptr, &host_api, sizeof(ttm_host_api));
 
     /* init(host_api_ptr, config_ptr, config_len) → i32 */
     uint32_t init_args[3] = { api_wasm_ptr, config_wasm_ptr, config_len };
     if (!wasm_runtime_call_wasm(plugin.env, fn_init, 3, init_args)) {
-        throw std::runtime_error(
+        wasm_runtime_module_free(plugin.inst, config_wasm_ptr);
+        wasm_runtime_module_free(plugin.inst, api_wasm_ptr);
+        wasm_loader_unload(plugin);
+        return std::unexpected(
             "wasm_loader_load: ttm_plugin_init failed: "
             + std::string(wasm_runtime_get_exception(plugin.inst)));
     }
     const auto init_result = static_cast<ttm_error>(init_args[0]);
     if (init_result != TTM_OK) {
-        throw std::runtime_error(
+        wasm_runtime_module_free(plugin.inst, config_wasm_ptr);
+        wasm_runtime_module_free(plugin.inst, api_wasm_ptr);
+        wasm_loader_unload(plugin);
+        return std::unexpected(
             "wasm_loader_load: ttm_plugin_init returned error "
             + std::to_string(static_cast<int>(init_result)));
     }
@@ -276,21 +293,23 @@ void wasm_loader_load(const std::filesystem::path& path,
     auto lookup = [&](const char* name) -> wasm_function_inst_t {
         return wasm_runtime_lookup_function(plugin.inst, name);
     };
-    plugin.fn_fit_begin      = lookup("ttm_on_fit_begin");
-    plugin.fn_epoch_begin    = lookup("ttm_on_epoch_begin");
-    plugin.fn_batch_begin    = lookup("ttm_on_batch_begin");
-    plugin.fn_loss_computed  = lookup("ttm_on_loss_computed");
-    plugin.fn_batch_end      = lookup("ttm_on_batch_end");
-    plugin.fn_epoch_end      = lookup("ttm_on_epoch_end");
-    plugin.fn_validation_end = lookup("ttm_on_validation_end");
-    plugin.fn_fit_end        = lookup("ttm_on_fit_end");
-    plugin.fn_teardown       = lookup("ttm_plugin_teardown");
+    plugin.fnFitBegin      = lookup("ttm_on_fit_begin");
+    plugin.fnEpochBegin    = lookup("ttm_on_epoch_begin");
+    plugin.fnBatchBegin    = lookup("ttm_on_batch_begin");
+    plugin.fnLossComputed  = lookup("ttm_on_loss_computed");
+    plugin.fnBatchEnd      = lookup("ttm_on_batch_end");
+    plugin.fnEpochEnd      = lookup("ttm_on_epoch_end");
+    plugin.fnValidationEnd = lookup("ttm_on_validation_end");
+    plugin.fnFitEnd        = lookup("ttm_on_fit_end");
+    plugin.fnTeardown      = lookup("ttm_plugin_teardown");
+
+    return {};
 }
 
 void wasm_loader_unload(Plugin& plugin)
 {
-    if (plugin.env && plugin.fn_teardown) {
-        wasm_runtime_call_wasm(plugin.env, plugin.fn_teardown, 0, nullptr);
+    if (plugin.env && plugin.fnTeardown) {
+        wasm_runtime_call_wasm(plugin.env, plugin.fnTeardown, 0, nullptr);
     }
     if (plugin.env) {
         wasm_runtime_destroy_exec_env(plugin.env);

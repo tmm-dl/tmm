@@ -25,17 +25,17 @@
 
 TEST_CASE("PluginManager constructs and destructs without error", "[plugin_manager]")
 {
-	CHECK_NOTHROW([]() { ttm::plugins::PluginManager mgr; }());
+	CHECK_NOTHROW([]() { auto mgr = ttm::plugins::PluginManager::create().value(); }());
 }
 
 TEST_CASE("Multiple sequential PluginManager instances are safe", "[plugin_manager]")
 {
 	{
-		ttm::plugins::PluginManager mgr1;
+		auto mgr1 = ttm::plugins::PluginManager::create().value();
 		CHECK(mgr1.find_source("file:") != nullptr);
 	}
 	{
-		ttm::plugins::PluginManager mgr2;
+		auto mgr2 = ttm::plugins::PluginManager::create().value();
 		CHECK(mgr2.find_source("file:") != nullptr);
 	}
 }
@@ -46,13 +46,13 @@ TEST_CASE("Multiple sequential PluginManager instances are safe", "[plugin_manag
 
 TEST_CASE("Built-in file: source is always registered", "[plugin_manager][source]")
 {
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	CHECK(mgr.find_source("file:") != nullptr);
 }
 
 TEST_CASE("find_source returns nullptr for unknown scheme", "[plugin_manager][source]")
 {
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	CHECK(mgr.find_source("hf:") == nullptr);
 	CHECK(mgr.find_source("gh:") == nullptr);
 	CHECK(mgr.find_source("") == nullptr);
@@ -61,7 +61,7 @@ TEST_CASE("find_source returns nullptr for unknown scheme", "[plugin_manager][so
 
 TEST_CASE("find_source is case-sensitive", "[plugin_manager][source]")
 {
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	// "file:" is registered; "FILE:" and "File:" are not
 	CHECK(mgr.find_source("FILE:") == nullptr);
 	CHECK(mgr.find_source("File:") == nullptr);
@@ -99,7 +99,7 @@ TEST_CASE("FileSource opens and reads a local file", "[plugin_manager][source][f
 	constexpr std::string_view content = "hello from file source";
 	TempFile tmp{content};
 
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	auto* src = mgr.find_source("file:");
 	REQUIRE(src != nullptr);
 
@@ -116,7 +116,7 @@ TEST_CASE("FileSource reaches EOF correctly", "[plugin_manager][source][file]")
 {
 	TempFile tmp{"eof"};
 
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	auto* src = mgr.find_source("file:");
 	auto  reader = src->open(tmp.uri());
 	REQUIRE(reader != nullptr);
@@ -128,7 +128,7 @@ TEST_CASE("FileSource reaches EOF correctly", "[plugin_manager][source][file]")
 
 TEST_CASE("FileSource returns nullptr for a missing file", "[plugin_manager][source][file]")
 {
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	auto* src = mgr.find_source("file:");
 	REQUIRE(src != nullptr);
 
@@ -141,7 +141,7 @@ TEST_CASE("FileSource reader is seekable", "[plugin_manager][source][file]")
 	constexpr std::string_view content = "0123456789";
 	TempFile tmp{content};
 
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	auto reader = mgr.find_source("file:")->open(tmp.uri());
 	REQUIRE(reader != nullptr);
 	CHECK(reader->seekable());
@@ -159,7 +159,7 @@ TEST_CASE("FileSource reader exposes contents via as_stream()", "[plugin_manager
 	constexpr std::string_view content = "stream test content";
 	TempFile tmp{content};
 
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	auto reader = mgr.find_source("file:")->open(tmp.uri());
 	REQUIRE(reader != nullptr);
 
@@ -174,7 +174,7 @@ TEST_CASE("FileSource reader exposes contents via as_stream()", "[plugin_manager
 
 TEST_CASE("Lifecycle emit_* methods are no-ops when no user plugins are loaded", "[plugin_manager][lifecycle]")
 {
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 
 	CHECK_NOTHROW(mgr.emit_fit_begin("{}"));
 	CHECK_NOTHROW(mgr.emit_epoch_begin(0, 10));
@@ -188,7 +188,7 @@ TEST_CASE("Lifecycle emit_* methods are no-ops when no user plugins are loaded",
 
 TEST_CASE("emit_loss_computed returns input unchanged with no user plugins", "[plugin_manager][lifecycle]")
 {
-	ttm::plugins::PluginManager mgr;
+	auto mgr = ttm::plugins::PluginManager::create().value();
 	CHECK(mgr.emit_loss_computed(0.0f) == Catch::Approx(0.0f));
 	CHECK(mgr.emit_loss_computed(3.14f) == Catch::Approx(3.14f));
 	CHECK(mgr.emit_loss_computed(-1.0f) == Catch::Approx(-1.0f));

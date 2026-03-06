@@ -119,8 +119,8 @@ public:
     std::istream& as_stream();
 
 private:
-    std::unique_ptr<std::streambuf> streambuf_;
-    std::unique_ptr<std::istream>   stream_;
+    std::unique_ptr<std::streambuf> streambuf;
+    std::unique_ptr<std::istream>   stream;
 };
 
 /** @} */

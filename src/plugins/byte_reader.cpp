@@ -142,11 +142,11 @@ IByteReader::~IByteReader() = default;
 
 std::istream& IByteReader::as_stream()
 {
-    if (!streambuf_) {
-        streambuf_ = std::make_unique<detail::ByteReaderBuf>(*this);
-        stream_    = std::make_unique<std::istream>(streambuf_.get()); // raw ptr stays valid — same lifetime
+    if (!streambuf) {
+        streambuf = std::make_unique<detail::ByteReaderBuf>(*this);
+        stream    = std::make_unique<std::istream>(streambuf.get()); // raw ptr stays valid — same lifetime
     }
-    return *stream_;
+    return *stream;
 }
 
 } // namespace ttm::plugins

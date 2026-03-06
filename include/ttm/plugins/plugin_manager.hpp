@@ -9,10 +9,10 @@
  *
  * @par Typical usage
  * @code{.cpp}
- * ttm::plugins::PluginManager mgr;
+ * auto mgr = ttm::plugins::PluginManager::create().value();
  *
  * // Load plugins declared in the project config
- * mgr.load("plugins/my-source.wasm", R"({"token":"..."})");
+ * mgr.load("plugins/my-source.wasm", R"({"token":"..."})").value();
  *
  * // Resolve a dataset source and open a URI
  * auto* src = mgr.find_source("gh:");
@@ -44,6 +44,7 @@
 #include <ttm/plugins/extension.hpp>
 
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -63,8 +64,8 @@ namespace ttm::plugins {
  * - Maintain registries of extension objects (sources, transforms, tasks, metrics).
  * - Dispatch lifecycle events (emit_*()) to all loaded plugins.
  *
- * @note Non-copyable and non-movable: owns WAMR runtime handles and raw
- *       extension pointers whose addresses must remain stable.
+ * @note Non-copyable; movable.  After a move the source object is left in a
+ *       safe but empty state and must not be used further.
  *
  * @see load           Load a plugin from a WASM file
  * @see find_source    Look up a registered data source by URI scheme
@@ -72,10 +73,13 @@ namespace ttm::plugins {
 class PluginManager {
 public:
     /**
-     * @brief Construct a PluginManager and register the built-in `file:` source.
-     * @throws std::runtime_error if the WAMR runtime cannot be initialised.
+     * @brief Named constructor — creates a PluginManager and registers the
+     *        built-in `file:` source.
+     *
+     * @return A fully initialised PluginManager, or an error string if the
+     *         WAMR runtime cannot be initialised.
      */
-    PluginManager();
+    [[nodiscard]] static std::expected<PluginManager, std::string> create();
 
     /**
      * @brief Destroy all plugins (calling ttm_plugin_teardown on each) and
@@ -85,8 +89,11 @@ public:
 
     PluginManager(const PluginManager&)            = delete;
     PluginManager& operator=(const PluginManager&) = delete;
-    PluginManager(PluginManager&&)                 = delete;
-    PluginManager& operator=(PluginManager&&)      = delete;
+
+    /** @brief Move constructor — transfers ownership of WAMR runtime and plugins. */
+    PluginManager(PluginManager&&) noexcept;
+    /** @brief Move assignment — transfers ownership of WAMR runtime and plugins. */
+    PluginManager& operator=(PluginManager&&) noexcept;
 
     /* =====================================================================
      * @defgroup pm_loading Plugin loading
@@ -111,19 +118,20 @@ public:
      *                         to `ttm_plugin_init()`.  Pass `"{}"` (the default)
      *                         if the plugin requires no configuration.
      *
-     * @throws std::runtime_error if any step of the loading sequence fails.
+     * @return `{}` on success, or an error string if any loading step fails.
      *
      * @par Example
      * @code{.cpp}
-     * mgr.load("plugins/hf-source.wasm");
-     * mgr.load("plugins/bpe-tokenizer.wasm", R"({"vocab":"bpe.json"})");
+     * mgr.load("plugins/hf-source.wasm").value();
+     * mgr.load("plugins/bpe-tokenizer.wasm", R"({"vocab":"bpe.json"})").value();
      * @endcode
      *
      * @see ttm_plugin_get_info  ABI entry-point queried in step 5
      * @see ttm_plugin_init      ABI entry-point called in step 6
      */
-    void load(const std::filesystem::path& path,
-              std::string_view config_json = "{}");
+    [[nodiscard]] std::expected<void, std::string>
+    load(const std::filesystem::path& path,
+         std::string_view config_json = "{}");
 
     /** @} */
 
@@ -229,11 +237,14 @@ public:
     /** @} */
 
 private:
+    /** @brief Private default constructor — use create() instead. */
+    PluginManager() = default;
+
     /** @brief Internal per-plugin state — defined in plugin_manager.cpp. */
     struct Plugin;
 
     /** @brief Loaded plugins, in load order. */
-    std::vector<std::unique_ptr<Plugin>> plugins_;
+    std::vector<std::unique_ptr<Plugin>> plugins;
 
     /**
      * @brief Source registry: scheme string → non-owning source pointer.
@@ -241,7 +252,16 @@ private:
      * Sources are owned by their Plugin record; this map holds raw pointers
      * for O(1) scheme lookup.
      */
-    std::unordered_map<std::string, IDatasetSource*> source_registry_;
+    std::unordered_map<std::string, IDatasetSource*> sourceRegistry;
+
+    /**
+     * @brief True if this instance owns a WAMR runtime reference.
+     *
+     * @details Used by the move constructor/assignment and destructor to ensure
+     *          wasm_loader_destroy() is called exactly once per successful
+     *          wasm_loader_init() call.
+     */
+    bool wamrRefOwned = false;
 
     /* -----------------------------------------------------------------
      * Static host API callbacks (ctx == PluginManager*)

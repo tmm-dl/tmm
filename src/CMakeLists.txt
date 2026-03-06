@@ -2,7 +2,7 @@ add_executable(ttm
     main.cpp
 )
 
-target_compile_features(ttm PUBLIC cxx_std_20)
+target_compile_features(ttm PUBLIC cxx_std_23)
 target_compile_definitions(ttm PUBLIC TTM_VERSION="${TTM_VERSION}")
 
 ##########################################################################################

@@ -11,7 +11,7 @@ add_executable(ttm_tests
     plugins/test_plugin_manager.cpp
 )
 
-target_compile_features(ttm_tests PRIVATE cxx_std_20)
+target_compile_features(ttm_tests PRIVATE cxx_std_23)
 
 target_link_libraries(ttm_tests PRIVATE
     ttm_plugins

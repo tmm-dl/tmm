@@ -34,7 +34,7 @@ extern "C" {
  * @{
  */
 
-/** Current ABI version.  #ttm_plugin_info::abi_version must equal this value. */
+/** Current ABI version.  #ttm_plugin_info::abiVersion must equal this value. */
 #define TTM_ABI_VERSION 1
 
 /** @} */
@@ -305,10 +305,10 @@ typedef struct ttm_host_api {
  * @see ttm_plugin_get_info
  */
 typedef struct ttm_plugin_info {
-    uint32_t    abi_version; /**< Must equal #TTM_ABI_VERSION.               */
-    const char* name;        /**< Human-readable plugin name (NUL-terminated). */
-    const char* version;     /**< SemVer string, e.g. "1.0.0" (NUL-terminated). */
-    const char* description; /**< One-line description (NUL-terminated; may be NULL). */
+    uint32_t    abiVersion; /**< Must equal #TTM_ABI_VERSION.               */
+    const char* name;       /**< Human-readable plugin name (NUL-terminated). */
+    const char* version;    /**< SemVer string, e.g. "1.0.0" (NUL-terminated). */
+    const char* description;/**< One-line description (NUL-terminated; may be NULL). */
 } ttm_plugin_info;
 
 /** @} */

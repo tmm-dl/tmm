@@ -7,6 +7,9 @@
  * It declares the Plugin struct that PluginManager stores per loaded WASM
  * module, and the helper functions used to load and tear down plugins.
  *
+ * All functions that can fail return `std::expected<T, std::string>` rather
+ * than throwing exceptions, so callers must explicitly handle error paths.
+ *
  * @note All WAMR API calls are confined to wasm_loader.cpp so that the rest
  *       of the library does not need to include WAMR headers directly.
  */
@@ -16,6 +19,7 @@
 #include <ttm/plugins/abi.h>
 #include <ttm/plugins/extension.hpp>
 
+#include <expected>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -50,22 +54,22 @@ struct Plugin {
     /* -----------------------------------------------------------------
      * WAMR runtime handles
      * -------------------------------------------------------------- */
-    wasm_module_t      module  = nullptr; ///< Loaded WASM module.
-    wasm_module_inst_t inst    = nullptr; ///< Module instance.
-    wasm_exec_env_t    env     = nullptr; ///< Execution environment.
+    wasm_module_t      module = nullptr; ///< Loaded WASM module.
+    wasm_module_inst_t inst   = nullptr; ///< Module instance.
+    wasm_exec_env_t    env    = nullptr; ///< Execution environment.
 
     /* -----------------------------------------------------------------
      * Resolved optional lifecycle hooks (nullptr = not exported)
      * -------------------------------------------------------------- */
-    wasm_function_inst_t fn_fit_begin      = nullptr; ///< @see ttm_on_fit_begin
-    wasm_function_inst_t fn_epoch_begin    = nullptr; ///< @see ttm_on_epoch_begin
-    wasm_function_inst_t fn_batch_begin    = nullptr; ///< @see ttm_on_batch_begin
-    wasm_function_inst_t fn_loss_computed  = nullptr; ///< @see ttm_on_loss_computed
-    wasm_function_inst_t fn_batch_end      = nullptr; ///< @see ttm_on_batch_end
-    wasm_function_inst_t fn_epoch_end      = nullptr; ///< @see ttm_on_epoch_end
-    wasm_function_inst_t fn_validation_end = nullptr; ///< @see ttm_on_validation_end
-    wasm_function_inst_t fn_fit_end        = nullptr; ///< @see ttm_on_fit_end
-    wasm_function_inst_t fn_teardown       = nullptr; ///< @see ttm_plugin_teardown
+    wasm_function_inst_t fnFitBegin      = nullptr; ///< @see ttm_on_fit_begin
+    wasm_function_inst_t fnEpochBegin    = nullptr; ///< @see ttm_on_epoch_begin
+    wasm_function_inst_t fnBatchBegin    = nullptr; ///< @see ttm_on_batch_begin
+    wasm_function_inst_t fnLossComputed  = nullptr; ///< @see ttm_on_loss_computed
+    wasm_function_inst_t fnBatchEnd      = nullptr; ///< @see ttm_on_batch_end
+    wasm_function_inst_t fnEpochEnd      = nullptr; ///< @see ttm_on_epoch_end
+    wasm_function_inst_t fnValidationEnd = nullptr; ///< @see ttm_on_validation_end
+    wasm_function_inst_t fnFitEnd        = nullptr; ///< @see ttm_on_fit_end
+    wasm_function_inst_t fnTeardown      = nullptr; ///< @see ttm_plugin_teardown
 
     /* -----------------------------------------------------------------
      * C++ extension objects registered by this plugin
@@ -73,7 +77,7 @@ struct Plugin {
 
     /**
      * @brief Dataset sources registered by this plugin.
-     * @details Ownership lives here; PluginManager::source_registry_ holds
+     * @details Ownership lives here; PluginManager::sourceRegistry holds
      *          non-owning raw pointers.
      */
     std::vector<std::unique_ptr<IDatasetSource>> sources;
@@ -84,18 +88,24 @@ struct Plugin {
  * ====================================================================== */
 
 /**
- * @brief Initialise the WAMR runtime.
+ * @brief Initialise the WAMR runtime (refcounted — safe to call multiple times).
  *
- * @details Must be called once before any wasm_loader_load() calls.
- * @throws std::runtime_error on failure.
+ * @details
+ * The runtime is reference-counted so that multiple PluginManager instances
+ * (e.g. in unit tests) are safe.  Each successful call to wasm_loader_init
+ * must be paired with exactly one call to wasm_loader_destroy.
+ *
+ * @return `{}` on success, or an error string on failure.
  */
-void wasm_loader_init();
+[[nodiscard]] std::expected<void, std::string> wasm_loader_init();
 
 /**
- * @brief Shut down the WAMR runtime.
+ * @brief Decrement the WAMR runtime reference count.
  *
- * @details Must be called after all plugins have been unloaded.
- * @see wasm_loader_unload
+ * @details Shuts down the runtime when the last reference is released.
+ * Always succeeds.
+ *
+ * @see wasm_loader_init
  */
 void wasm_loader_destroy();
 
@@ -112,26 +122,29 @@ void wasm_loader_destroy();
  * 6. Build a #ttm_host_api and call `ttm_plugin_init`.
  * 7. Resolve optional lifecycle hook pointers.
  *
+ * On failure the plugin struct is left fully cleaned up (no dangling handles).
+ *
  * @param[in]  path         Path to the `.wasm` file.
  * @param[in]  config_json  JSON configuration string passed to `ttm_plugin_init`.
  * @param[in]  host_api     Fully populated host API struct (callbacks + ctx).
- * @param[out] plugin       Plugin struct to populate; caller owns the result.
+ * @param[out] plugin       Plugin struct to populate on success.
  *
- * @throws std::runtime_error if any step fails.
+ * @return `{}` on success, or an error string describing which step failed.
  *
  * @see wasm_loader_unload
  */
-void wasm_loader_load(const std::filesystem::path& path,
-                      std::string_view config_json,
-                      const ttm_host_api& host_api,
-                      Plugin& plugin);
+[[nodiscard]] std::expected<void, std::string>
+wasm_loader_load(const std::filesystem::path& path,
+                 std::string_view config_json,
+                 const ttm_host_api& host_api,
+                 Plugin& plugin);
 
 /**
  * @brief Tear down a plugin and release all WAMR handles.
  *
  * @details
  * Calls `ttm_plugin_teardown` (if exported), then destroys the execution
- * environment, module instance, and module in that order.
+ * environment, module instance, and module in that order.  Always succeeds.
  *
  * @param[in,out] plugin  Plugin to unload; all handles are set to nullptr on return.
  *
@@ -148,20 +161,21 @@ void wasm_loader_unload(Plugin& plugin);
  *
  * @details
  * Allocates `str.size()` bytes in the plugin's linear memory via
- * `wasm_runtime_module_malloc`, writes the bytes with `memcpy`, and returns
- * the WASM-side pointer and byte count.  The caller is responsible for
- * freeing the allocation (via the ABI free callback or directly).
+ * `wasm_runtime_module_malloc`, writes the bytes with `memcpy`, and sets the
+ * output parameters.  The caller is responsible for freeing the allocation
+ * via `wasm_runtime_module_free`.
  *
  * @param[in]  inst     WASM module instance that owns the linear memory.
  * @param[in]  str      String to copy (not required to be NUL-terminated).
- * @param[out] wasm_ptr Set to the WASM-side linear-memory offset.
+ * @param[out] wasm_ptr Set to the WASM-side linear-memory offset on success.
  * @param[out] len      Set to the number of bytes copied (== str.size()).
  *
- * @throws std::runtime_error if allocation in WASM linear memory fails.
+ * @return `{}` on success, or an error string if WASM-heap allocation fails.
  */
-void wasm_push_string(wasm_module_inst_t inst,
-                      std::string_view str,
-                      uint32_t& wasm_ptr,
-                      uint32_t& len);
+[[nodiscard]] std::expected<void, std::string>
+wasm_push_string(wasm_module_inst_t inst,
+                 std::string_view str,
+                 uint32_t& wasm_ptr,
+                 uint32_t& len);
 
 } // namespace ttm::plugins

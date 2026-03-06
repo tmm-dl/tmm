@@ -17,6 +17,9 @@ target_sources(ttm_plugins
         byte_reader.cpp
 )
 
+# C++23 required for std::expected (used in public headers).
+target_compile_features(ttm_plugins PUBLIC cxx_std_23)
+
 # FILE_SET HEADERS propagates the BASE_DIRS as INTERFACE include paths for
 # consumers, but not for the library's own private compilation units.
 target_include_directories(ttm_plugins PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)

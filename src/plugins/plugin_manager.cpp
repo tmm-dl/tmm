@@ -17,11 +17,12 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <expected>
 #include <fstream>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace ttm::plugins {
 
@@ -54,33 +55,30 @@ class FileReader final : public IByteReader {
 public:
     /**
      * @param[in] path  Absolute or relative filesystem path to open.
-     * @throws std::runtime_error if the file cannot be opened.
      */
     explicit FileReader(const std::string& path)
-        : file_(path, std::ios::binary)
-    {
-        if (!file_) {
-            throw std::runtime_error("FileReader: cannot open '" + path + "'");
-        }
-    }
+        : file(path, std::ios::binary)
+    {}
+
+    bool valid() const { return static_cast<bool>(file); }
 
     std::streamsize read(std::byte* buf, std::streamsize n) override
     {
-        file_.read(reinterpret_cast<char*>(buf), n);
-        return file_.gcount();
+        file.read(reinterpret_cast<char*>(buf), n);
+        return file.gcount();
     }
 
     bool seekable() const noexcept override { return true; }
 
     std::streampos seek(std::streamoff off, std::ios_base::seekdir dir) override
     {
-        file_.seekg(off, dir);
-        if (!file_) return std::streampos(-1);
-        return file_.tellg();
+        file.seekg(off, dir);
+        if (!file) return std::streampos(-1);
+        return file.tellg();
     }
 
 private:
-    std::ifstream file_;
+    std::ifstream file;
 };
 
 /**
@@ -112,12 +110,9 @@ public:
             path = path.substr(5);
         }
 
-        try {
-            return std::make_unique<FileReader>(path);
-        } catch (const std::exception& ex) {
-            std::cerr << "[ttm] FileSource::open error: " << ex.what() << '\n';
-            return nullptr;
-        }
+        auto reader = std::make_unique<FileReader>(path);
+        if (!reader->valid()) return nullptr;
+        return reader;
     }
 };
 
@@ -135,27 +130,27 @@ public:
      * @param[in] handle  Handle returned by vt->open().
      */
     CVtableReader(const ttm_source_vtable& vt, ttm_handle handle)
-        : vt_(vt), handle_(handle) {}
+        : vt(vt), handle(handle) {}
 
     ~CVtableReader() override
     {
-        if (handle_ != TTM_INVALID_HANDLE && vt_.close) {
-            vt_.close(handle_);
+        if (handle != TTM_INVALID_HANDLE && vt.close) {
+            vt.close(handle);
         }
     }
 
     std::streamsize read(std::byte* buf, std::streamsize n) override
     {
-        if (!vt_.read) return -1;
+        if (!vt.read) return -1;
         return static_cast<std::streamsize>(
-            vt_.read(handle_, buf, static_cast<int32_t>(n)));
+            vt.read(handle, buf, static_cast<int32_t>(n)));
     }
 
-    bool seekable() const noexcept override { return vt_.seek != nullptr; }
+    bool seekable() const noexcept override { return vt.seek != nullptr; }
 
     std::streampos seek(std::streamoff off, std::ios_base::seekdir dir) override
     {
-        if (!vt_.seek) return std::streampos(-1);
+        if (!vt.seek) return std::streampos(-1);
         int32_t whence = 0;
         switch (dir) {
             case std::ios_base::beg: whence = 0; break;
@@ -163,13 +158,13 @@ public:
             case std::ios_base::end: whence = 2; break;
             default: return std::streampos(-1);
         }
-        const auto pos = vt_.seek(handle_, static_cast<int64_t>(off), whence);
+        const auto pos = vt.seek(handle, static_cast<int64_t>(off), whence);
         return (pos < 0) ? std::streampos(-1) : std::streampos(pos);
     }
 
 private:
-    const ttm_source_vtable& vt_;
-    ttm_handle                handle_;
+    const ttm_source_vtable vt;
+    ttm_handle              handle;
 };
 
 /**
@@ -182,80 +177,119 @@ private:
 class CSourceAdapter final : public IDatasetSource {
 public:
     /**
-     * @param[in] scheme_list  Schemes this source handles (copied).
-     * @param[in] vt           Source vtable (must remain valid for this object's lifetime).
+     * @param[in] schemeList  Schemes this source handles (copied).
+     * @param[in] vt          Source vtable (must remain valid for this object's lifetime).
      */
-    CSourceAdapter(std::vector<std::string> scheme_list,
+    CSourceAdapter(std::vector<std::string> schemeList,
                    const ttm_source_vtable* vt)
-        : schemes_(std::move(scheme_list)), vt_(*vt) {}
+        : schemeList(std::move(schemeList)), vt(*vt) {}
 
-    std::vector<std::string> schemes() const override { return schemes_; }
+    std::vector<std::string> schemes() const override { return schemeList; }
 
     std::unique_ptr<IByteReader> open(std::string_view uri) override
     {
-        char err_buf[256] = {};
-        const auto handle = vt_.open(
+        char errBuf[256] = {};
+        const auto handle = vt.open(
             uri.data(), static_cast<uint32_t>(uri.size()),
-            err_buf, sizeof(err_buf));
+            errBuf, sizeof(errBuf));
 
         if (handle == TTM_INVALID_HANDLE) {
-            std::cerr << "[ttm] CSourceAdapter::open error: " << err_buf << '\n';
+            std::cerr << "[ttm] CSourceAdapter::open error: " << errBuf << '\n';
             return nullptr;
         }
-        return std::make_unique<CVtableReader>(vt_, handle);
+        return std::make_unique<CVtableReader>(vt, handle);
     }
 
 private:
-    std::vector<std::string> schemes_;
-    ttm_source_vtable        vt_;  /* Copy of the vtable struct */
+    std::vector<std::string> schemeList;
+    ttm_source_vtable        vt;  /* Copy of the vtable struct */
 };
 
 } // anonymous namespace
 
 /* =========================================================================
- * PluginManager — construction / destruction
+ * PluginManager — named constructor
  * ====================================================================== */
 
-PluginManager::PluginManager()
+std::expected<PluginManager, std::string> PluginManager::create()
 {
-    wasm_loader_init();
+    PluginManager mgr;
+
+    if (auto r = wasm_loader_init(); !r) {
+        return std::unexpected(r.error());
+    }
+    mgr.wamrRefOwned = true;
 
     /* Register the built-in local filesystem source */
-    auto file_src = std::make_unique<FileSource>();
-    for (const auto& scheme : file_src->schemes()) {
-        source_registry_.emplace(scheme, file_src.get());
+    auto fileSrc = std::make_unique<FileSource>();
+    for (const auto& scheme : fileSrc->schemes()) {
+        mgr.sourceRegistry.emplace(scheme, fileSrc.get());
     }
     /* Store a dummy Plugin record to own the built-in source */
-    auto builtin_plugin = std::make_unique<Plugin>();
-    builtin_plugin->sources.push_back(std::move(file_src));
-    plugins_.push_back(std::move(builtin_plugin));
+    auto builtinPlugin = std::make_unique<Plugin>();
+    builtinPlugin->sources.push_back(std::move(fileSrc));
+    mgr.plugins.push_back(std::move(builtinPlugin));
+
+    return mgr;
 }
+
+/* =========================================================================
+ * PluginManager — destructor and move operations
+ * ====================================================================== */
 
 PluginManager::~PluginManager()
 {
+    if (!wamrRefOwned) return;
+
     /* Unload all plugins (index 0 is the built-in, no WASM handles to release) */
-    for (auto& p : plugins_) {
+    for (auto& p : plugins) {
         wasm_loader_unload(*p);
     }
-    plugins_.clear();
-    source_registry_.clear();
+    plugins.clear();
+    sourceRegistry.clear();
 
     wasm_loader_destroy();
+}
+
+PluginManager::PluginManager(PluginManager&& other) noexcept
+    : plugins(std::move(other.plugins))
+    , sourceRegistry(std::move(other.sourceRegistry))
+    , wamrRefOwned(other.wamrRefOwned)
+{
+    other.wamrRefOwned = false;
+}
+
+PluginManager& PluginManager::operator=(PluginManager&& other) noexcept
+{
+    if (this != &other) {
+        /* Destroy current state */
+        this->~PluginManager();
+        /* Move from other */
+        plugins        = std::move(other.plugins);
+        sourceRegistry = std::move(other.sourceRegistry);
+        wamrRefOwned   = other.wamrRefOwned;
+        other.wamrRefOwned = false;
+    }
+    return *this;
 }
 
 /* =========================================================================
  * Plugin loading
  * ====================================================================== */
 
-void PluginManager::load(const std::filesystem::path& path,
-                          std::string_view config_json)
+std::expected<void, std::string>
+PluginManager::load(const std::filesystem::path& path,
+                    std::string_view config_json)
 {
-    auto p        = std::make_unique<Plugin>();
-    auto host_api = make_host_api();
+    auto p       = std::make_unique<Plugin>();
+    auto hostApi = make_host_api();
 
-    wasm_loader_load(path, config_json, host_api, *p);
+    if (auto r = wasm_loader_load(path, config_json, hostApi, *p); !r) {
+        return std::unexpected(r.error());
+    }
 
-    plugins_.push_back(std::move(p));
+    plugins.push_back(std::move(p));
+    return {};
 }
 
 /* =========================================================================
@@ -264,8 +298,8 @@ void PluginManager::load(const std::filesystem::path& path,
 
 IDatasetSource* PluginManager::find_source(std::string_view scheme) const
 {
-    const auto it = source_registry_.find(std::string(scheme));
-    return (it != source_registry_.end()) ? it->second : nullptr;
+    const auto it = sourceRegistry.find(std::string(scheme));
+    return (it != sourceRegistry.end()) ? it->second : nullptr;
 }
 
 /* =========================================================================
@@ -296,14 +330,14 @@ ttm_error PluginManager::s_register_source(void* ctx,
 {
     if (!ctx || !schemes || !vt) return TTM_ERR_ARGS;
 
-    std::vector<std::string> scheme_list;
+    std::vector<std::string> schemeList;
     for (const char** s = schemes; *s != nullptr; ++s) {
-        scheme_list.emplace_back(*s);
+        schemeList.emplace_back(*s);
     }
-    if (scheme_list.empty()) return TTM_ERR_ARGS;
+    if (schemeList.empty()) return TTM_ERR_ARGS;
 
-    auto* self = static_cast<PluginManager*>(ctx);
-    auto  adapter = std::make_unique<CSourceAdapter>(std::move(scheme_list), vt);
+    auto* self    = static_cast<PluginManager*>(ctx);
+    auto  adapter = std::make_unique<CSourceAdapter>(std::move(schemeList), vt);
 
     /* The plugin currently being loaded is always the last one pushed before
      * the init call; we pass nullptr here and let register_source_impl
@@ -316,15 +350,15 @@ void PluginManager::register_source_impl(std::unique_ptr<IDatasetSource> src,
                                           Plugin* /*owner — reserved for future use*/)
 {
     for (const auto& scheme : src->schemes()) {
-        if (source_registry_.count(scheme)) {
+        if (sourceRegistry.count(scheme)) {
             std::cerr << "[ttm] warning: source scheme '" << scheme
                       << "' already registered; overriding.\n";
         }
-        source_registry_[scheme] = src.get();
+        sourceRegistry[scheme] = src.get();
     }
     /* Attach to the last plugin (the one currently being initialised) */
-    assert(!plugins_.empty());
-    plugins_.back()->sources.push_back(std::move(src));
+    assert(!plugins.empty());
+    plugins.back()->sources.push_back(std::move(src));
 }
 
 ttm_error PluginManager::s_register_transform(void* /*ctx*/,
@@ -383,7 +417,7 @@ void PluginManager::s_free(void* /*ctx*/, void* ptr)
 /* =========================================================================
  * Lifecycle event dispatch
  *
- * Each emit_* function iterates plugins_ and calls the resolved hook on
+ * Each emit_* function iterates plugins and calls the resolved hook on
  * plugins that exported it.  String arguments are pushed into WASM linear
  * memory for each call and freed immediately after.
  * ====================================================================== */
@@ -394,46 +428,46 @@ static void call_with_string(Plugin& p,
                               std::string_view str)
 {
     if (!fn) return;
-    uint32_t wasm_ptr = 0, wasm_len = 0;
-    wasm_push_string(p.inst, str, wasm_ptr, wasm_len);
-    uint32_t args[2] = { wasm_ptr, wasm_len };
+    uint32_t wasmPtr = 0, wasmLen = 0;
+    wasm_push_string(p.inst, str, wasmPtr, wasmLen);
+    uint32_t args[2] = { wasmPtr, wasmLen };
     wasm_runtime_call_wasm(p.env, fn, 2, args);
-    wasm_runtime_module_free(p.inst, wasm_ptr);
+    wasm_runtime_module_free(p.inst, wasmPtr);
 }
 
 void PluginManager::emit_fit_begin(std::string_view ctx_json)
 {
-    for (auto& p : plugins_) {
-        call_with_string(*p, p->fn_fit_begin, ctx_json);
+    for (auto& p : plugins) {
+        call_with_string(*p, p->fnFitBegin, ctx_json);
     }
 }
 
 void PluginManager::emit_epoch_begin(std::uint32_t epoch, std::uint32_t total)
 {
-    for (auto& p : plugins_) {
-        if (!p->fn_epoch_begin) continue;
+    for (auto& p : plugins) {
+        if (!p->fnEpochBegin) continue;
         uint32_t args[2] = { epoch, total };
-        wasm_runtime_call_wasm(p->env, p->fn_epoch_begin, 2, args);
+        wasm_runtime_call_wasm(p->env, p->fnEpochBegin, 2, args);
     }
 }
 
 void PluginManager::emit_batch_begin(std::uint32_t batch, std::uint32_t total)
 {
-    for (auto& p : plugins_) {
-        if (!p->fn_batch_begin) continue;
+    for (auto& p : plugins) {
+        if (!p->fnBatchBegin) continue;
         uint32_t args[2] = { batch, total };
-        wasm_runtime_call_wasm(p->env, p->fn_batch_begin, 2, args);
+        wasm_runtime_call_wasm(p->env, p->fnBatchBegin, 2, args);
     }
 }
 
 float PluginManager::emit_loss_computed(float loss)
 {
-    for (auto& p : plugins_) {
-        if (!p->fn_loss_computed) continue;
+    for (auto& p : plugins) {
+        if (!p->fnLossComputed) continue;
         /* WAMR passes f32 as uint32 bit-cast */
         uint32_t args[1];
         std::memcpy(&args[0], &loss, sizeof(float));
-        wasm_runtime_call_wasm(p->env, p->fn_loss_computed, 1, args);
+        wasm_runtime_call_wasm(p->env, p->fnLossComputed, 1, args);
         std::memcpy(&loss, &args[0], sizeof(float));
     }
     return loss;
@@ -442,15 +476,15 @@ float PluginManager::emit_loss_computed(float loss)
 void PluginManager::emit_batch_end(std::uint32_t batch, float loss,
                                     std::string_view metrics_json)
 {
-    for (auto& p : plugins_) {
-        if (!p->fn_batch_end) continue;
-        uint32_t metrics_ptr = 0, metrics_len = 0;
-        wasm_push_string(p->inst, metrics_json, metrics_ptr, metrics_len);
-        uint32_t loss_bits;
-        std::memcpy(&loss_bits, &loss, sizeof(float));
-        uint32_t args[4] = { batch, loss_bits, metrics_ptr, metrics_len };
-        wasm_runtime_call_wasm(p->env, p->fn_batch_end, 4, args);
-        wasm_runtime_module_free(p->inst, metrics_ptr);
+    for (auto& p : plugins) {
+        if (!p->fnBatchEnd) continue;
+        uint32_t metricsPtr = 0, metricsLen = 0;
+        wasm_push_string(p->inst, metrics_json, metricsPtr, metricsLen);
+        uint32_t lossBits;
+        std::memcpy(&lossBits, &loss, sizeof(float));
+        uint32_t args[4] = { batch, lossBits, metricsPtr, metricsLen };
+        wasm_runtime_call_wasm(p->env, p->fnBatchEnd, 4, args);
+        wasm_runtime_module_free(p->inst, metricsPtr);
     }
 }
 
@@ -458,13 +492,13 @@ bool PluginManager::emit_epoch_end(std::uint32_t epoch,
                                     std::string_view metrics_json)
 {
     bool stop = false;
-    for (auto& p : plugins_) {
-        if (!p->fn_epoch_end) continue;
-        uint32_t metrics_ptr = 0, metrics_len = 0;
-        wasm_push_string(p->inst, metrics_json, metrics_ptr, metrics_len);
-        uint32_t args[3] = { epoch, metrics_ptr, metrics_len };
-        wasm_runtime_call_wasm(p->env, p->fn_epoch_end, 3, args);
-        wasm_runtime_module_free(p->inst, metrics_ptr);
+    for (auto& p : plugins) {
+        if (!p->fnEpochEnd) continue;
+        uint32_t metricsPtr = 0, metricsLen = 0;
+        wasm_push_string(p->inst, metrics_json, metricsPtr, metricsLen);
+        uint32_t args[3] = { epoch, metricsPtr, metricsLen };
+        wasm_runtime_call_wasm(p->env, p->fnEpochEnd, 3, args);
+        wasm_runtime_module_free(p->inst, metricsPtr);
         if (args[0] != 0) stop = true;
     }
     return stop;
@@ -472,15 +506,15 @@ bool PluginManager::emit_epoch_end(std::uint32_t epoch,
 
 void PluginManager::emit_validation_end(std::string_view metrics_json)
 {
-    for (auto& p : plugins_) {
-        call_with_string(*p, p->fn_validation_end, metrics_json);
+    for (auto& p : plugins) {
+        call_with_string(*p, p->fnValidationEnd, metrics_json);
     }
 }
 
 void PluginManager::emit_fit_end(std::string_view metrics_json)
 {
-    for (auto& p : plugins_) {
-        call_with_string(*p, p->fn_fit_end, metrics_json);
+    for (auto& p : plugins) {
+        call_with_string(*p, p->fnFitEnd, metrics_json);
     }
 }
 
