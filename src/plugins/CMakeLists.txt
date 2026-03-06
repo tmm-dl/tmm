@@ -5,10 +5,21 @@ target_sources(ttm_plugins
         FILE_SET ttm_plugins_headers
         TYPE HEADERS
         BASE_DIRS
-            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/plugins
+            ${CMAKE_CURRENT_LIST_DIR}/../../include
+        FILES
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/plugins/abi.h
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/plugins/extension.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/plugins/plugin_manager.hpp
     PRIVATE
         plugins.cpp
+        plugin_manager.cpp
+        wasm_loader.cpp
+        byte_reader.cpp
 )
+
+# FILE_SET HEADERS propagates the BASE_DIRS as INTERFACE include paths for
+# consumers, but not for the library's own private compilation units.
+target_include_directories(ttm_plugins PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
 
 ##########################################################################################
 # Dependencies
@@ -16,4 +27,10 @@ target_sources(ttm_plugins
 
 # WAMR
 CPMAddPackage(URI "gh:bytecodealliance/wasm-micro-runtime#WAMR-2.4.4" EXCLUDE_FROM_ALL YES)
-target_link_libraries(ttm_plugins PRIVATE wamr)
+target_link_libraries(ttm_plugins PRIVATE vmlib)
+# WAMR does not set INTERFACE_INCLUDE_DIRECTORIES on its target; add manually.
+if(wasm-micro-runtime_SOURCE_DIR)
+    target_include_directories(ttm_plugins PRIVATE
+        "${wasm-micro-runtime_SOURCE_DIR}/core/iwasm/include"
+    )
+endif()
