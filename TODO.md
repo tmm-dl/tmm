@@ -52,7 +52,7 @@ The config system is the spine of the tool; most other components depend on it.
 
 ## Plugins
 
-Tasks (fit, validate, predict, sweep) are themselves first-class plugins. Anyone can register new tasks, optimizers, LR schedulers, dataset sources, or callbacks.
+Plugins extend ttm with new ML task types (in the [Dataset Cards](https://huggingface.co/docs/hub/datasets-cards) sense: text classification, sequence tagging, image segmentation, …), new dataset sources, transforms, optimizers, schedulers, callbacks, and loggers. `fit`, `validate`, `predict`, and `sweep` are built into core and are not plugins.
 
 ### Core Plugin System
 - [ ] Define stable C ABI for WASM plugins (function signatures, memory layout, versioning)
@@ -78,21 +78,24 @@ Plugins are **project-local only** — modelled after npm. The project config (`
 - [ ] OCI/ORAS registry support (`oras://registry/image:tag`) — emerging standard for WASM artifact distribution
 
 ### Plugin Extension Points (registries, called by core at runtime)
-- [ ] **Task registry** — register top-level CLI subcommands (e.g., `fit`, `validate`, `predict`, `sweep`, or custom tasks)
-- [ ] **Dataset source registry** — register handlers for custom URI schemes
+- [ ] **ML task registry** — register named ML task types (e.g., `text-classification`, `token-classification`, `image-segmentation`); each task type defines expected input/output schema, default metrics, and default loss; a task may declare aliases (e.g., `seq-tagging` → `token-classification`)
+- [ ] **Dataset source registry** — register handlers for URI schemes; a single plugin may register multiple schemes (e.g., one `source-forge` plugin handles both `gh:` and `gl:` and `bb:`)
 - [ ] **Transform registry** — register named data transforms (called during dataset preparation)
 - [ ] **Optimizer registry** — register custom optimizers
 - [ ] **LR scheduler registry** — register custom schedulers
 - [ ] **Callback/event registry** — register on_epoch_start, on_batch_end, on_train_end, etc.
-- [ ] **Metric registry** — register custom evaluation metrics
+- [ ] **Metric registry** — register custom evaluation metrics; metrics may declare aliases
 
 ### Built-in Plugins (shipped with ttm)
 
-#### Tasks (required — replaces hard-coded subcommands)
-- [ ] `task-fit` — training loop
-- [ ] `task-validate` — evaluation loop
-- [ ] `task-predict` — inference / export predictions
-- [ ] `task-sweep` — hyperparameter search orchestration
+#### ML Task Types
+- [ ] `task-text-classification` — single-label and multi-label text classification (aliases: `text-clf`, `tc`)
+- [ ] `task-token-classification` — sequence labeling / NER / POS tagging (aliases: `seq-tagging`, `ner`)
+- [ ] `task-text-generation` — causal / seq2seq language modeling (aliases: `lm`, `seq2seq`)
+- [ ] `task-image-classification` — image classification (alias: `image-clf`)
+- [ ] `task-object-detection` — bounding-box detection
+- [ ] `task-image-segmentation` — semantic / instance segmentation
+- [ ] `task-regression` — tabular or structured regression
 
 #### UI / Logging
 - [ ] `console-ui` — rich terminal progress bars and metrics table (using e.g. FTXUI or a simpler approach)
@@ -106,15 +109,15 @@ Plugins are **project-local only** — modelled after npm. The project config (`
 - [ ] `aim-logger` — Aim experiment tracker
 
 #### Dataset Sources (built-in, as plugins)
-- [ ] `source-local` — local files / directories (glob patterns)
-- [ ] `source-git` — arbitrary Git repository (with libgit2)
-- [ ] `source-huggingface` — Hugging Face Hub datasets API
-- [ ] `source-webdataset` — sharded `.tar` WebDataset streaming
-- [ ] `source-s3` / `source-gcs` / `source-azure` — cloud object storage
-- [ ] `source-dvc` — DVC remote (reads `.dvc` files, fetches from remote)
-- [ ] `source-kaggle` — Kaggle API (`kaggle://competition-or-dataset`)
-- [ ] `source-openml` — OpenML benchmark catalog
-- [ ] `source-sql` — SQL database via ODBC
+- [ ] `source-local` — local files / directories (glob patterns); schemes: `file://`
+- [ ] `source-forge` — any Git forge via libgit2; registers multiple schemes: `gh:` (GitHub), `gl:` (GitLab), `bb:` (Bitbucket), `sr:` (SourceHut), `gitea:` (self-hosted Gitea)
+- [ ] `source-huggingface` — Hugging Face Hub datasets API; schemes: `hf:`, `huggingface:`
+- [ ] `source-webdataset` — sharded `.tar` WebDataset streaming; scheme: `wds:`
+- [ ] `source-cloud` — cloud object storage; schemes: `s3:`, `gs:`, `az:`
+- [ ] `source-dvc` — DVC remote (reads `.dvc` files, fetches from remote); scheme: `dvc:`
+- [ ] `source-kaggle` — Kaggle API; scheme: `kaggle:`
+- [ ] `source-openml` — OpenML benchmark catalog; scheme: `openml:`
+- [ ] `source-sql` — SQL database via ODBC; scheme: `sql:`
 
 #### Transforms (built-in, as plugins)
 - [ ] `transform-tokenize` — text tokenization (sentencepiece / tiktoken compatible)
@@ -189,7 +192,7 @@ The following formats appear frequently in the ML ecosystem and should be covere
 - [ ] DLPack as the tensor exchange format between dataset, model, and optimizer
 - [ ] Validate model input shapes against dataset output shapes at startup (fail fast)
 
-### Training Loop (task-fit plugin, but core provides the harness)
+### Training Loop (`fit`)
 - [ ] Implement the forward pass: feed batch → run TVM module → get logits/outputs
 - [ ] Implement the backward pass: compute gradients via TVM's autograd or external loss+grad
 - [ ] Basic training loop: for epoch in epochs: for batch in dataloader: forward → loss → backward → step
@@ -220,17 +223,17 @@ The following formats appear frequently in the ML ecosystem and should be covere
 - [ ] Export: convert a checkpoint to a standalone TVM compiled module for deployment
 - [ ] SafeTensors format for weight storage (safe, fast, supports partial loading)
 
-### Validation Loop (task-validate plugin)
+### Validation Loop (`validate`)
 - [ ] Separate eval dataloader (no shuffle, no augmentation)
 - [ ] Collect predictions and targets; compute registered metrics
 - [ ] Support custom metrics via plugin registry
 
-### Inference / Prediction (task-predict plugin)
+### Inference / Prediction (`predict`)
 - [ ] Load model + weights; run on a dataset or single input
 - [ ] Write outputs to a file (CSV, Arrow IPC, JSONL) or stdout
 - [ ] Batch inference with configurable batch size
 
-### Hyperparameter Sweep (task-sweep plugin)
+### Hyperparameter Sweep (`sweep`)
 - [ ] Grid search: enumerate all combinations
 - [ ] Random search: sample N combinations uniformly
 - [ ] Bayesian optimization: Gaussian Process surrogate (Eigen-based) with expected improvement acquisition
@@ -242,7 +245,7 @@ The following formats appear frequently in the ML ecosystem and should be covere
 
 ## CLI
 
-Built on CLI11; subcommands correspond to registered task plugins.
+Built on CLI11. `fit`, `validate`, `predict`, and `sweep` are built-in subcommands. Plugins extend behaviour through registries (ML task types, dataset sources, transforms, etc.), not by adding subcommands.
 
 - [ ] `ttm fit [--config ...] [--set key=val] [checkpoint]` — train a model
 - [ ] `ttm validate [--config ...] [checkpoint]` — evaluate on val/test split
@@ -258,18 +261,17 @@ Built on CLI11; subcommands correspond to registered task plugins.
 - [ ] `ttm dataset clear-cache [uri]` — remove cached datasets
 - [ ] `ttm config dump [--config ...]` — print final merged config (useful for debugging)
 - [ ] `ttm version` — print versions
-- [ ] Dynamic subcommand registration: task plugins add their own subcommands at startup
 - [ ] Shell completion scripts (bash, zsh, fish) via CLI11
 
 ---
 
 ## Notes
 
-### On task-as-plugin design
-`fit`, `validate`, `predict`, and `sweep` are all built-in plugins that ship with ttm. Core only provides the harness (config, XDG paths, plugin manager, dataset router, DLPack types). This means third parties can implement entirely new training paradigms (e.g., reinforcement learning, contrastive learning, RLHF) as plugins without forking ttm.
+### On "tasks"
+"Task" in this codebase means an **ML task type** in the Dataset Cards sense (text classification, token classification, image segmentation, …) — not the CLI commands. `fit`, `validate`, `predict`, and `sweep` are built-in commands and are not plugins. ML task types define the expected input/output schema, default loss, and default evaluation metrics; they are registered by plugins and may declare aliases (e.g., `seq-tagging` and `ner` both resolve to `token-classification`).
 
 ### On dataset source coverage
-The dataset URI router should treat sources as an open registry. Priority order when resolving a bare path with no scheme: `file://` → warn and ask the user to be explicit. Any URI scheme unknown to core is dispatched to a plugin that registered that scheme.
+The dataset URI router is an open registry. A single plugin may register multiple URI schemes (e.g., `source-forge` handles `gh:`, `gl:`, `bb:`, `sr:`, `gitea:`). Priority when resolving a bare path with no scheme: treat as `file://` and warn the user to be explicit. Any unknown scheme is dispatched to whichever plugin registered it; if none did, fail with a clear error listing available schemes.
 
 ### On credentials
 Credentials for private dataset sources (Git SSH keys, HF tokens, S3 credentials, Kaggle API key) should follow platform conventions:
