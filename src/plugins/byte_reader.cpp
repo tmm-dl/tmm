@@ -16,8 +16,9 @@
 
 #include <ttm/plugins/extension.hpp>
 
-#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <ios>
 #include <istream>
@@ -26,127 +27,122 @@
 
 namespace ttm::plugins {
 
-/* =========================================================================
- * detail::ByteReaderBuf — internal std::streambuf adapter
- * ====================================================================== */
+	/* =========================================================================
+     * detail::ByteReaderBuf — internal std::streambuf adapter
+     * ====================================================================== */
 
-namespace detail {
+	namespace detail {
 
-/**
- * @brief std::streambuf that reads from an IByteReader.
- *
- * @details
- * Instances are created and owned by IByteReader::as_stream().  The reader
- * must outlive this buffer.
- *
- * @see IByteReader::as_stream
- */
-class ByteReaderBuf final : public std::streambuf {
-public:
-    /**
+		/**
+         * @brief std::streambuf that reads from an IByteReader.
+         *
+         * @details
+         * Instances are created and owned by IByteReader::as_stream().  The reader
+         * must outlive this buffer.
+         *
+         * @see IByteReader::as_stream
+         */
+		class ByteReaderBuf final : public std::streambuf {
+		public:
+			/**
      * @param[in] reader  The reader this buffer delegates to.
      *                    Must remain valid for the lifetime of this object.
      */
-    explicit ByteReaderBuf(IByteReader& reader)
-        : reader_(reader)
-    {
-        /* Start with an empty get area; underflow() will fill it. */
-        setg(buf_.data(), buf_.data(), buf_.data());
-    }
+			explicit ByteReaderBuf(IByteReader& reader) : reader_(reader) {
+				/* Start with an empty get area; underflow() will fill it. */
+				setg(buf_.data(), buf_.data(), buf_.data());
+			}
 
-protected:
-    /* ------------------------------------------------------------------
-     * Read interface
-     * --------------------------------------------------------------- */
+		protected:
+			/* ------------------------------------------------------------------
+             * Read interface
+             * --------------------------------------------------------------- */
 
-    /**
-     * @brief Refill the internal buffer from the underlying reader.
-     * @details Called by the base class whenever the get area is exhausted.
-     * @return The next character as an unsigned char cast to int_type,
-     *         or traits_type::eof() at end of stream.
-     */
-    int_type underflow() override
-    {
-        const auto n = reader_.read(
-            reinterpret_cast<std::byte*>(buf_.data()),
-            static_cast<std::streamsize>(buf_.size()));
+			/**
+             * @brief Refill the internal buffer from the underlying reader.
+             * @details Called by the base class whenever the get area is exhausted.
+             * @return The next character as an unsigned char cast to int_type,
+             *         or traits_type::eof() at end of stream.
+             */
+			int_type underflow() override {
+				const auto nRead = reader_.read(
+						// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- necessary: buf_ is char[] but IByteReader::read() takes std::byte*; both are single-byte types so the cast is well-defined
+						reinterpret_cast<std::byte*>(buf_.data()), static_cast<std::streamsize>(buf_.size())
+				);
 
-        if (n <= 0) {
-            return traits_type::eof();
-        }
+				if (nRead <= 0) {
+					return traits_type::eof();
+				}
 
-        setg(buf_.data(), buf_.data(), buf_.data() + n);
-        return traits_type::to_int_type(*gptr());
-    }
+				setg(buf_.data(), buf_.data(), buf_.data() + nRead);
+				return traits_type::to_int_type(*gptr());
+			}
 
-    /* ------------------------------------------------------------------
-     * Seek interface
-     * --------------------------------------------------------------- */
+			/* ------------------------------------------------------------------
+             * Seek interface
+             * --------------------------------------------------------------- */
 
-    /**
-     * @brief Forward seek requests to the underlying IByteReader.
-     * @details Seeking is only supported when IByteReader::seekable() is true.
-     *
-     * @param[in] off   Byte offset relative to `dir`.
-     * @param[in] dir   Origin direction.
-     * @param[in] which Must include std::ios_base::in; out is rejected.
-     * @return New stream position, or pos_type(off_type(-1)) on failure.
-     */
-    pos_type seekoff(off_type off,
-                     std::ios_base::seekdir dir,
-                     std::ios_base::openmode which) override
-    {
-        /* This buffer is read-only */
-        if (!(which & std::ios_base::in)) {
-            return pos_type(off_type(-1));
-        }
+            /**
+             * @brief Forward seek requests to the underlying IByteReader.
+             * @details Seeking is only supported when IByteReader::seekable() is true.
+             *
+             * @param[in] off   Byte offset relative to `dir`.
+             * @param[in] dir   Origin direction.
+             * @param[in] which Must include std::ios_base::in; out is rejected.
+             * @return New stream position, or pos_type(off_type(-1)) on failure.
+             */
+			pos_type seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode which) override {
+				/* This buffer is read-only */
+				if ((which & std::ios_base::in) == 0) {
+					return {off_type(-1)};
+				}
 
-        if (!reader_.seekable()) {
-            return pos_type(off_type(-1));
-        }
+				if (!reader_.seekable()) {
+					return {off_type(-1)};
+				}
 
-        const auto pos = reader_.seek(off, dir);
-        if (pos == std::streampos(-1)) {
-            return pos_type(off_type(-1));
-        }
+				const auto pos = reader_.seek(off, dir);
+				if (pos == std::streampos(-1)) {
+					return {off_type(-1)};
+				}
 
-        /* After seeking, the get area is stale — reset it to empty so that
+				/* After seeking, the get area is stale — reset it to empty so that
          * the next read triggers underflow() to refill from the new position. */
-        setg(buf_.data(), buf_.data(), buf_.data());
-        return pos_type(pos);
-    }
+				setg(buf_.data(), buf_.data(), buf_.data());
+				return {pos};
+			}
 
-    /**
+			/**
      * @brief Absolute seek — delegates to seekoff(off, beg, which).
      */
-    pos_type seekpos(pos_type sp,
-                     std::ios_base::openmode which) override
-    {
-        return seekoff(off_type(sp), std::ios_base::beg, which);
-    }
+			pos_type seekpos(pos_type sp, std::ios_base::openmode which) override {
+				return seekoff(off_type(sp), std::ios_base::beg, which);
+			}
 
-private:
-    IByteReader& reader_;
+		private:
+			// NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) -- intentional reference: ByteReaderBuf is non-copyable and always outlived by its owning IByteReader
+			IByteReader& reader_;
 
-    /** Internal read buffer — 64 KiB to amortise plugin boundary crossings. */
-    std::array<char, 65536> buf_;
-};
+			/** Size of the internal read buffer — 64 KiB amortises plugin boundary crossings. */
+			static constexpr std::size_t kBufSize = 64UL * 1024UL; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- 64 KiB is the intended buffer size
+			/** Internal read buffer. */
+			std::array<char, kBufSize> buf_{};
+		};
 
-} // namespace detail
+	} // namespace detail
 
-/* =========================================================================
- * IByteReader implementation
- * ====================================================================== */
+    /* =========================================================================
+    * IByteReader implementation
+    * ====================================================================== */
 
-IByteReader::~IByteReader() = default;
+	IByteReader::~IByteReader() = default;
 
-std::istream& IByteReader::as_stream()
-{
-    if (!streambuf) {
-        streambuf = std::make_unique<detail::ByteReaderBuf>(*this);
-        stream    = std::make_unique<std::istream>(streambuf.get()); // raw ptr stays valid — same lifetime
-    }
-    return *stream;
-}
+	std::istream& IByteReader::as_stream() {
+		if (!streambuf) {
+			streambuf = std::make_unique<detail::ByteReaderBuf>(*this);
+			stream = std::make_unique<std::istream>(streambuf.get()); // raw ptr stays valid — same lifetime
+		}
+		return *stream;
+	}
 
 } // namespace ttm::plugins

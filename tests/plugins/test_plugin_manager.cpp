@@ -23,13 +23,11 @@
 // Construction / destruction
 // =============================================================================
 
-TEST_CASE("PluginManager constructs and destructs without error", "[plugin_manager]")
-{
+TEST_CASE("PluginManager constructs and destructs without error", "[plugin_manager]") {
 	CHECK_NOTHROW([]() { auto mgr = ttm::plugins::PluginManager::create().value(); }());
 }
 
-TEST_CASE("Multiple sequential PluginManager instances are safe", "[plugin_manager]")
-{
+TEST_CASE("Multiple sequential PluginManager instances are safe", "[plugin_manager]") {
 	{
 		auto mgr1 = ttm::plugins::PluginManager::create().value();
 		CHECK(mgr1.find_source("file:") != nullptr);
@@ -44,14 +42,12 @@ TEST_CASE("Multiple sequential PluginManager instances are safe", "[plugin_manag
 // Source registry
 // =============================================================================
 
-TEST_CASE("Built-in file: source is always registered", "[plugin_manager][source]")
-{
+TEST_CASE("Built-in file: source is always registered", "[plugin_manager][source]") {
 	auto mgr = ttm::plugins::PluginManager::create().value();
 	CHECK(mgr.find_source("file:") != nullptr);
 }
 
-TEST_CASE("find_source returns nullptr for unknown scheme", "[plugin_manager][source]")
-{
+TEST_CASE("find_source returns nullptr for unknown scheme", "[plugin_manager][source]") {
 	auto mgr = ttm::plugins::PluginManager::create().value();
 	CHECK(mgr.find_source("hf:") == nullptr);
 	CHECK(mgr.find_source("gh:") == nullptr);
@@ -59,8 +55,7 @@ TEST_CASE("find_source returns nullptr for unknown scheme", "[plugin_manager][so
 	CHECK(mgr.find_source("s3:") == nullptr);
 }
 
-TEST_CASE("find_source is case-sensitive", "[plugin_manager][source]")
-{
+TEST_CASE("find_source is case-sensitive", "[plugin_manager][source]") {
 	auto mgr = ttm::plugins::PluginManager::create().value();
 	// "file:" is registered; "FILE:" and "File:" are not
 	CHECK(mgr.find_source("FILE:") == nullptr);
@@ -73,29 +68,29 @@ TEST_CASE("find_source is case-sensitive", "[plugin_manager][source]")
 
 namespace {
 
-/// RAII helper that creates a temporary file and removes it on destruction.
-struct TempFile {
-	std::filesystem::path path;
+	/// RAII helper that creates a temporary file and removes it on destruction.
+	struct TempFile {
+		std::filesystem::path path;
 
-	explicit TempFile(std::string_view content)
-	{
-		path = std::filesystem::temp_directory_path() / "ttm_test_XXXXXX.bin";
-		// Use a fixed name derived from current time to avoid collisions.
-		path.replace_filename("ttm_plugin_test_" + std::to_string(std::hash<std::string>{}(std::string(content))) + ".bin");
-		std::ofstream f(path, std::ios::binary);
-		f.write(content.data(), static_cast<std::streamsize>(content.size()));
-	}
+		explicit TempFile(std::string_view content) {
+			path = std::filesystem::temp_directory_path() / "ttm_test_XXXXXX.bin";
+			// Use a fixed name derived from current time to avoid collisions.
+			path.replace_filename(
+					"ttm_plugin_test_" + std::to_string(std::hash<std::string>{}(std::string(content))) + ".bin"
+			);
+			std::ofstream f(path, std::ios::binary);
+			f.write(content.data(), static_cast<std::streamsize>(content.size()));
+		}
 
-	~TempFile() { std::filesystem::remove(path); }
+		~TempFile() { std::filesystem::remove(path); }
 
-	/// URI in file:// form.
-	std::string uri() const { return "file://" + path.string(); }
-};
+		/// URI in file:// form.
+		std::string uri() const { return "file://" + path.string(); }
+	};
 
 } // anonymous namespace
 
-TEST_CASE("FileSource opens and reads a local file", "[plugin_manager][source][file]")
-{
+TEST_CASE("FileSource opens and reads a local file", "[plugin_manager][source][file]") {
 	constexpr std::string_view content = "hello from file source";
 	TempFile tmp{content};
 
@@ -112,13 +107,12 @@ TEST_CASE("FileSource opens and reads a local file", "[plugin_manager][source][f
 	CHECK(std::string(reinterpret_cast<const char*>(buf.data()), static_cast<std::size_t>(n)) == content);
 }
 
-TEST_CASE("FileSource reaches EOF correctly", "[plugin_manager][source][file]")
-{
+TEST_CASE("FileSource reaches EOF correctly", "[plugin_manager][source][file]") {
 	TempFile tmp{"eof"};
 
 	auto mgr = ttm::plugins::PluginManager::create().value();
 	auto* src = mgr.find_source("file:");
-	auto  reader = src->open(tmp.uri());
+	auto reader = src->open(tmp.uri());
 	REQUIRE(reader != nullptr);
 
 	std::array<std::byte, 128> buf{};
@@ -126,8 +120,7 @@ TEST_CASE("FileSource reaches EOF correctly", "[plugin_manager][source][file]")
 	CHECK(reader->read(buf.data(), static_cast<std::streamsize>(buf.size())) == 0);
 }
 
-TEST_CASE("FileSource returns nullptr for a missing file", "[plugin_manager][source][file]")
-{
+TEST_CASE("FileSource returns nullptr for a missing file", "[plugin_manager][source][file]") {
 	auto mgr = ttm::plugins::PluginManager::create().value();
 	auto* src = mgr.find_source("file:");
 	REQUIRE(src != nullptr);
@@ -136,8 +129,7 @@ TEST_CASE("FileSource returns nullptr for a missing file", "[plugin_manager][sou
 	CHECK(reader == nullptr);
 }
 
-TEST_CASE("FileSource reader is seekable", "[plugin_manager][source][file]")
-{
+TEST_CASE("FileSource reader is seekable", "[plugin_manager][source][file]") {
 	constexpr std::string_view content = "0123456789";
 	TempFile tmp{content};
 
@@ -154,8 +146,7 @@ TEST_CASE("FileSource reader is seekable", "[plugin_manager][source][file]")
 	CHECK(std::string(reinterpret_cast<const char*>(buf.data()), 3) == "567");
 }
 
-TEST_CASE("FileSource reader exposes contents via as_stream()", "[plugin_manager][source][file]")
-{
+TEST_CASE("FileSource reader exposes contents via as_stream()", "[plugin_manager][source][file]") {
 	constexpr std::string_view content = "stream test content";
 	TempFile tmp{content};
 
@@ -172,8 +163,7 @@ TEST_CASE("FileSource reader exposes contents via as_stream()", "[plugin_manager
 // Lifecycle event dispatch (no-op with zero user plugins)
 // =============================================================================
 
-TEST_CASE("Lifecycle emit_* methods are no-ops when no user plugins are loaded", "[plugin_manager][lifecycle]")
-{
+TEST_CASE("Lifecycle emit_* methods are no-ops when no user plugins are loaded", "[plugin_manager][lifecycle]") {
 	auto mgr = ttm::plugins::PluginManager::create().value();
 
 	CHECK_NOTHROW(mgr.emit_fit_begin("{}"));
@@ -186,8 +176,7 @@ TEST_CASE("Lifecycle emit_* methods are no-ops when no user plugins are loaded",
 	CHECK_NOTHROW(mgr.emit_fit_end("{}"));
 }
 
-TEST_CASE("emit_loss_computed returns input unchanged with no user plugins", "[plugin_manager][lifecycle]")
-{
+TEST_CASE("emit_loss_computed returns input unchanged with no user plugins", "[plugin_manager][lifecycle]") {
 	auto mgr = ttm::plugins::PluginManager::create().value();
 	CHECK(mgr.emit_loss_computed(0.0f) == Catch::Approx(0.0f));
 	CHECK(mgr.emit_loss_computed(3.14f) == Catch::Approx(3.14f));

@@ -28,14 +28,14 @@ env:
 jobs:
   format:
     name: clang-format
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install clang-format
         uses: aminya/setup-cpp@v1
         with:
-          clangformat: "18"
+          clangformat: "19"
           # Nothing else needed for a format-only job
           cmake: false
           ninja: false
@@ -47,24 +47,24 @@ jobs:
         run: |
           find src include tests \
             \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) \
-            | xargs clang-format-18 --dry-run --Werror
+            | xargs clang-format-19 --dry-run --Werror
 
 ##########################################################################################
 # clang-tidy static analysis
 ##########################################################################################
   tidy:
     name: clang-tidy
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM 18 + CMake + Ninja
+      - name: Install LLVM 19 + CMake + Ninja
         uses: aminya/setup-cpp@v1
         with:
-          compiler: llvm-18
+          compiler: llvm-19
           cmake: true
           ninja: true
-          clangtidy: "18"
+          clangtidy: "19"
 
       - name: Restore CPM cache
         uses: actions/cache@v4
@@ -87,7 +87,7 @@ jobs:
         # run-clang-tidy reads compile_commands.json and filters to our paths only.
         # -quiet suppresses "no relevant changes" lines.
         run: |
-          run-clang-tidy-18 \
+          run-clang-tidy-19 \
             -p build \
             -header-filter='.*/(src|include|tests)/.*' \
             -quiet \
@@ -122,17 +122,16 @@ jobs:
             os: ubuntu-24.04-arm
             compiler: gcc-14
 
-          # ── macOS x86-64 (Intel) ─────────────────────────────────────────────
-          - name: "macOS 13 / Clang / x64"
-            os: macos-13
-            compiler: llvm-17
-
           # ── macOS ARM64 (Apple Silicon) ───────────────────────────────────────
           - name: "macOS 14 / Clang / ARM64"
             os: macos-14
             compiler: llvm-18
 
           - name: "macOS 15 / Clang / ARM64"
+            os: macos-15
+            compiler: llvm-18
+
+          - name: "macOS 26 / Clang / ARM64"
             os: macos-15
             compiler: llvm-18
 
@@ -170,9 +169,7 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DTTM_BUILD_TESTS=ON
+          cmake -S . -B build -G Ninja -D CMAKE_BUILD_TYPE=Release -D TTM_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --target ttm_tests

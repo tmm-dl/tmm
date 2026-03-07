@@ -54,7 +54,7 @@
 
 namespace ttm::plugins {
 
-/**
+	/**
  * @brief Central manager for TTM plugins.
  *
  * @details
@@ -70,37 +70,37 @@ namespace ttm::plugins {
  * @see load           Load a plugin from a WASM file
  * @see find_source    Look up a registered data source by URI scheme
  */
-class PluginManager {
-public:
-    /**
+	class PluginManager {
+	public:
+		/**
      * @brief Named constructor — creates a PluginManager and registers the
      *        built-in `file:` source.
      *
      * @return A fully initialised PluginManager, or an error string if the
      *         WAMR runtime cannot be initialised.
      */
-    [[nodiscard]] static std::expected<PluginManager, std::string> create();
+		[[nodiscard]] static std::expected<PluginManager, std::string> create();
 
-    /**
+		/**
      * @brief Destroy all plugins (calling ttm_plugin_teardown on each) and
      *        shut down the WAMR runtime.
      */
-    ~PluginManager();
+		~PluginManager();
 
-    PluginManager(const PluginManager&)            = delete;
-    PluginManager& operator=(const PluginManager&) = delete;
+		PluginManager(const PluginManager&) = delete;
+		PluginManager& operator=(const PluginManager&) = delete;
 
-    /** @brief Move constructor — transfers ownership of WAMR runtime and plugins. */
-    PluginManager(PluginManager&&) noexcept;
-    /** @brief Move assignment — transfers ownership of WAMR runtime and plugins. */
-    PluginManager& operator=(PluginManager&&) noexcept;
+		/** @brief Move constructor — transfers ownership of WAMR runtime and plugins. */
+		PluginManager(PluginManager&&) noexcept;
+		/** @brief Move assignment — transfers ownership of WAMR runtime and plugins. */
+		PluginManager& operator=(PluginManager&&) noexcept;
 
-    /* =====================================================================
+		/* =====================================================================
      * @defgroup pm_loading Plugin loading
      * @{
      * ================================================================== */
 
-    /**
+		/**
      * @brief Load a WASM plugin from disk and initialise it.
      *
      * @details
@@ -129,18 +129,17 @@ public:
      * @see ttm_plugin_get_info  ABI entry-point queried in step 5
      * @see ttm_plugin_init      ABI entry-point called in step 6
      */
-    [[nodiscard]] std::expected<void, std::string>
-    load(const std::filesystem::path& path,
-         std::string_view config_json = "{}");
+		[[nodiscard]] std::expected<void, std::string>
+		load(const std::filesystem::path& path, std::string_view config_json = "{}");
 
-    /** @} */
+		/** @} */
 
-    /* =====================================================================
+		/* =====================================================================
      * @defgroup pm_registry Extension registries
      * @{
      * ================================================================== */
 
-    /**
+		/**
      * @brief Look up a registered dataset source by URI scheme.
      *
      * @details
@@ -154,11 +153,11 @@ public:
      *
      * @see IDatasetSource
      */
-    IDatasetSource* find_source(std::string_view scheme) const;
+		[[nodiscard]] IDatasetSource* find_source(std::string_view scheme) const;
 
-    /** @} */
+		/** @} */
 
-    /* =====================================================================
+		/* =====================================================================
      * @defgroup pm_lifecycle Lifecycle event dispatch
      * @{
      *
@@ -168,27 +167,27 @@ public:
      * results are chained (loss_computed) or accumulated (epoch_end).
      * ================================================================== */
 
-    /**
+		/**
      * @brief Dispatch #ttm_on_fit_begin to all plugins that export it.
      * @param[in] ctx_json  JSON object carrying run metadata (hyperparameters, etc.).
      */
-    void emit_fit_begin(std::string_view ctx_json);
+		void emit_fit_begin(std::string_view ctx_json);
 
-    /**
+		/**
      * @brief Dispatch #ttm_on_epoch_begin to all plugins that export it.
      * @param[in] epoch  0-based current epoch index.
      * @param[in] total  Total number of planned epochs.
      */
-    void emit_epoch_begin(std::uint32_t epoch, std::uint32_t total);
+		void emit_epoch_begin(std::uint32_t epoch, std::uint32_t total);
 
-    /**
+		/**
      * @brief Dispatch #ttm_on_batch_begin to all plugins that export it.
      * @param[in] batch  0-based batch index within the current epoch.
      * @param[in] total  Total batches in the epoch.
      */
-    void emit_batch_begin(std::uint32_t batch, std::uint32_t total);
+		void emit_batch_begin(std::uint32_t batch, std::uint32_t total);
 
-    /**
+		/**
      * @brief Chain the loss value through all plugins that export #ttm_on_loss_computed.
      *
      * @details
@@ -198,18 +197,17 @@ public:
      * @param[in] loss  Loss value computed by the training loop.
      * @return Final loss after all plugins have processed it.
      */
-    float emit_loss_computed(float loss);
+		float emit_loss_computed(float loss);
 
-    /**
+		/**
      * @brief Dispatch #ttm_on_batch_end to all plugins that export it.
      * @param[in] batch        0-based batch index.
      * @param[in] loss         Final loss for this batch.
      * @param[in] metrics_json JSON object containing live scalar metrics.
      */
-    void emit_batch_end(std::uint32_t batch, float loss,
-                        std::string_view metrics_json);
+		void emit_batch_end(std::uint32_t batch, float loss, std::string_view metrics_json);
 
-    /**
+		/**
      * @brief Dispatch #ttm_on_epoch_end to all plugins that export it.
      *
      * @details
@@ -220,94 +218,83 @@ public:
      * @param[in] metrics_json JSON object containing epoch-level metrics.
      * @return `true` if any plugin requested early stopping.
      */
-    bool emit_epoch_end(std::uint32_t epoch, std::string_view metrics_json);
+		bool emit_epoch_end(std::uint32_t epoch, std::string_view metrics_json);
 
-    /**
+		/**
      * @brief Dispatch #ttm_on_validation_end to all plugins that export it.
      * @param[in] metrics_json JSON object containing validation metrics.
      */
-    void emit_validation_end(std::string_view metrics_json);
+		void emit_validation_end(std::string_view metrics_json);
 
-    /**
+		/**
      * @brief Dispatch #ttm_on_fit_end to all plugins that export it.
      * @param[in] metrics_json JSON object containing final training metrics.
      */
-    void emit_fit_end(std::string_view metrics_json);
+		void emit_fit_end(std::string_view metrics_json);
 
-    /** @} */
+		/** @} */
 
-private:
-    /** @brief Private default constructor — use create() instead. */
-    PluginManager() = default;
+	private:
+		/** @brief Private default constructor — use create() instead. */
+		PluginManager() = default;
 
-    /** @brief Internal per-plugin state — defined in plugin_manager.cpp. */
-    struct Plugin;
+		/** @brief Internal per-plugin state — defined in plugin_manager.cpp. */
+		struct Plugin;
 
-    /** @brief Loaded plugins, in load order. */
-    std::vector<std::unique_ptr<Plugin>> plugins;
+		/** @brief Loaded plugins, in load order. */
+		std::vector<std::unique_ptr<Plugin>> plugins;
 
-    /**
+		/**
      * @brief Source registry: scheme string → non-owning source pointer.
      *
      * Sources are owned by their Plugin record; this map holds raw pointers
      * for O(1) scheme lookup.
      */
-    std::unordered_map<std::string, IDatasetSource*> sourceRegistry;
+		std::unordered_map<std::string, IDatasetSource*> sourceRegistry;
 
-    /**
+		/**
      * @brief True if this instance owns a WAMR runtime reference.
      *
      * @details Used by the move constructor/assignment and destructor to ensure
      *          wasm_loader_destroy() is called exactly once per successful
      *          wasm_loader_init() call.
      */
-    bool wamrRefOwned = false;
+		bool wamrRefOwned = false;
 
-    /* -----------------------------------------------------------------
+		/* -----------------------------------------------------------------
      * Static host API callbacks (ctx == PluginManager*)
      * -------------------------------------------------------------- */
 
-    /// @private
-    static ttm_error s_register_source   (void* ctx,
-                                          const char** schemes,
-                                          const ttm_source_vtable* vt);
-    /// @private
-    static ttm_error s_register_transform(void* ctx,
-                                          const char* name,
-                                          const char** aliases,
-                                          const ttm_transform_vtable* vt);
-    /// @private
-    static ttm_error s_register_task     (void* ctx,
-                                          const char* name,
-                                          const char** aliases,
-                                          const ttm_task_vtable* vt);
-    /// @private
-    static ttm_error s_register_metric   (void* ctx,
-                                          const char* name,
-                                          const char** aliases,
-                                          const ttm_metric_vtable* vt);
-    /// @private
-    static void      s_log               (void* ctx, ttm_log_level level,
-                                          const char* msg, uint32_t len);
-    /// @private
-    static void*     s_alloc             (void* ctx, uint32_t size);
-    /// @private
-    static void      s_free              (void* ctx, void* ptr);
+		/// @private
+		static ttm_error s_register_source(void* ctx, const char** schemes, const ttm_source_vtable* vt);
+		/// @private
+		static ttm_error
+		s_register_transform(void* ctx, const char* name, const char** aliases, const ttm_transform_vtable* vt);
+		/// @private
+		static ttm_error s_register_task(void* ctx, const char* name, const char** aliases, const ttm_task_vtable* vt);
+		/// @private
+		static ttm_error
+		s_register_metric(void* ctx, const char* name, const char** aliases, const ttm_metric_vtable* vt);
+		/// @private
+		static void s_log(void* ctx, ttm_log_level level, const char* msg, uint32_t len);
+		/// @private
+		static void* s_alloc(void* ctx, uint32_t size);
+		/// @private
+		static void s_free(void* ctx, void* ptr);
 
-    /**
+		/**
      * @brief Construct a #ttm_host_api struct that points back to this manager.
      * @return Fully populated host API struct.
      */
-    ttm_host_api make_host_api();
+		ttm_host_api make_host_api();
 
-    /**
+		/**
      * @brief Register a source object into the scheme registry.
      * @param[in] src    Source to register (ownership transferred).
      * @param[in] owner  Plugin record that produced this source.
      */
-    void register_source_impl(std::unique_ptr<IDatasetSource> src,
-                               Plugin* owner);
-};
+		void register_source_impl(std::unique_ptr<IDatasetSource> src, Plugin* owner);
+	};
 
 } // namespace ttm::plugins
 

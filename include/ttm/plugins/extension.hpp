@@ -27,12 +27,12 @@
 
 namespace ttm::plugins {
 
-/* =========================================================================
+	/* =========================================================================
  * @defgroup ext_byte_reader IByteReader — sequential byte stream
  * @{
  * ====================================================================== */
 
-/**
+	/**
  * @brief Abstract sequential (optionally seekable) byte-stream reader.
  *
  * @details
@@ -64,11 +64,17 @@ namespace ttm::plugins {
  * @see IDatasetSource::open  Returns a unique_ptr<IByteReader>
  * @see as_stream             Lazily adapts this reader to std::istream
  */
-class IByteReader {
-public:
-    virtual ~IByteReader();
+	class IByteReader {
+	public:
+		IByteReader()          = default;
+		virtual ~IByteReader();
 
-    /**
+		IByteReader(const IByteReader&)            = delete;
+		IByteReader& operator=(const IByteReader&) = delete;
+		IByteReader(IByteReader&&)                 = delete;
+		IByteReader& operator=(IByteReader&&)      = delete;
+
+		/**
      * @brief Read up to `n` bytes from the stream.
      *
      * @param[out] buf  Destination buffer; must have capacity of at least `n` bytes.
@@ -76,16 +82,16 @@ public:
      * @return Number of bytes actually written to `buf` (>0),
      *         0 at end-of-stream, or a negative value on error.
      */
-    virtual std::streamsize read(std::byte* buf, std::streamsize n) = 0;
+		virtual std::streamsize read(std::byte* buf, std::streamsize n) = 0;
 
-    /**
+		/**
      * @brief Query whether this reader supports random access.
      * @return `true` if seek() is supported; `false` otherwise.
      * @see seek
      */
-    virtual bool seekable() const noexcept = 0;
+		[[nodiscard]] virtual bool seekable() const noexcept = 0;
 
-    /**
+		/**
      * @brief Seek to a position within the stream.
      *
      * @param[in] off  Byte offset relative to `dir`.
@@ -94,9 +100,9 @@ public:
      *         or -1 if the reader is not seekable or an error occurred.
      * @see seekable
      */
-    virtual std::streampos seek(std::streamoff off, std::ios_base::seekdir dir) = 0;
+		virtual std::streampos seek(std::streamoff off, std::ios_base::seekdir dir) = 0;
 
-    /**
+		/**
      * @brief Adapt this reader to a `std::istream`.
      *
      * @details
@@ -116,21 +122,21 @@ public:
      *
      * @see detail::ByteReaderBuf  Internal streambuf implementation
      */
-    std::istream& as_stream();
+		std::istream& as_stream();
 
-private:
-    std::unique_ptr<std::streambuf> streambuf;
-    std::unique_ptr<std::istream>   stream;
-};
+	private:
+		std::unique_ptr<std::streambuf> streambuf;
+		std::unique_ptr<std::istream> stream;
+	};
 
-/** @} */
+	/** @} */
 
-/* =========================================================================
+	/* =========================================================================
  * @defgroup ext_sources IDatasetSource — URI-based dataset factory
  * @{
  * ====================================================================== */
 
-/**
+	/**
  * @brief Factory that opens dataset URIs and returns byte-stream readers.
  *
  * @details
@@ -161,11 +167,17 @@ private:
  * @see IByteReader                   Returned by open()
  * @see PluginManager::find_source    Look up a source by scheme
  */
-class IDatasetSource {
-public:
-    virtual ~IDatasetSource() = default;
+	class IDatasetSource {
+	public:
+		IDatasetSource()          = default;
+		virtual ~IDatasetSource() = default;
 
-    /**
+		IDatasetSource(const IDatasetSource&)            = delete;
+		IDatasetSource& operator=(const IDatasetSource&) = delete;
+		IDatasetSource(IDatasetSource&&)                 = delete;
+		IDatasetSource& operator=(IDatasetSource&&)      = delete;
+
+		/**
      * @brief URI schemes handled by this source.
      *
      * @details Each entry is a scheme prefix including the trailing colon,
@@ -173,9 +185,9 @@ public:
      *
      * @return Non-empty list of scheme strings owned by the implementation.
      */
-    virtual std::vector<std::string> schemes() const = 0;
+		[[nodiscard]] virtual std::vector<std::string> schemes() const = 0;
 
-    /**
+		/**
      * @brief Open a URI and return a reader for its contents.
      *
      * @param[in] uri  Full URI, including the scheme prefix.
@@ -184,17 +196,17 @@ public:
      *
      * @see IByteReader
      */
-    virtual std::unique_ptr<IByteReader> open(std::string_view uri) = 0;
-};
+		virtual std::unique_ptr<IByteReader> open(std::string_view uri) = 0;
+	};
 
-/** @} */
+	/** @} */
 
-/* =========================================================================
+	/* =========================================================================
  * @defgroup ext_transforms ITransform — record-batch transformation
  * @{
  * ====================================================================== */
 
-/**
+	/**
  * @brief Transforms an Arrow RecordBatch (e.g. tokenisation, normalisation).
  *
  * @details
@@ -203,20 +215,27 @@ public:
  *
  * @see ttm_transform_vtable  Underlying C vtable
  */
-class ITransform {
-public:
-    virtual ~ITransform() = default;
-    /* Interface to be defined. */
-};
+	class ITransform {
+	public:
+		ITransform()          = default;
+		virtual ~ITransform() = default;
 
-/** @} */
+		ITransform(const ITransform&)            = delete;
+		ITransform& operator=(const ITransform&) = delete;
+		ITransform(ITransform&&)                 = delete;
+		ITransform& operator=(ITransform&&)      = delete;
 
-/* =========================================================================
+		/* Interface to be defined. */
+	};
+
+	/** @} */
+
+	/* =========================================================================
  * @defgroup ext_tasks ITask — ML task type
  * @{
  * ====================================================================== */
 
-/**
+	/**
  * @brief Defines an ML task type (e.g. text-classification, token-classification).
  *
  * @details
@@ -226,20 +245,27 @@ public:
  *
  * @see ttm_task_vtable  Underlying C vtable
  */
-class ITask {
-public:
-    virtual ~ITask() = default;
-    /* Interface to be defined. */
-};
+	class ITask {
+	public:
+		ITask()          = default;
+		virtual ~ITask() = default;
 
-/** @} */
+		ITask(const ITask&)            = delete;
+		ITask& operator=(const ITask&) = delete;
+		ITask(ITask&&)                 = delete;
+		ITask& operator=(ITask&&)      = delete;
 
-/* =========================================================================
+		/* Interface to be defined. */
+	};
+
+	/** @} */
+
+	/* =========================================================================
  * @defgroup ext_metrics IMetric — evaluation metric
  * @{
  * ====================================================================== */
 
-/**
+	/**
  * @brief Computes an evaluation metric (e.g. F1, accuracy, BLEU).
  *
  * @details
@@ -247,13 +273,20 @@ public:
  *
  * @see ttm_metric_vtable  Underlying C vtable
  */
-class IMetric {
-public:
-    virtual ~IMetric() = default;
-    /* Interface to be defined. */
-};
+	class IMetric {
+	public:
+		IMetric()          = default;
+		virtual ~IMetric() = default;
 
-/** @} */
+		IMetric(const IMetric&)            = delete;
+		IMetric& operator=(const IMetric&) = delete;
+		IMetric(IMetric&&)                 = delete;
+		IMetric& operator=(IMetric&&)      = delete;
+
+		/* Interface to be defined. */
+	};
+
+	/** @} */
 
 } // namespace ttm::plugins
 
