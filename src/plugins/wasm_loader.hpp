@@ -19,7 +19,7 @@
 #include <ttm/plugins/abi.h>
 #include <ttm/plugins/extension.hpp>
 
-#include <expected>
+#include <ttm/compat/expected.hpp>
 #include <filesystem>
 #include <memory>
 #include <string>

@@ -8,6 +8,7 @@ target_compile_definitions(ttm PUBLIC TTM_VERSION="${TTM_VERSION}")
 ##########################################################################################
 # Dependencies
 ##########################################################################################
+add_subdirectory(compat)
 add_subdirectory(datasets)
 add_subdirectory(plugins)
 target_link_libraries(ttm PRIVATE ttm_datasets ttm_plugins)

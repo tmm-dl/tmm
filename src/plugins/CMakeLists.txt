@@ -16,7 +16,6 @@ target_sources(ttm_plugins
         byte_reader.cpp
 )
 
-# C++23 required for std::expected (used in public headers).
 target_compile_features(ttm_plugins PUBLIC cxx_std_23)
 
 # FILE_SET HEADERS propagates the BASE_DIRS as INTERFACE include paths for
@@ -36,3 +35,5 @@ if(wasm-micro-runtime_SOURCE_DIR)
         "${wasm-micro-runtime_SOURCE_DIR}/core/iwasm/include"
     )
 endif()
+
+target_link_libraries(ttm_plugins PUBLIC ttm_compat)
