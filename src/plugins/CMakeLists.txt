@@ -11,7 +11,6 @@ target_sources(ttm_plugins
             ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/plugins/extension.hpp
             ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/plugins/plugin_manager.hpp
     PRIVATE
-        plugins.cpp
         plugin_manager.cpp
         wasm_loader.cpp
         byte_reader.cpp
