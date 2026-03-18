@@ -86,12 +86,7 @@ jobs:
       - name: Run clang-tidy
         # run-clang-tidy reads compile_commands.json and filters to our paths only.
         # -quiet suppresses "no relevant changes" lines.
-        run: |
-          run-clang-tidy-19 \
-            -p build \
-            -header-filter='.*/(src|include|tests)/.*' \
-            -quiet \
-            $(find src include tests -name "*.cpp" | tr '\n' ' ')
+        run: run-clang-tidy-19 -p build/ -config-file .clang-tidy -header-filter '^(?!.*build/).*' source-filter '^(?!.*build/).*' -quiet
 
 ##########################################################################################
 # Build + Test matrix

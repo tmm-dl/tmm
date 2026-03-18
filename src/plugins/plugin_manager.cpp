@@ -14,21 +14,28 @@
 
 #include "wasm_loader.hpp"
 
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ttm/compat/expected.hpp>
 #include <filesystem>
 #include <fstream>
+#include <iosfwd>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <ttm/compat/expected.hpp>
 #include <utility>
 #include <vector>
+
+#include <wasm_export.h>
+
+#include <ttm/plugins/abi.h>
+#include <ttm/plugins/extension.hpp>
 
 namespace ttm::plugins {
 
@@ -204,13 +211,12 @@ namespace ttm::plugins {
 
 			std::unique_ptr<IByteReader> open(std::string_view uri) override {
 				constexpr std::size_t kErrBufSize = 256;
-				// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- C API requires a char[] error buffer; std::array cannot be passed to C vtable open()
-				char errBuf[kErrBufSize] = {};
-				// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- required by C vtable API
-				const auto handle = vt.open(uri.data(), static_cast<uint32_t>(uri.size()), errBuf, kErrBufSize);
+				std::array<char, kErrBufSize> errBuf{};
+				const auto handle =
+						vt.open(uri.data(), static_cast<uint32_t>(uri.size()), errBuf.data(), errBuf.size());
 
 				if (handle == TTM_INVALID_HANDLE) {
-					std::cerr << "[ttm] CSourceAdapter::open error: " << errBuf << '\n'; // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- errBuf is a C error message buffer
+					std::cerr << "[ttm] CSourceAdapter::open error: " << errBuf.data() << '\n';
 					return nullptr;
 				}
 				return std::make_unique<CVtableReader>(vt, handle);
@@ -443,9 +449,8 @@ namespace ttm::plugins {
 		if (!wasm_push_string(plug.inst, str, wasmPtr, wasmLen)) {
 			return;
 		}
-		// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array for args
-		uint32_t args[2] = {wasmPtr, wasmLen};
-		wasm_runtime_call_wasm(plug.env, fn, 2, args); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- WAMR ABI
+		std::array<uint32_t, 2> args{wasmPtr, wasmLen};
+		wasm_runtime_call_wasm(plug.env, fn, args.size(), args.data());
 		wasm_runtime_module_free(plug.inst, wasmPtr);
 	}
 
@@ -460,9 +465,8 @@ namespace ttm::plugins {
 			if (p->fnEpochBegin == nullptr) {
 				continue;
 			}
-			// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array for args
-			uint32_t args[2] = {epoch, total};
-			wasm_runtime_call_wasm(p->env, p->fnEpochBegin, 2, args); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- WAMR ABI
+			std::array<uint32_t, 2> args{epoch, total};
+			wasm_runtime_call_wasm(p->env, p->fnEpochBegin, args.size(), args.data());
 		}
 	}
 
@@ -471,9 +475,8 @@ namespace ttm::plugins {
 			if (p->fnBatchBegin == nullptr) {
 				continue;
 			}
-			// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array for args
-			uint32_t args[2] = {batch, total};
-			wasm_runtime_call_wasm(p->env, p->fnBatchBegin, 2, args); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- WAMR ABI
+			std::array<uint32_t, 2> args{batch, total};
+			wasm_runtime_call_wasm(p->env, p->fnBatchBegin, args.size(), args.data());
 		}
 	}
 
@@ -483,10 +486,9 @@ namespace ttm::plugins {
 				continue;
 			}
 			/* WAMR passes f32 as uint32 bit-cast */
-			// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array for args
-			uint32_t args[1] = {};
+			std::array<uint32_t, 1> args{};
 			std::memcpy(&args[0], &loss, sizeof(float));
-			wasm_runtime_call_wasm(p->env, p->fnLossComputed, 1, args); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- WAMR ABI
+			wasm_runtime_call_wasm(p->env, p->fnLossComputed, args.size(), args.data());
 			std::memcpy(&loss, &args[0], sizeof(float));
 		}
 		return loss;
@@ -505,9 +507,8 @@ namespace ttm::plugins {
 			}
 			uint32_t lossBits = 0;
 			std::memcpy(&lossBits, &loss, sizeof(float));
-			// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array for args
-			uint32_t args[4] = {batch, lossBits, metricsPtr, metricsLen};
-			wasm_runtime_call_wasm(p->env, p->fnBatchEnd, 4, args); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- WAMR ABI
+			std::array<uint32_t, 4> args{batch, lossBits, metricsPtr, metricsLen};
+			wasm_runtime_call_wasm(p->env, p->fnBatchEnd, args.size(), args.data());
 			wasm_runtime_module_free(p->inst, metricsPtr);
 		}
 	}
@@ -523,9 +524,8 @@ namespace ttm::plugins {
 			if (!wasm_push_string(p->inst, metrics_json, metricsPtr, metricsLen)) {
 				continue;
 			}
-			// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array for args
-			uint32_t args[3] = {epoch, metricsPtr, metricsLen};
-			wasm_runtime_call_wasm(p->env, p->fnEpochEnd, 3, args); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- WAMR ABI
+			std::array<uint32_t, 3> args{epoch, metricsPtr, metricsLen};
+			wasm_runtime_call_wasm(p->env, p->fnEpochEnd, args.size(), args.data());
 			wasm_runtime_module_free(p->inst, metricsPtr);
 			if (args[0] != 0) {
 				stop = true;

@@ -11,15 +11,21 @@
 
 #include <ttm/plugins/abi.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <ios>
+#include <iterator>
+#include <string>
 #include <string_view>
 #include <ttm/compat/expected.hpp>
-#include <fstream>
-#include <string>
 #include <vector>
 
+#include <lib_export.h>
 #include <wasm_export.h>
 
 namespace ttm::plugins {
@@ -39,7 +45,9 @@ namespace ttm::plugins {
 			RuntimeInitArgs args{};
 			args.mem_alloc_type = Alloc_With_System_Allocator;
 
-			if (!wasm_runtime_full_init(&args)) { // NOLINT(readability-implicit-bool-conversion) -- WAMR API returns bool-like int
+			if (!wasm_runtime_full_init(
+						&args
+				)) { // NOLINT(readability-implicit-bool-conversion) -- WAMR API returns bool-like int
 				g_wamr_refcount.fetch_sub(1, std::memory_order_acq_rel);
 				return std::unexpected("wasm_loader_init: wasm_runtime_full_init failed");
 			}
@@ -116,8 +124,7 @@ namespace ttm::plugins {
 		}
 
 		/* ---------- register_source -------------------------------------------- */
-		int32_t
-		host_register_source(wasm_exec_env_t /*env*/, uint32_t /*schemes_ptr*/, uint32_t /*vtable_ptr*/) {
+		int32_t host_register_source(wasm_exec_env_t /*env*/, uint32_t /*schemes_ptr*/, uint32_t /*vtable_ptr*/) {
 			/* TODO: unmarshal the scheme list and vtable from WASM linear memory,
      * construct a CSourceAdapter, and forward to PluginManager via the
      * ttm_host_api ctx.  Stubbed for the initial build. */
@@ -129,13 +136,13 @@ namespace ttm::plugins {
 		NativeSymbol ttm_native_symbols[] = {
 				/* { "export_name", func_ptr, "signature", attachment } */
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- WAMR NativeSymbol API requires void* function pointers; no safer alternative
-			{"ttm_log", reinterpret_cast<void*>(host_log), "(iii)", nullptr},
+				{"ttm_log", reinterpret_cast<void*>(host_log), "(iii)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-			{"ttm_alloc", reinterpret_cast<void*>(host_alloc), "(i)i", nullptr},
+				{"ttm_alloc", reinterpret_cast<void*>(host_alloc), "(i)i", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-			{"ttm_free", reinterpret_cast<void*>(host_free), "(i)", nullptr},
+				{"ttm_free", reinterpret_cast<void*>(host_free), "(i)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-			{"ttm_register_source", reinterpret_cast<void*>(host_register_source), "(ii)i", nullptr},
+				{"ttm_register_source", reinterpret_cast<void*>(host_register_source), "(ii)i", nullptr},
 		};
 
 	} // anonymous namespace
@@ -153,7 +160,7 @@ namespace ttm::plugins {
 		if (!file) {
 			return std::unexpected("wasm_loader_load: cannot open '" + path.string() + "'");
 		}
-		const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+		std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
 		/* 2. Register host symbols ------------------------------------------- */
 		// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay,cppcoreguidelines-pro-bounds-constant-array-index) -- WAMR API requires array-to-pointer decay for NativeSymbol table
@@ -165,30 +172,21 @@ namespace ttm::plugins {
 
 		/* 3. Load (compile) module ------------------------------------------- */
 		constexpr uint32_t kErrBufSize = 256;
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- WAMR API requires a char[] error buffer of fixed size
-	char error_buf[kErrBufSize] = {};
-		plugin.module = wasm_runtime_load(
-				const_cast<uint8_t*>(bytes.data()), // NOLINT(cppcoreguidelines-pro-type-const-cast) -- WAMR does not modify bytes
-				static_cast<uint32_t>(bytes.size()),
-				error_buf, // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-				kErrBufSize
-		);
+		std::array<char, kErrBufSize> errorbuf{};
+		plugin.module =
+				wasm_runtime_load(bytes.data(), static_cast<uint32_t>(bytes.size()), errorbuf.data(), errorbuf.size());
 		if (plugin.module == nullptr) {
-			return std::unexpected(std::string("wasm_loader_load: wasm_runtime_load failed: ") + error_buf); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+			return std::unexpected(std::format("wasm_loader_load: wasm_runtime_load failed: {}", errorbuf.data()));
 		}
 
 		/* 4. Instantiate ----------------------------------------------------- */
 		constexpr uint32_t STACK_SIZE = 512 * 1024;		/* 512 KB */
 		constexpr uint32_t HEAP_SIZE = 4 * 1024 * 1024; /* 4 MB */
-		plugin.inst = wasm_runtime_instantiate(
-			plugin.module, STACK_SIZE, HEAP_SIZE,
-			error_buf, // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-			kErrBufSize
-	);
+		plugin.inst = wasm_runtime_instantiate(plugin.module, STACK_SIZE, HEAP_SIZE, errorbuf.data(), errorbuf.size());
 		if (plugin.inst == nullptr) {
 			wasm_runtime_unload(plugin.module);
 			plugin.module = nullptr;
-			return std::unexpected(std::string("wasm_loader_load: instantiate failed: ") + error_buf); // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+			return std::unexpected(std::format("wasm_loader_load: instantiate failed: {}", errorbuf.data()));
 		}
 
 		/* 5. Create execution environment ------------------------------------ */
@@ -202,7 +200,9 @@ namespace ttm::plugins {
 		}
 
 		/* Attach host API pointer so host callbacks can retrieve it */
-		wasm_runtime_set_user_data(plugin.env, const_cast<ttm_host_api*>(&host_api)); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- WAMR user_data is void*; WAMR does not modify it
+		wasm_runtime_set_user_data(
+				plugin.env, const_cast<ttm_host_api*>(&host_api)
+		); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- WAMR user_data is void*; WAMR does not modify it
 
 		/* 6. Verify ABI version ---------------------------------------------- */
 		auto* fn_info = wasm_runtime_lookup_function(plugin.inst, "ttm_plugin_get_info");
@@ -210,9 +210,8 @@ namespace ttm::plugins {
 			wasm_loader_unload(plugin);
 			return std::unexpected("wasm_loader_load: '" + path.string() + "' does not export ttm_plugin_get_info");
 		}
-		// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array
-	uint32_t info_args[1] = {};
-		if (!wasm_runtime_call_wasm(plugin.env, fn_info, 0, info_args)) { // NOLINT(readability-implicit-bool-conversion,cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+		std::array<uint32_t, 1> info_args{};
+		if (!wasm_runtime_call_wasm(plugin.env, fn_info, 0, info_args.data())) {
 			wasm_loader_unload(plugin);
 			return std::unexpected(
 					"wasm_loader_load: ttm_plugin_get_info call failed: " +
@@ -259,9 +258,8 @@ namespace ttm::plugins {
 		std::memcpy(api_native_ptr, &host_api, sizeof(ttm_host_api));
 
 		/* init(host_api_ptr, config_ptr, config_len) → i32 */
-		// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays) -- WAMR call ABI requires C array
-	uint32_t init_args[3] = {api_wasm_ptr, config_wasm_ptr, config_len};
-		if (!wasm_runtime_call_wasm(plugin.env, fn_init, 3, init_args)) { // NOLINT(readability-implicit-bool-conversion,cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
+		std::array<uint32_t, 3> init_args{api_wasm_ptr, config_wasm_ptr, config_len};
+		if (!wasm_runtime_call_wasm(plugin.env, fn_init, init_args.size(), init_args.data())) {
 			wasm_runtime_module_free(plugin.inst, config_wasm_ptr);
 			wasm_runtime_module_free(plugin.inst, api_wasm_ptr);
 			wasm_loader_unload(plugin);

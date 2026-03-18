@@ -18,9 +18,9 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <ios>
+#include <iosfwd>
 #include <istream>
 #include <memory>
 #include <streambuf>
@@ -45,9 +45,9 @@ namespace ttm::plugins {
 		class ByteReaderBuf final : public std::streambuf {
 		public:
 			/**
-     * @param[in] reader  The reader this buffer delegates to.
-     *                    Must remain valid for the lifetime of this object.
-     */
+			 * @param[in] reader  The reader this buffer delegates to.
+			 *                    Must remain valid for the lifetime of this object.
+			 */
 			explicit ByteReaderBuf(IByteReader& reader) : reader_(reader) {
 				/* Start with an empty get area; underflow() will fill it. */
 				setg(buf_.data(), buf_.data(), buf_.data());
@@ -82,7 +82,7 @@ namespace ttm::plugins {
              * Seek interface
              * --------------------------------------------------------------- */
 
-            /**
+			/**
              * @brief Forward seek requests to the underlying IByteReader.
              * @details Seeking is only supported when IByteReader::seekable() is true.
              *
@@ -113,8 +113,8 @@ namespace ttm::plugins {
 			}
 
 			/**
-     * @brief Absolute seek — delegates to seekoff(off, beg, which).
-     */
+			 * @brief Absolute seek — delegates to seekoff(off, beg, which).
+			 */
 			pos_type seekpos(pos_type sp, std::ios_base::openmode which) override {
 				return seekoff(off_type(sp), std::ios_base::beg, which);
 			}
@@ -124,16 +124,18 @@ namespace ttm::plugins {
 			IByteReader& reader_;
 
 			/** Size of the internal read buffer — 64 KiB amortises plugin boundary crossings. */
-			static constexpr std::size_t kBufSize = 64UL * 1024UL; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- 64 KiB is the intended buffer size
+			static constexpr std::size_t kBufSize =
+					64UL *
+					1024UL; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- 64 KiB is the intended buffer size
 			/** Internal read buffer. */
 			std::array<char, kBufSize> buf_{};
 		};
 
 	} // namespace detail
 
-    /* =========================================================================
-    * IByteReader implementation
-    * ====================================================================== */
+	/* =========================================================================
+     * IByteReader implementation
+     * ====================================================================== */
 
 	IByteReader::~IByteReader() = default;
 

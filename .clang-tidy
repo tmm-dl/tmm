@@ -15,7 +15,10 @@ Checks: "*,
         -misc-non-private-member-variables-in-classes,
         -misc-no-recursion,
         -misc-use-anonymous-namespace,
-        -misc-use-internal-linkage
+        -misc-use-internal-linkage,
+        -hicpp-uppercase-literal-suffix,
+        -readability-uppercase-literal-suffix,
+        -misc-include-cleaner
 "
 WarningsAsErrors: ''
 HeaderFilterRegex: ''
@@ -31,7 +34,8 @@ CheckOptions:
   #   it  — iterator (conventional abbreviation accepted by most style guides)
   #   sp  — seekpos parameter (matches std::streambuf::seekpos naming)
   #   s   — sentinel-loop variable for null-terminated char** arrays
+  #   c   — a single character
   - key: readability-identifier-length.IgnoredVariableNames
-    value: 'x|y|z|p|r|it|sp'
+    value: 'x|y|z|p|r|it|sp|c'
   - key: readability-identifier-length.IgnoredParameterNames
-    value: 'x|y|z|h|vt|n|s'
+    value: 'x|y|z|h|vt|n|s|c'

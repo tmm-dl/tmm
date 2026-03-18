@@ -11,7 +11,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstring>
+#include <ios>
+#include <iosfwd>
 #include <sstream>
 #include <string>
 
@@ -28,15 +31,16 @@ namespace {
 
 		std::streamsize read(std::byte* buf, std::streamsize n) override {
 			const auto remaining = static_cast<std::streamsize>(data_.size()) - pos_;
-			if (remaining <= 0)
+			if (remaining <= 0) {
 				return 0;
+			}
 			const auto to_read = std::min(n, remaining);
 			std::memcpy(buf, data_.data() + static_cast<std::size_t>(pos_), static_cast<std::size_t>(to_read));
 			pos_ += to_read;
 			return to_read;
 		}
 
-		bool seekable() const noexcept override { return true; }
+		[[nodiscard]] bool seekable() const noexcept override { return true; }
 
 		std::streampos seek(std::streamoff off, std::ios_base::seekdir dir) override {
 			std::streamsize new_pos{};
@@ -51,12 +55,13 @@ namespace {
 				new_pos = static_cast<std::streamsize>(data_.size()) + off;
 				break;
 			default:
-				return std::streampos(-1);
+				return {-1};
 			}
-			if (new_pos < 0 || new_pos > static_cast<std::streamsize>(data_.size()))
-				return std::streampos(-1);
+			if (new_pos < 0 || new_pos > static_cast<std::streamsize>(data_.size())) {
+				return {-1};
+			}
 			pos_ = new_pos;
-			return std::streampos(pos_);
+			return {pos_};
 		}
 
 	private:
@@ -73,19 +78,18 @@ namespace {
 
 		std::streamsize read(std::byte* buf, std::streamsize n) override {
 			const auto remaining = static_cast<std::streamsize>(data_.size()) - pos_;
-			if (remaining <= 0)
+			if (remaining <= 0) {
 				return 0;
+			}
 			const auto to_read = std::min(n, remaining);
 			std::memcpy(buf, data_.data() + static_cast<std::size_t>(pos_), static_cast<std::size_t>(to_read));
 			pos_ += to_read;
 			return to_read;
 		}
 
-		bool seekable() const noexcept override { return false; }
+		[[nodiscard]] bool seekable() const noexcept override { return false; }
 
-		std::streampos seek(std::streamoff /*off*/, std::ios_base::seekdir /*dir*/) override {
-			return std::streampos(-1);
-		}
+		std::streampos seek(std::streamoff /*off*/, std::ios_base::seekdir /*dir*/) override { return {-1}; }
 
 	private:
 		std::string data_;
@@ -100,9 +104,10 @@ namespace {
 
 TEST_CASE("StringReader reads all bytes in one call", "[byte_reader]") {
 	StringReader reader("hello");
+	// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- arbitrary buffer that is big enough for the test case
 	std::array<std::byte, 16> buf{};
-	const auto n = reader.read(buf.data(), static_cast<std::streamsize>(buf.size()));
-	REQUIRE(n == 5);
+	const auto numread = reader.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+	REQUIRE(numread == 5);
 	CHECK(std::memcmp(buf.data(), "hello", 5) == 0);
 }
 
@@ -172,7 +177,8 @@ TEST_CASE("UnseekableReader::seekable returns false", "[byte_reader]") {
 TEST_CASE("as_stream reads words via std::istream operator>>", "[byte_reader][as_stream]") {
 	StringReader reader("hello world");
 	auto& stream = reader.as_stream();
-	std::string word1, word2;
+	std::string word1;
+	std::string word2;
 	stream >> word1 >> word2;
 	CHECK(word1 == "hello");
 	CHECK(word2 == "world");
@@ -180,9 +186,9 @@ TEST_CASE("as_stream reads words via std::istream operator>>", "[byte_reader][as
 
 TEST_CASE("as_stream returns the same object on repeated calls", "[byte_reader][as_stream]") {
 	StringReader reader("data");
-	auto& s1 = reader.as_stream();
-	auto& s2 = reader.as_stream();
-	CHECK(&s1 == &s2);
+	auto& str1 = reader.as_stream();
+	auto& str2 = reader.as_stream();
+	CHECK(&str1 == &str2);
 }
 
 TEST_CASE("as_stream reads multi-line text correctly", "[byte_reader][as_stream]") {
