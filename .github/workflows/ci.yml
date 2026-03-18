@@ -1,0 +1,232 @@
+##########################################################################################
+# TTM Continuous Integration
+#
+# Jobs:
+#   format   — clang-format style check (non-blocking annotation on PRs)
+#   tidy     — clang-tidy static analysis on Linux / Clang
+#   build    — compile + ctest across the full OS/arch/compiler matrix
+#   coverage — Debug build with --coverage, report uploaded to Codecov
+##########################################################################################
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel redundant runs on the same ref (e.g. rapid pushes to a PR branch).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Shared: CPM package download cache lives at this path on every runner.
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm_cache
+
+##########################################################################################
+# clang-format check
+##########################################################################################
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        uses: aminya/setup-cpp@v1
+        with:
+          clangformat: "19"
+          # Nothing else needed for a format-only job
+          cmake: false
+          ninja: false
+
+      - name: Check formatting
+        # Fail if any file would be reformatted.
+        # Excludes the build/ tree (generated files) automatically because
+        # we only search src/ include/ tests/.
+        run: |
+          find src include tests \
+            \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) \
+            | xargs clang-format-19 --dry-run --Werror
+
+##########################################################################################
+# clang-tidy static analysis
+##########################################################################################
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 19 + CMake + Ninja
+        uses: aminya/setup-cpp@v1
+        with:
+          compiler: llvm-19
+          cmake: true
+          ninja: true
+          clangtidy: "19"
+
+      - name: Restore CPM cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-tidy-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: cpm-tidy-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure (generates compile_commands.json)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DTTM_BUILD_TESTS=ON
+
+      - name: Build (ensures generated headers exist before tidy runs)
+        run: cmake --build build --target ttm_tests
+
+      - name: Run clang-tidy
+        # run-clang-tidy reads compile_commands.json and filters to our paths only.
+        # -quiet suppresses "no relevant changes" lines.
+        run: run-clang-tidy-19 -p build/ -config-file .clang-tidy -header-filter '^(?!.*build/).*' source-filter '^(?!.*build/).*' -quiet
+
+##########################################################################################
+# Build + Test matrix
+##########################################################################################
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false   # keep running other matrix legs when one fails
+      matrix:
+        include:
+          # ── Linux x86-64 ─────────────────────────────────────────────────────
+          - name: "Linux / GCC 12 / x64"
+            os: ubuntu-22.04
+            compiler: gcc-12
+
+          - name: "Linux / GCC 14 / x64"
+            os: ubuntu-24.04
+            compiler: gcc-14
+
+          - name: "Linux / Clang 18 / x64"
+            os: ubuntu-24.04
+            compiler: llvm-18
+
+          # ── Linux ARM64 ──────────────────────────────────────────────────────
+          # Requires GitHub Team / Enterprise or a public repo with Actions minutes.
+          - name: "Linux / GCC 14 / ARM64"
+            os: ubuntu-24.04-arm
+            compiler: gcc-14
+
+          # ── macOS ARM64 (Apple Silicon) ───────────────────────────────────────
+          - name: "macOS 14 / Clang / ARM64"
+            os: macos-14
+            compiler: llvm-18
+
+          - name: "macOS 15 / Clang / ARM64"
+            os: macos-15
+            compiler: llvm-18
+
+          - name: "macOS 26 / Clang / ARM64"
+            os: macos-15
+            compiler: llvm-18
+
+          # ── Windows x86-64 ───────────────────────────────────────────────────
+          - name: "Windows 2022 / MSVC / x64"
+            os: windows-2022
+            compiler: msvc
+
+          - name: "Windows 2025 / MSVC / x64"
+            os: windows-2025
+            compiler: msvc
+
+          # ── Windows ARM64 ────────────────────────────────────────────────────
+          # Requires GitHub Team / Enterprise or a public repo.
+          - name: "Windows 11 / MSVC / ARM64"
+            os: windows-11-arm
+            compiler: msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up C++ toolchain
+        uses: aminya/setup-cpp@v1
+        with:
+          compiler: ${{ matrix.compiler }}
+          cmake: true
+          ninja: true
+
+      - name: Restore CPM cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-build-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: cpm-build-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -D CMAKE_BUILD_TYPE=Release -D TTM_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --target ttm_tests
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+
+##########################################################################################
+# Coverage (Linux / GCC / Debug, uploaded to Codecov)
+##########################################################################################
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-24.04
+    # Only upload on pushes to main to avoid spamming Codecov with PR noise.
+    # Remove the if: condition to also upload on PRs.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GCC 14 + gcovr
+        uses: aminya/setup-cpp@v1
+        with:
+          compiler: gcc-14
+          cmake: true
+          ninja: true
+          gcovr: true
+
+      - name: Restore CPM cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-coverage-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: cpm-coverage-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure with coverage
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DTTM_BUILD_TESTS=ON \
+            -DTTM_ENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build --target ttm_tests
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Generate coverage report (Cobertura XML)
+        run: |
+          gcovr \
+            --root . \
+            --object-directory build \
+            --filter 'src/' \
+            --filter 'include/' \
+            --exclude-throw-branches \
+            --xml-pretty \
+            --output coverage.xml
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          # CODECOV_TOKEN must be set in your repository's Settings → Secrets.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true

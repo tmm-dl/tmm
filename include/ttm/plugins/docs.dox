@@ -1,0 +1,489 @@
+/**
+ * @file docs.dox
+ * @brief Doxygen narrative documentation for the TTM plugin system.
+ *
+ * @details
+ * This file contains no compilable code.  It exists solely to hold Doxygen
+ * group definitions and long-form prose that would otherwise clutter the
+ * source headers.
+ */
+
+/* =========================================================================
+ * Top-level group
+ * ====================================================================== */
+
+/**
+ * @defgroup ttm_plugins TTM Plugin System
+ *
+ * @brief Extensible plugin architecture for TTM — dataset sources, transforms,
+ *        task types, evaluation metrics, and training lifecycle hooks.
+ *
+ * @details
+ * The TTM plugin system lets third-party code extend the training runtime
+ * without modifying the core library.  Plugins are distributed as
+ * **WebAssembly** (`.wasm`) binaries and are loaded at runtime by
+ * ttm::plugins::PluginManager.
+ *
+ * The system has two distinct layers:
+ *
+ * | Layer | Audience | Key files |
+ * |-------|----------|-----------|
+ * | C ABI | Plugin authors; consumed by WASM code | `abi.h` |
+ * | C++ API | Host application; consumed by training loop | `extension.hpp`, `plugin_manager.hpp` |
+ *
+ * @par Quick start — host side
+ * @code{.cpp}
+ * #include <ttm/plugins/plugin_manager.hpp>
+ *
+ * // 1. Create the manager (initialises WAMR runtime).
+ * auto mgr = ttm::plugins::PluginManager::create().value();
+ *
+ * // 2. Load one or more plugins.
+ * mgr.load("plugins/hf-source.wasm").value();
+ * mgr.load("plugins/bpe-tok.wasm", R"({"vocab":"bpe.json"})").value();
+ *
+ * // 3. Use a registered dataset source.
+ * auto* src = mgr.find_source("hf:");
+ * auto reader = src->open("hf:datasets/wikitext/train");
+ * std::istream& in = reader->as_stream();
+ *
+ * // 4. Drive the training lifecycle.
+ * mgr.emit_fit_begin(ctx_json);
+ * for (uint32_t ep = 0; ep < epochs; ++ep) {
+ *     mgr.emit_epoch_begin(ep, epochs);
+ *     for (uint32_t b = 0; b < batches; ++b) {
+ *         mgr.emit_batch_begin(b, batches);
+ *         float loss = compute_loss();
+ *         loss = mgr.emit_loss_computed(loss);   // plugins may modify loss
+ *         mgr.emit_batch_end(b, loss, metrics_json);
+ *     }
+ *     if (mgr.emit_epoch_end(ep, metrics_json)) break; // early stop
+ * }
+ * mgr.emit_fit_end(final_metrics_json);
+ * @endcode
+ *
+ * @par Quick start — plugin side (C, compiled to WASM)
+ * @code{.c}
+ * #include <ttm/plugins/abi.h>
+ *
+ * static ttm_plugin_info INFO = {
+ *     .abiVersion = TTM_ABI_VERSION,
+ *     .name       = "my-source",
+ *     .version    = "1.0.0",
+ *     .description = "Custom dataset source for my data format",
+ * };
+ *
+ * ttm_plugin_info* ttm_plugin_get_info(void) { return &INFO; }
+ *
+ * static const ttm_source_vtable MY_VT = { .open=my_open, .read=my_read,
+ *                                          .seek=my_seek, .close=my_close };
+ * static const char* SCHEMES[] = { "myscheme:", NULL };
+ *
+ * ttm_error ttm_plugin_init(const ttm_host_api* host,
+ *                           const char* cfg, uint32_t cfg_len)
+ * {
+ *     return host->register_source(host->ctx, SCHEMES, &MY_VT);
+ * }
+ *
+ * void ttm_plugin_teardown(void) {}
+ * @endcode
+ */
+
+/* =========================================================================
+ * Sub-group: ABI design rationale
+ * ====================================================================== */
+
+/**
+ * @defgroup abi_design ABI Design Rationale
+ * @ingroup ttm_plugins
+ *
+ * @brief Why the ABI looks the way it does — fixed-width types, vtables,
+ *        string conventions, and pointer rules.
+ *
+ * @details
+ * Understanding the ABI design choices prevents subtle bugs when writing
+ * plugins, especially when targeting WebAssembly.
+ *
+ * ---
+ *
+ * @section abi_design_types Fixed-width integer types
+ *
+ * The ABI uses **only fixed-width types** from `<stdint.h>` and never
+ * `size_t`, `ptrdiff_t`, `long`, or any other type whose width depends on
+ * the target architecture:
+ *
+ * | Type | Width | Used for |
+ * |------|-------|----------|
+ * | `uint32_t` | 32 bits everywhere | lengths, counts, capacities |
+ * | `int32_t`  | 32 bits everywhere | `read()` return, `whence` |
+ * | `int64_t`  | 64 bits everywhere | `ttm_handle`, seek offsets/positions |
+ *
+ * **Why not `size_t`?**
+ *
+ * `size_t` is `uint32_t` inside a 32-bit WebAssembly module but `uint64_t`
+ * on a 64-bit host process.  If `size_t` appeared in a struct field or a
+ * function parameter that crosses the WASM boundary, the plugin and the host
+ * would disagree on the memory layout:
+ *
+ * @code{.c}
+ * // BAD — do NOT do this in abi.h
+ * typedef struct { size_t len; const char* data; } bad_string;
+ * //  Plugin sees: { u32 len; u32 data_ptr; }  (8 bytes total in WASM32)
+ * //  Host sees:   { u64 len; u64 data_ptr; }  (16 bytes on LP64)
+ * @endcode
+ *
+ * With `uint32_t` the layout is identical in both environments:
+ *
+ * @code{.c}
+ * // GOOD — what abi.h actually does
+ * int32_t (*read)(ttm_handle h, void* buf, int32_t len);
+ * //  Plugin and host both see: (i64, ptr, i32) → i32
+ * @endcode
+ *
+ * **Why `int64_t` for handles and seek positions?**
+ *
+ * Handles need to be able to represent a native pointer on 64-bit hosts
+ * without loss of information, even though WASM only sees an opaque integer.
+ * `int64_t` is always 8 bytes, so casting a host pointer to `int64_t` and
+ * back is safe on all supported platforms.  Seek positions may exceed 4 GiB
+ * for large datasets, so `int64_t` is appropriate there too.
+ *
+ * ---
+ *
+ * @section abi_design_strings String convention
+ *
+ * All strings in the ABI are passed as **(const char\*, uint32_t len)** pairs.
+ * They are **not** required to be NUL-terminated.  This design:
+ *
+ * - Avoids a heap allocation to NUL-terminate slices (e.g. Rust `&str`).
+ * - Lets hosts pass substrings of larger buffers without copying.
+ * - Works identically across language boundaries.
+ *
+ * The only exception is the NULL-terminated `const char**` scheme/alias
+ * arrays in registration functions, which are sentinel-terminated for
+ * convenience (matching idiomatic C).
+ *
+ * ---
+ *
+ * @section abi_design_vtables COM-style vtables
+ *
+ * Extension objects (sources, transforms, …) are represented as a
+ * **vtable struct + opaque handle** pair — the same pattern used by COM,
+ * POSIX `FILE*`, and WebGPU:
+ *
+ * @code{.c}
+ * // Open returns a handle; all subsequent calls pass it back.
+ * ttm_handle h = vt->open(uri, uri_len, err_buf, err_cap);
+ * vt->read(h, buf, len);
+ * vt->seek(h, offset, SEEK_SET);
+ * vt->close(h);
+ * @endcode
+ *
+ * The vtable struct itself is **copied** into the host (it is not referenced
+ * by pointer after `ttm_plugin_init` returns).  This means the plugin does
+ * not need to keep a stable vtable address — a local or stack-allocated
+ * struct is fine.
+ *
+ * ---
+ *
+ * @section abi_design_posix No `_t` suffix
+ *
+ * POSIX reserves all identifiers ending in `_t` in the global namespace.
+ * To avoid conflicts on POSIX systems, TTM ABI types are named without the
+ * `_t` suffix: `ttm_handle`, `ttm_error`, `ttm_source_vtable`, etc.
+ *
+ * ---
+ *
+ * @section abi_design_memory Memory ownership
+ *
+ * The general rule is: **the allocator frees**.
+ *
+ * - Host-allocated buffers (e.g. `err_buf` in `open()`, `in_ipc` in
+ *   `apply()`) are freed by the host after the call returns.
+ * - Plugin-allocated buffers returned through out-parameters (e.g. `out_ipc`
+ *   in `ttm_transform_vtable::apply`) must be freed by the host via
+ *   `ttm_host_api::free`.
+ * - Inside WASM, `ttm_host_api::alloc` / `ttm_host_api::free` allocate and
+ *   free within the plugin's own linear memory so that returned pointers are
+ *   valid from the plugin's address space.
+ */
+
+/* =========================================================================
+ * Sub-group: PluginManager lifecycle
+ * ====================================================================== */
+
+/**
+ * @defgroup pm_guide PluginManager Usage Guide
+ * @ingroup ttm_plugins
+ *
+ * @brief Step-by-step guide to constructing, loading plugins, and driving
+ *        the training lifecycle through PluginManager.
+ *
+ * @details
+ *
+ * @section pm_guide_create Construction
+ *
+ * PluginManager cannot be constructed with a plain constructor because
+ * initialising the WAMR runtime is a fallible operation.  Use the named
+ * constructor instead:
+ *
+ * @code{.cpp}
+ * auto result = ttm::plugins::PluginManager::create();
+ * if (!result) {
+ *     std::cerr << "Failed to init plugin runtime: " << result.error() << '\n';
+ *     return EXIT_FAILURE;
+ * }
+ * auto mgr = std::move(*result);
+ * @endcode
+ *
+ * Or, if you prefer to propagate the error as an exception:
+ *
+ * @code{.cpp}
+ * auto mgr = ttm::plugins::PluginManager::create().value(); // throws std::bad_expected_access on failure
+ * @endcode
+ *
+ * The WAMR runtime is reference-counted internally.  Multiple PluginManager
+ * instances may exist simultaneously (useful in unit tests); the runtime is
+ * shut down only when the last instance is destroyed.
+ *
+ * @section pm_guide_load Loading plugins
+ *
+ * `load()` reads the `.wasm` file, compiles it, instantiates it, verifies
+ * the ABI version, calls `ttm_plugin_init`, and resolves lifecycle hook
+ * pointers — all in one call:
+ *
+ * @code{.cpp}
+ * // Load with default configuration.
+ * mgr.load("plugins/hf-source.wasm").value();
+ *
+ * // Load with JSON configuration forwarded verbatim to ttm_plugin_init.
+ * mgr.load("plugins/bpe-tok.wasm", R"({"vocab":"bpe.json","merges":50000})").value();
+ *
+ * // Handle load failure explicitly.
+ * if (auto r = mgr.load("plugins/optional.wasm"); !r) {
+ *     std::cerr << "Optional plugin unavailable: " << r.error() << '\n';
+ * }
+ * @endcode
+ *
+ * @section pm_guide_sources Using dataset sources
+ *
+ * Plugins register sources by URI scheme (e.g. `"hf:"`, `"s3:"`).
+ * The built-in `"file:"` source is always available.
+ *
+ * @code{.cpp}
+ * // Look up a source by scheme — returns nullptr if not registered.
+ * auto* src = mgr.find_source("hf:");
+ * if (!src) { /* plugin not loaded or doesn't handle hf: */ }
+ *
+ * // Open a URI and get a byte-stream reader.
+ * auto reader = src->open("hf:datasets/wikitext/train.arrow");
+ * if (!reader) { /* URI not found or I/O error */ }
+ *
+ * // Option A — direct read loop.
+ * std::array<std::byte, 65536> buf;
+ * while (true) {
+ *     auto n = reader->read(buf.data(), buf.size());
+ *     if (n == 0) break;   // EOF
+ *     process(buf.data(), n);
+ * }
+ *
+ * // Option B — wrap in std::istream (lazy; same lifetime as reader).
+ * std::istream& in = reader->as_stream();
+ * auto table = read_arrow_ipc(in);
+ * @endcode
+ *
+ * @section pm_guide_lifecycle Lifecycle event dispatch
+ *
+ * The emit_* family of methods notifies all loaded plugins in load order.
+ * Plugins that did not export a given hook are silently skipped.
+ *
+ * @code{.cpp}
+ * // Fit loop skeleton with all hooks:
+ * mgr.emit_fit_begin(ctx_json);
+ *
+ * for (uint32_t ep = 0; ep < total_epochs; ++ep) {
+ *     mgr.emit_epoch_begin(ep, total_epochs);
+ *
+ *     for (uint32_t b = 0; b < total_batches; ++b) {
+ *         mgr.emit_batch_begin(b, total_batches);
+ *
+ *         float loss = forward_and_backward();
+ *
+ *         // Plugins may add regularisation terms or observe the loss.
+ *         loss = mgr.emit_loss_computed(loss);
+ *
+ *         mgr.emit_batch_end(b, loss, batch_metrics_json);
+ *     }
+ *
+ *     mgr.emit_validation_end(val_metrics_json);   // after optional val pass
+ *
+ *     // Returns true if any plugin requested early stopping.
+ *     if (mgr.emit_epoch_end(ep, epoch_metrics_json)) break;
+ * }
+ *
+ * mgr.emit_fit_end(final_metrics_json);
+ * @endcode
+ *
+ * The `emit_loss_computed` hook chains across plugins: each plugin receives
+ * the output of the previous one, so the final return value reflects
+ * modifications from all plugins in load order.
+ *
+ * `emit_epoch_end` calls every plugin regardless of intermediate return
+ * values (so every plugin sees the epoch end), and returns `true` if **any**
+ * plugin requested early stopping.
+ */
+
+/* =========================================================================
+ * Sub-group: Writing a plugin
+ * ====================================================================== */
+
+/**
+ * @defgroup plugin_guide Writing a Plugin
+ * @ingroup ttm_plugins
+ *
+ * @brief How to implement, compile, and distribute a TTM plugin.
+ *
+ * @details
+ *
+ * @section plugin_guide_required Required exports
+ *
+ * Every plugin must export exactly these three C symbols:
+ *
+ * | Symbol | Purpose |
+ * |--------|---------|
+ * | `ttm_plugin_get_info` | Return static metadata; called before init |
+ * | `ttm_plugin_init`     | Register extensions; called once on load |
+ * | `ttm_plugin_teardown` | Clean up; called once on unload |
+ *
+ * The host verifies `ttm_plugin_info::abiVersion == TTM_ABI_VERSION`
+ * immediately after calling `ttm_plugin_get_info`.  A mismatch causes the
+ * load to fail with an error message — **always keep `abiVersion` set to
+ * `TTM_ABI_VERSION`** from the version of `abi.h` you compiled against.
+ *
+ * @section plugin_guide_init Registering extensions
+ *
+ * All registration must happen inside `ttm_plugin_init`.  The host API
+ * pointer is valid only until `ttm_plugin_teardown` returns; do not retain
+ * it.
+ *
+ * @code{.c}
+ * ttm_error ttm_plugin_init(const ttm_host_api* host,
+ *                           const char* cfg, uint32_t cfg_len)
+ * {
+ *     // Parse config if needed (cfg is NOT NUL-terminated).
+ *     char buf[256];
+ *     uint32_t n = cfg_len < sizeof(buf)-1 ? cfg_len : sizeof(buf)-1;
+ *     memcpy(buf, cfg, n);
+ *     buf[n] = '\0';
+ *
+ *     // Register a dataset source.
+ *     static const ttm_source_vtable VT = { my_open, my_read, my_seek, my_close };
+ *     static const char* SCHEMES[] = { "myscheme:", "ms:", NULL };
+ *     ttm_error err = host->register_source(host->ctx, SCHEMES, &VT);
+ *     if (err != TTM_OK) return err;
+ *
+ *     return TTM_OK;
+ * }
+ * @endcode
+ *
+ * @section plugin_guide_hooks Optional lifecycle hooks
+ *
+ * Export any subset of the optional hooks — the host looks them up by name
+ * and silently ignores missing ones:
+ *
+ * @code{.c}
+ * // Called once before training starts.
+ * void ttm_on_fit_begin(const char* ctx_json, uint32_t len) { /* ... */ }
+ *
+ * // Called at the start of each epoch.
+ * void ttm_on_epoch_begin(uint32_t epoch, uint32_t total_epochs) { /* ... */ }
+ *
+ * // Called at the start of each batch.
+ * void ttm_on_batch_begin(uint32_t batch, uint32_t total_batches) { /* ... */ }
+ *
+ * // May modify the loss (e.g. add an L2 term). Must return a valid float.
+ * float ttm_on_loss_computed(float loss) { return loss + l2_penalty(); }
+ *
+ * // Called after each batch completes.
+ * void ttm_on_batch_end(uint32_t batch, float loss,
+ *                       const char* metrics_json, uint32_t len) { /* ... */ }
+ *
+ * // Return non-zero to request early stopping.
+ * int32_t ttm_on_epoch_end(uint32_t epoch,
+ *                          const char* metrics_json, uint32_t len)
+ * {
+ *     return patience_exceeded() ? 1 : 0;
+ * }
+ *
+ * // Called after each validation pass.
+ * void ttm_on_validation_end(const char* metrics_json, uint32_t len) { /* ... */ }
+ *
+ * // Called when the fit loop finishes (normally or via early stop).
+ * void ttm_on_fit_end(const char* metrics_json, uint32_t len) { /* ... */ }
+ * @endcode
+ *
+ * @section plugin_guide_source Implementing a dataset source
+ *
+ * A source provides four functions: `open`, `read`, `seek`, `close`.
+ *
+ * @code{.c}
+ * // Each open() call returns a new independent handle.
+ * // err_buf/err_cap: fill on failure; the host may log this.
+ * ttm_handle my_open(const char* uri, uint32_t uri_len,
+ *                    char* err_buf, uint32_t err_cap)
+ * {
+ *     MyStream* s = stream_open(uri, uri_len);
+ *     if (!s) {
+ *         snprintf(err_buf, err_cap, "cannot open URI");
+ *         return TTM_INVALID_HANDLE;
+ *     }
+ *     return (ttm_handle)(uintptr_t)s;
+ * }
+ *
+ * // Return > 0: bytes read.  Return 0: EOF.  Return -1: error.
+ * int32_t my_read(ttm_handle h, void* buf, int32_t len)
+ * {
+ *     return stream_read((MyStream*)(uintptr_t)h, buf, len);
+ * }
+ *
+ * // Return new byte offset >= 0.  Return -1 if unseekable or error.
+ * // whence: 0 = SEEK_SET, 1 = SEEK_CUR, 2 = SEEK_END.
+ * int64_t my_seek(ttm_handle h, int64_t offset, int32_t whence)
+ * {
+ *     return stream_seek((MyStream*)(uintptr_t)h, offset, whence);
+ * }
+ *
+ * void my_close(ttm_handle h)
+ * {
+ *     stream_close((MyStream*)(uintptr_t)h);
+ * }
+ * @endcode
+ *
+ * @section plugin_guide_compile Compiling to WebAssembly
+ *
+ * Use a WASI-capable toolchain such as `wasi-sdk` or `zig cc`:
+ *
+ * @code{.sh}
+ * # wasi-sdk
+ * /opt/wasi-sdk/bin/clang        \
+ *     --target=wasm32-wasi       \
+ *     --sysroot=/opt/wasi-sdk/share/wasi-sysroot \
+ *     -O2                        \
+ *     -I include                 \
+ *     -o plugins/my-source.wasm  \
+ *     my_source.c
+ *
+ * # zig cc
+ * zig cc -target wasm32-wasi -O2 -I include -o plugins/my-source.wasm my_source.c
+ * @endcode
+ *
+ * The three required symbols (`ttm_plugin_get_info`, `ttm_plugin_init`,
+ * `ttm_plugin_teardown`) are automatically exported by WASI toolchains when
+ * they appear at file scope without `static`.  If your toolchain requires
+ * explicit export attributes, annotate them with:
+ *
+ * @code{.c}
+ * __attribute__((visibility("default")))
+ * ttm_plugin_info* ttm_plugin_get_info(void) { ... }
+ * @endcode
+ */

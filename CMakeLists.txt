@@ -77,11 +77,24 @@ message("Loaded CPM v${CURRENT_CPM_VERSION}")
 add_subdirectory(src)
 
 ########################################################################################################################
+# Coverage                                                                                                             #
+########################################################################################################################
+option(TTM_ENABLE_COVERAGE "Enable test coverage instrumentation (GCC / Clang only)" OFF)
+if(TTM_ENABLE_COVERAGE)
+	if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+		add_compile_options(--coverage -O0 -g)
+		add_link_options(--coverage)
+	else()
+		message(WARNING "TTM_ENABLE_COVERAGE is only supported with GCC/Clang; ignoring.")
+	endif()
+endif()
+
+########################################################################################################################
 # Testing                                                                                                              #
 ########################################################################################################################
 # Testing only available if this is the main app
 # Emergency override MODERN_CMAKE_BUILD_TESTING provided as well
 if((CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME OR MODERN_CMAKE_BUILD_TESTING) AND TMM_BUILD_TESTS)
 	enable_testing()
-	# add_subdirectory(tests)
+	add_subdirectory(tests)
 endif()
