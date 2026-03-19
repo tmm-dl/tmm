@@ -3,5 +3,8 @@
     "C_Cpp.codeAnalysis.clangTidy.sourceFilter": "^(?!.*build/).*",
     "C_Cpp.codeAnalysis.clangTidy.args": [
         "-p", "${command:cmake.buildDirectory}"
-    ]
+    ],
+    "cmake.configureSettings": {
+        "TTM_BUILD_EXTENSIONS": "ON"
+    }
 }

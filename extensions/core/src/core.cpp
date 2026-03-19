@@ -23,6 +23,9 @@
  */
 
 #include <ttm/plugins/abi.h>
+#include <ttm_core_export.h>
+
+#include <curl/curl.h>
 
 #include <algorithm>
 #include <array>
@@ -257,7 +260,7 @@ namespace {
 			git_repository_free(repo);
 			if (fetchRet < 0) {
 				/* Non-fatal: might already have the ref locally */
-				git_error_clear();
+				giterr_clear();
 			}
 		}
 
@@ -294,6 +297,102 @@ namespace {
 	}
 
 	/* =========================================================================
+	 * git-lfs helpers
+	 * ====================================================================== */
+
+	/**
+	 * @brief Return true if `fp` starts with the git-lfs pointer magic.
+	 *
+	 * A git-lfs pointer file begins with the line:
+	 *   `version https://git-lfs.github.com/spec/1`
+	 * Rewinds the file position before returning.
+	 */
+	bool is_lfs_pointer(std::FILE* fp) {
+		static constexpr std::string_view kLfsMagic = "version https://git-lfs.github.com/spec/v1";
+		std::array<char, 42> buf{};
+		const std::size_t n = std::fread(buf.data(), 1, kLfsMagic.size(), fp);
+		std::rewind(fp);
+		return n == kLfsMagic.size() && std::memcmp(buf.data(), kLfsMagic.data(), kLfsMagic.size()) == 0;
+	}
+
+	/** @brief libcurl write callback: writes received bytes to a FILE*. */
+	std::size_t curl_write_cb(const char* ptr, std::size_t size, std::size_t nmemb, void* userdata) {
+		return std::fwrite(ptr, size, nmemb, static_cast<std::FILE*>(userdata));
+	}
+
+	/**
+	 * @brief Download `url` to `dest` via libcurl.
+	 * @return true on success; false with `err` filled on failure.
+	 */
+	bool curl_download(const std::string& url, const std::filesystem::path& dest, char* err, uint32_t err_cap) {
+		std::filesystem::create_directories(dest.parent_path());
+
+		std::FILE* out = std::fopen(dest.string().c_str(), "wb");
+		if (out == nullptr) {
+			std::snprintf(err, err_cap, "curl_download: cannot create '%s': %s",
+			              dest.string().c_str(), std::strerror(errno));
+			return false;
+		}
+
+		CURL* curl = curl_easy_init();
+		if (curl == nullptr) {
+			std::fclose(out);
+			std::snprintf(err, err_cap, "curl_download: curl_easy_init failed");
+			return false;
+		}
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+
+		const CURLcode rc = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+		std::fclose(out);
+
+		if (rc != CURLE_OK) {
+			std::filesystem::remove(dest);
+			std::snprintf(err, err_cap, "curl_download: %s: %s", url.c_str(), curl_easy_strerror(rc));
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * @brief Resolve a git-lfs pointer to the real file content.
+	 *
+	 * Downloads the real content from `<git_url>/resolve/<ref>/<subpath>`
+	 * and caches it at `localRepo/.ttm_lfs/<subpath>` — inside the repo's
+	 * existing XDG cache directory — so all data for one repo stays together.
+	 * On subsequent opens the cached file is returned directly.
+	 *
+	 * @return Opened FILE* on success, nullptr with `err` filled on failure.
+	 */
+	std::FILE* lfs_open(
+			const std::string& git_url, const std::string& ref, const std::string& subpath,
+			const std::filesystem::path& localRepo, char* err, uint32_t err_cap
+	) {
+		/* Stable cache path inside the repo's XDG directory */
+		const auto cachePath = localRepo / ".ttm_lfs" / subpath;
+
+		if (!std::filesystem::exists(cachePath)) {
+			/* HuggingFace resolve URL: git_url/resolve/ref/subpath */
+			const std::string resolveUrl = git_url + "/resolve/" + ref + "/" + subpath;
+			if (!curl_download(resolveUrl, cachePath, err, err_cap)) {
+				return nullptr;
+			}
+		}
+
+		std::FILE* fp = std::fopen(cachePath.string().c_str(), "rb");
+		if (fp == nullptr) {
+			std::snprintf(err, err_cap, "lfs_open: cannot open '%s': %s",
+			              cachePath.string().c_str(), std::strerror(errno));
+		}
+		return fp;
+	}
+
+	/* =========================================================================
 	 * Source vtable implementations
 	 * ====================================================================== */
 
@@ -321,6 +420,15 @@ namespace {
 					err, err_cap, "core_open: cannot open '%s': %s", filePath.string().c_str(), std::strerror(errno)
 			);
 			return TTM_INVALID_HANDLE;
+		}
+
+		/* Detect git-lfs pointer and download the real content if needed */
+		if (is_lfs_pointer(fp)) {
+			std::fclose(fp);
+			fp = lfs_open(parsed->git_url, parsed->ref, parsed->subpath, localRepo, err, err_cap);
+			if (fp == nullptr) {
+				return TTM_INVALID_HANDLE;
+			}
 		}
 
 		const auto handle = alloc_handle(fp);
@@ -356,10 +464,10 @@ namespace {
 		}
 		return static_cast<int64_t>(_ftelli64(entry->fp));
 #else
-		if (std::fseeko(entry->fp, static_cast<off_t>(offset), posixWhence) != 0) {
+		if (fseeko(entry->fp, static_cast<off_t>(offset), posixWhence) != 0) {
 			return -1;
 		}
-		return static_cast<int64_t>(std::ftello(entry->fp));
+		return static_cast<int64_t>(ftello(entry->fp));
 #endif
 	}
 
@@ -397,17 +505,17 @@ namespace {
 
 extern "C" {
 
-ttm_plugin_info* ttm_plugin_get_info(void) {
+TTM_CORE_EXPORT ttm_plugin_info* ttm_plugin_get_info(void) {
 	return &g_info;
 }
 
-ttm_error ttm_plugin_init(const ttm_host_api* host, const char* /*cfg*/, uint32_t /*len*/) {
+TTM_CORE_EXPORT ttm_error ttm_plugin_init(const ttm_host_api* host, const char* /*cfg*/, uint32_t /*len*/) {
 	git_libgit2_init();
 	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- C ABI null-terminated array
 	return host->register_source(host->ctx, g_schemes, &g_vtable);
 }
 
-void ttm_plugin_teardown(void) {
+TTM_CORE_EXPORT void ttm_plugin_teardown(void) {
 	/* Close any leftover file handles */
 	for (auto& entry : g_handles) {
 		if (entry.fp != nullptr) {

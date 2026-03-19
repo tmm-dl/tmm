@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <ttm/compat/expected.hpp>
+#include <utility>
 #include <vector>
 
 #include <yaml-cpp/yaml.h>
@@ -122,9 +123,22 @@ namespace ttm::datasets {
 					feat.kind = FeatureKind::ClassLabel;
 					feat.dtype = "class_label";
 					const auto& clNode = dtypeNode["class_label"];
-					if (clNode["names"] && clNode["names"].IsSequence()) {
-						for (const auto& n : clNode["names"]) {
-							feat.class_names.push_back(n.as<std::string>());
+					if (clNode["names"]) {
+						const auto& namesNode = clNode["names"];
+						if (namesNode.IsSequence()) {
+							for (const auto& n : namesNode) {
+								feat.class_names.push_back(n.as<std::string>());
+							}
+						} else if (namesNode.IsMap()) {
+							/* Map form: '0': uncausal, '1': causal — sort by integer key */
+							std::vector<std::pair<int, std::string>> entries;
+							for (const auto& kv : namesNode) {
+								entries.emplace_back(std::stoi(kv.first.as<std::string>()), kv.second.as<std::string>());
+							}
+							std::sort(entries.begin(), entries.end());
+							for (auto& [k, v] : entries) {
+								feat.class_names.push_back(std::move(v));
+							}
 						}
 					}
 					return feat;
@@ -192,9 +206,21 @@ namespace ttm::datasets {
 				feat.kind = FeatureKind::ClassLabel;
 				feat.dtype = "class_label";
 				const auto& clNode = node["class_label"];
-				if (clNode["names"] && clNode["names"].IsSequence()) {
-					for (const auto& n : clNode["names"]) {
-						feat.class_names.push_back(n.as<std::string>());
+				if (clNode["names"]) {
+					const auto& namesNode = clNode["names"];
+					if (namesNode.IsSequence()) {
+						for (const auto& n : namesNode) {
+							feat.class_names.push_back(n.as<std::string>());
+						}
+					} else if (namesNode.IsMap()) {
+						std::vector<std::pair<int, std::string>> entries;
+						for (const auto& kv : namesNode) {
+							entries.emplace_back(std::stoi(kv.first.as<std::string>()), kv.second.as<std::string>());
+						}
+						std::sort(entries.begin(), entries.end());
+						for (auto& [k, v] : entries) {
+							feat.class_names.push_back(std::move(v));
+						}
 					}
 				}
 			} else if (node["image"]) {
@@ -258,7 +284,8 @@ namespace ttm::datasets {
 	 * Public API
 	 * ====================================================================== */
 
-	std::expected<DatasetInfo, std::string> parse_dataset_card(const std::filesystem::path& repo_root) {
+	std::expected<DatasetInfo, std::string>
+	parse_dataset_card(const std::filesystem::path& repo_root, std::string_view config_name) {
 		/* Find the card file */
 		const std::filesystem::path readmePath = repo_root / "README.md";
 		const std::filesystem::path cardPath   = repo_root / "datasetcard.md";
@@ -304,7 +331,53 @@ namespace ttm::datasets {
 			}
 		}
 
-		/* dataset_info: may be a single mapping or a list of mappings */
+		/* configs: modern HF format with explicit data_files per split */
+		if (root["configs"] && root["configs"].IsSequence()) {
+			const auto& configs = root["configs"];
+			int chosenIdx = -1;
+			for (std::size_t i = 0; i < configs.size(); ++i) {
+				const YAML::Node cfg = configs[i];
+				if (!config_name.empty()) {
+					if (cfg["config_name"] && cfg["config_name"].as<std::string>() == config_name) {
+						chosenIdx = static_cast<int>(i);
+						break;
+					}
+				} else {
+					chosenIdx = 0; // first config
+					break;
+				}
+			}
+			if (chosenIdx < 0) {
+				return std::unexpected(
+						"parse_dataset_card: config '" + std::string(config_name) + "' not found"
+				);
+			}
+			const YAML::Node cfg = configs[chosenIdx];
+			if (cfg["config_name"]) {
+				result.config_name = cfg["config_name"].as<std::string>();
+			}
+			if (cfg["features"] && cfg["features"].IsSequence()) {
+				for (const auto& f : cfg["features"]) {
+					result.features.push_back(parse_feature(f));
+				}
+			}
+			/* data_files: [{split: train, path: ...}, ...] */
+			if (cfg["data_files"] && cfg["data_files"].IsSequence()) {
+				for (const auto& df : cfg["data_files"]) {
+					DatasetSplit sp;
+					if (df["split"]) {
+						sp.name = df["split"].as<std::string>();
+					}
+					if (df["path"]) {
+						sp.path = df["path"].as<std::string>();
+					}
+					result.splits.push_back(std::move(sp));
+				}
+			}
+			return result;
+		}
+
+		/* dataset_info: legacy HF format — single mapping or list */
 		if (root["dataset_info"]) {
 			const auto& di = root["dataset_info"];
 			if (di.IsMap()) {
@@ -315,11 +388,27 @@ namespace ttm::datasets {
 					result.config_name = info.config_name;
 				}
 			} else if (di.IsSequence() && di.size() > 0) {
-				/* Multi-config: use the first entry */
-				auto info = parse_dataset_info_node(di[0]);
-				result.features    = std::move(info.features);
-				result.splits      = std::move(info.splits);
-				result.config_name = info.config_name;
+				/* Multi-config: select by name or fall back to first */
+				int chosenIdx = -1;
+				for (std::size_t i = 0; i < di.size(); ++i) {
+					const YAML::Node entry = di[i];
+					if (!config_name.empty()) {
+						if (entry["config_name"] && entry["config_name"].as<std::string>() == config_name) {
+							chosenIdx = static_cast<int>(i);
+							break;
+						}
+					} else {
+						chosenIdx = 0;
+						break;
+					}
+				}
+				if (chosenIdx >= 0) {
+					const YAML::Node entry = di[chosenIdx];
+					auto info = parse_dataset_info_node(entry);
+					result.features    = std::move(info.features);
+					result.splits      = std::move(info.splits);
+					result.config_name = info.config_name;
+				}
 			}
 		}
 

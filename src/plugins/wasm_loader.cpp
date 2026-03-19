@@ -563,7 +563,7 @@ namespace ttm::plugins {
 			}
 
 			auto adapter = std::make_unique<WasmTaskAdapter>(
-					env, inst, nameFn, aliasesFn, inputsFn, labelFn, metricsFn, lossFn
+					env, inst, nameFn, aliasesFn, inputsFn, labelFn, metricsFn
 			);
 			if (adapter->name().empty()) {
 				return TTM_ERR_ARGS;

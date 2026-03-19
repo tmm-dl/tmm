@@ -19,6 +19,14 @@ target_link_libraries(ttm_datasets PUBLIC ttm_plugins)
 ##########################################################################################
 # Dependencies
 ##########################################################################################
+# LibGit2 — fetched here so extensions/core can reuse the same CPM instance.
+# ttm_datasets itself does notuse libgit2; only extensions/core does.
+CPMAddPackage(
+	URI "gh:libgit2/libgit2@1.8.4"
+	OPTIONS "USE_SSH OFF" "USE_HTTPS ON" "REGEX_BACKEND builtin" "USE_BUNDLED_ZLIB OFF" "BUILD_CLI OFF" "BUILD_TESTS OFF" "DEPRECATE_HARD OFF"
+	EXCLUDE_FROM_ALL YES
+)
+
 # Apache Arrow
 # DOWNLOAD_ONLY so we can fix arrow_SOURCE_DIR before add_subdirectory.
 # Arrow's ThirdpartyToolchain.cmake resolves thirdparty/ relative to
@@ -46,6 +54,7 @@ if(arrow_SOURCE_DIR)
 	set(ARROW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 	set(ARROW_PARQUET ON CACHE BOOL "" FORCE)
 	set(ARROW_IPC ON CACHE BOOL "" FORCE)
+	set(ARROW_WITH_SNAPPY ON CACHE BOOL "" FORCE)
 	# Arrow static libs must be PIC because ttm_plugins is a shared library
 	set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
 	add_subdirectory("${arrow_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/arrow-build" EXCLUDE_FROM_ALL)

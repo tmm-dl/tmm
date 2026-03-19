@@ -83,6 +83,7 @@ namespace ttm::datasets {
 	 */
 	struct DatasetSplit {
 		std::string name;                 ///< Split name, e.g. "train".
+		std::string path;                 ///< Explicit file path relative to repo root (from configs.data_files); empty if not specified.
 		int64_t     num_examples = -1;    ///< Row count, or -1 if unknown.
 		int64_t     num_bytes    = -1;    ///< Uncompressed size in bytes, or -1 if unknown.
 	};
@@ -114,14 +115,21 @@ namespace ttm::datasets {
 	 *
 	 * @details
 	 * Looks for `README.md` (preferred) or `datasetcard.md` in `repo_root`.
-	 * Extracts the YAML frontmatter block (`---\n…\n---`) and parses the
-	 * `dataset_info` mapping.
+	 * Extracts the YAML frontmatter block (`---\n…\n---`) and handles two formats:
 	 *
-	 * @param[in] repo_root  Path to the local clone of the dataset repository.
+	 * - `configs:` list (modern HF format): each entry has `config_name`,
+	 *   `data_files` (explicit split → path mappings), and `features`.
+	 * - `dataset_info:` mapping or list (legacy HF format).
+	 *
+	 * When `config_name` is non-empty the matching config is selected;
+	 * otherwise the first available config is used.
+	 *
+	 * @param[in] repo_root    Path to the local clone of the dataset repository.
+	 * @param[in] config_name  Config to select (e.g. "causality detection"); empty → first config.
 	 * @return Parsed DatasetInfo on success, or an error string on failure.
 	 */
 	[[nodiscard]] std::expected<DatasetInfo, std::string>
-	parse_dataset_card(const std::filesystem::path& repo_root);
+	parse_dataset_card(const std::filesystem::path& repo_root, std::string_view config_name = "");
 
 	/**
 	 * @brief Enumerate the data files for a given split.

@@ -83,19 +83,24 @@ namespace ttm::datasets {
 	 * @details
 	 * Loading sequence:
 	 * 1. Opens `<uri>/README.md` (or `datasetcard.md`) via the source.
-	 * 2. Parses the HuggingFace Dataset Card frontmatter.
-	 * 3. Enumerates `<split>-*.parquet` / `<split>-*.arrow` files under `data/`.
+	 * 2. Parses the HuggingFace Dataset Card frontmatter, selecting `config` if non-empty.
+	 * 3. If the selected config provides explicit `data_files` paths, uses those directly.
+	 *    Otherwise falls back to probing `<uri>/data/<split>-*.parquet` / `*.arrow`.
 	 * 4. Opens each data file via the source and wraps it in an Arrow reader.
 	 * 5. Returns a DatasetIterator that chains all shard readers.
 	 *
 	 * @param[in] source   IDatasetSource that handles the URI scheme (e.g. "hf:").
-	 * @param[in] uri      Dataset URI (e.g. "hf:ylecun/mnist").
+	 * @param[in] uri      Dataset URI (e.g. "hf:thagen/SCITE").
 	 * @param[in] split    Split name (default: "train").
+	 * @param[in] config   Config name (e.g. "causality detection"); empty → first / only config.
 	 *
 	 * @return A DatasetIterator on success, or an error string on failure.
 	 */
 	[[nodiscard]] std::expected<std::unique_ptr<DatasetIterator>, std::string> load_dataset(
-			ttm::plugins::IDatasetSource& source, std::string_view uri, std::string_view split = "train"
+			ttm::plugins::IDatasetSource& source,
+			std::string_view uri,
+			std::string_view split  = "train",
+			std::string_view config = ""
 	);
 
 } // namespace ttm::datasets

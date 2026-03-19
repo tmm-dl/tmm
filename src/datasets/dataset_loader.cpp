@@ -324,7 +324,7 @@ namespace ttm::datasets {
 	 * ====================================================================== */
 
 	std::expected<std::unique_ptr<DatasetIterator>, std::string>
-	load_dataset(plugins::IDatasetSource& source, std::string_view uri, std::string_view split) {
+	load_dataset(plugins::IDatasetSource& source, std::string_view uri, std::string_view split, std::string_view config) {
 		/* Step 1: Parse the dataset card from README.md */
 		/* Open the README.md via the source */
 		const std::string readmeUri = std::string(uri) + "/README.md";
@@ -340,29 +340,20 @@ namespace ttm::datasets {
 			}
 		}
 
-		/* Read content into a temporary file for yaml-cpp parsing */
-		/* We use as_stream() to read the card content */
+		/* Read README content, write to a temp file named README.md so
+		 * parse_dataset_card() can find it at <tmp_dir>/README.md. */
 		auto& stream = readmeReader->as_stream();
 		std::string readmeContent{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>{}};
 
-		/* Write content to a temporary file, parse it */
-		const auto tmpPath = std::filesystem::temp_directory_path() / "ttm_readme_tmp.md";
-		{
-			std::ofstream ofs(tmpPath, std::ios::binary);
-			ofs.write(readmeContent.data(), static_cast<std::streamsize>(readmeContent.size()));
-		}
-
-		auto infoResult = parse_dataset_card(tmpPath.parent_path());
-		std::filesystem::remove(tmpPath);
-
-		/* Actually parse_dataset_card expects a repo root, not a temp path.
-		 * We need to write the file as README.md in the temp dir. */
-		const auto tmpReadme = std::filesystem::temp_directory_path() / "ttm_card_tmp_README.md";
+		const auto tmpDir    = std::filesystem::temp_directory_path() / "ttm_card_tmp";
+		const auto tmpReadme = tmpDir / "README.md";
+		std::filesystem::create_directories(tmpDir);
 		{
 			std::ofstream ofs(tmpReadme, std::ios::binary);
 			ofs.write(readmeContent.data(), static_cast<std::streamsize>(readmeContent.size()));
 		}
-		infoResult = parse_dataset_card(tmpReadme.parent_path());
+
+		auto infoResult = parse_dataset_card(tmpDir, config);
 		std::filesystem::remove(tmpReadme);
 
 		if (!infoResult) {
@@ -371,52 +362,38 @@ namespace ttm::datasets {
 		const DatasetInfo& info = *infoResult;
 
 		/* Step 2: Enumerate split files via the source */
-		/* For URI-based sources the split files are at: uri/data/<split>-*.parquet */
-		const std::string splitPrefix = std::string(split) + "-";
 		std::vector<std::string> shardUris;
 
-		/* We can't use filesystem::directory_iterator on a remote source.
-		 * Use find_split_files only if we have a local path — otherwise try
-		 * listing by checking known sharding patterns. */
-		/* Strategy: if the source supports listing, great. Otherwise, probe
-		 * common shard file patterns (0-of-N, etc.). For now, we attempt to
-		 * open a fixed set of patterns and fall back gracefully.
-		 * A proper listing API would be added to IDatasetSource in a future revision. */
-
-		/* Try to probe for shards: <split>-00000-of-NNNNN.parquet, … */
-		/* Open shards until the first 404 */
-		for (int shard = 0; shard < 9999; ++shard) {
-			const auto shardName = std::format("{:05d}", shard);
-			/* Try .parquet first, then .arrow */
-			bool found = false;
-			for (const char* ext : {".parquet", ".arrow"}) {
-				/* Pattern: <split>-NNNNN-of-MMMMM.<ext> or <split>-NNNNN.<ext> */
-				for (const auto& pattern : {
-						std::string(split) + "-" + shardName + ext,
-						std::string(split) + "-" + shardName + "-of-" /* partial; probed below */
-				}) {
-					if (pattern.ends_with("-of-")) {
-						break; // skip partial pattern sentinel
-					}
-					const std::string shardUri = std::string(uri) + "/data/" + pattern;
-					auto probe = source.open(shardUri);
-					if (probe) {
-						shardUris.push_back(std::string(uri) + "/data/" + pattern);
-						found = true;
-						break;
-					}
-				}
-				if (found) {
-					break;
-				}
-			}
-			if (!found) {
-				break;
+		/* If the card provides explicit data_files paths, use them directly */
+		for (const auto& sp : info.splits) {
+			if (sp.name == split && !sp.path.empty()) {
+				shardUris.push_back(std::string(uri) + "/" + sp.path);
 			}
 		}
 
 		if (shardUris.empty()) {
-			/* Fallback: try single-file split */
+			/* Fallback: probe standard HF sharding pattern data/<split>-NNNNN-of-MMMMM.<ext> */
+			for (int shard = 0; shard < 9999; ++shard) {
+				const auto shardName = std::format("{:05d}", shard);
+				bool found = false;
+				for (const char* ext : {".parquet", ".arrow"}) {
+					const std::string pattern = std::string(split) + "-" + shardName + ext;
+					const std::string shardUri = std::string(uri) + "/data/" + pattern;
+					auto probe = source.open(shardUri);
+					if (probe) {
+						shardUris.push_back(shardUri);
+						found = true;
+						break;
+					}
+				}
+				if (!found) {
+					break;
+				}
+			}
+		}
+
+		if (shardUris.empty()) {
+			/* Last resort: single-file split */
 			for (const char* ext : {".parquet", ".arrow"}) {
 				const std::string singleUri = std::string(uri) + "/data/" + std::string(split) + ext;
 				auto probe = source.open(singleUri);

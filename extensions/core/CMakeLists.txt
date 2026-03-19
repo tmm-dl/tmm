@@ -7,12 +7,19 @@ target_compile_features(ttm_core PRIVATE cxx_std_23)
 
 target_include_directories(ttm_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 set_target_properties(ttm_core PROPERTIES
     PREFIX ""
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
+)
+
+include(GenerateExportHeader)
+generate_export_header(ttm_core
+    EXPORT_FILE_NAME ttm_core_export.h
+    EXPORT_MACRO_NAME TTM_CORE_EXPORT
 )
 
 # ---------------------------------------------------------------------------
@@ -30,5 +37,9 @@ if(NOT TARGET libgit2)
 endif()
 
 target_link_libraries(ttm_core PRIVATE libgit2 libgit2package)
+
+# libcurl — for downloading git-lfs objects that libgit2 does not fetch.
+find_package(CURL REQUIRED)
+target_link_libraries(ttm_core PRIVATE CURL::libcurl)
 
 install(TARGETS ttm_core DESTINATION .)

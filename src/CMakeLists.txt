@@ -13,6 +13,14 @@ add_subdirectory(datasets)
 add_subdirectory(plugins)
 target_link_libraries(ttm PRIVATE ttm_datasets ttm_plugins)
 
+# Arrow headers are PRIVATE to ttm_datasets; expose them to the main executable
+# so main.cpp can use arrow::RecordBatch / arrow::Schema directly.
+if(arrow_SOURCE_DIR)
+	target_include_directories(ttm PRIVATE
+		"${arrow_SOURCE_DIR}/src"
+		"${CMAKE_BINARY_DIR}/_deps/arrow-build/src")
+endif()
+
 # spdlog
 CPMAddPackage(
 	URI "gh:gabime/spdlog@1.15.3"
