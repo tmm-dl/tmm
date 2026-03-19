@@ -5,22 +5,20 @@ target_sources(ttm_datasets
         FILE_SET ttm_datasets_headers
         TYPE HEADERS
         BASE_DIRS
-            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/datasets
+            ${CMAKE_CURRENT_LIST_DIR}/../../include
     PRIVATE
         datasets.cpp
+        dataset_info.cpp
+        dataset_loader.cpp
 )
+
+target_compile_features(ttm_datasets PRIVATE cxx_std_23)
+target_include_directories(ttm_datasets PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_link_libraries(ttm_datasets PUBLIC ttm_plugins)
 
 ##########################################################################################
 # Dependencies
 ##########################################################################################
-# LibGit
-CPMAddPackage(
-	URI "gh:libgit2/libgit2@1.8.4"
-	OPTIONS "USE_SSH OFF" "USE_HTTPS OFF" "REGEX_BACKEND builtin" "USE_BUNDLED_ZLIB OFF" "BUILD_CLI OFF" "BUILD_TESTS OFF" "DEPRECATE_HARD OFF"
-	EXCLUDE_FROM_ALL YES
-)
-target_link_libraries(ttm_datasets PRIVATE libgit2 libgit2package)
-
 # Apache Arrow
 # DOWNLOAD_ONLY so we can fix arrow_SOURCE_DIR before add_subdirectory.
 # Arrow's ThirdpartyToolchain.cmake resolves thirdparty/ relative to
@@ -46,7 +44,24 @@ if(arrow_SOURCE_DIR)
 	set(ARROW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 	set(ARROW_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 	set(ARROW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+	set(ARROW_PARQUET ON CACHE BOOL "" FORCE)
+	set(ARROW_IPC ON CACHE BOOL "" FORCE)
+	# Arrow static libs must be PIC because ttm_plugins is a shared library
+	set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
 	add_subdirectory("${arrow_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/arrow-build" EXCLUDE_FROM_ALL)
+	# Arrow uses include_directories() (not target_include_directories), so its
+	# INTERFACE_INCLUDE_DIRECTORIES are not propagated to consumers.  Add them explicitly.
+	target_include_directories(ttm_datasets PRIVATE
+		"${arrow_SOURCE_DIR}/src"
+		"${CMAKE_BINARY_DIR}/_deps/arrow-build/src")
 endif()
-target_link_libraries(ttm_datasets PRIVATE arrow_static)
+target_link_libraries(ttm_datasets PRIVATE arrow_static parquet_static)
+
+# yaml-cpp — for HuggingFace Dataset Card frontmatter parsing
+CPMAddPackage(
+	URI "gh:jbeder/yaml-cpp#yaml-cpp-0.9.0"
+	OPTIONS "YAML_CPP_BUILD_TESTS OFF" "YAML_CPP_BUILD_TOOLS OFF" "YAML_CPP_INSTALL OFF"
+	EXCLUDE_FROM_ALL YES
+)
+target_link_libraries(ttm_datasets PRIVATE yaml-cpp::yaml-cpp)
 

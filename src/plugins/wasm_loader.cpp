@@ -9,6 +9,8 @@
 
 #include "wasm_loader.hpp"
 
+#include "plugin_ctx.hpp"
+
 #include <ttm/plugins/abi.h>
 
 #include <array>
@@ -19,7 +21,9 @@
 #include <format>
 #include <fstream>
 #include <ios>
+#include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <ttm/compat/expected.hpp>
@@ -31,9 +35,9 @@
 namespace ttm::plugins {
 
 	/* =========================================================================
- * Runtime init / destroy — refcounted so multiple PluginManager instances
- * (e.g. in unit tests) are safe.
- * ====================================================================== */
+	 * Runtime init / destroy — refcounted so multiple PluginManager instances
+	 * (e.g. in unit tests) are safe.
+	 * ====================================================================== */
 
 	namespace {
 		// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- module-level refcount is intentionally mutable; no alternative without dynamic allocation or thread_local
@@ -62,8 +66,8 @@ namespace ttm::plugins {
 	}
 
 	/* =========================================================================
- * String helpers
- * ====================================================================== */
+	 * String helpers
+	 * ====================================================================== */
 
 	std::expected<void, std::string>
 	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- out_wasm_ptr and out_len are output parameters with distinct semantics (WASM address vs byte count); names make this clear
@@ -83,17 +87,372 @@ namespace ttm::plugins {
 	}
 
 	/* =========================================================================
- * Host import registrations
- *
- * These are the functions exported by the host under the "ttm" module
- * namespace.  They are registered before the WASM module is instantiated so
- * that the linker can resolve the plugin's imports.
- *
- * Signature strings use WAMR's compact notation:
- *   i = i32, I = i64, f = f32, F = f64, * = pointer (i32 in wasm32)
- * ====================================================================== */
+	 * WASM adapter types
+	 *
+	 * These wrap plugin-side function-table indices so that host code can call
+	 * back into a WASM plugin through the standard IDatasetSource / ITask
+	 * C++ interfaces.
+	 * ====================================================================== */
 
 	namespace {
+
+		/**
+		 * @brief Pack an i64 value into two consecutive uint32_t argv slots.
+		 * @param[out] lo  Low 32 bits.
+		 * @param[out] hi  High 32 bits.
+		 */
+		static void pack_i64(uint32_t& lo, uint32_t& hi, int64_t val) {
+			const auto u = static_cast<uint64_t>(val);
+			lo = static_cast<uint32_t>(u & 0xFFFF'FFFFu);
+			hi = static_cast<uint32_t>(u >> 32u);
+		}
+
+		/** @brief Unpack an i64 from two consecutive uint32_t argv slots. */
+		static int64_t unpack_i64(uint32_t lo, uint32_t hi) {
+			return static_cast<int64_t>((static_cast<uint64_t>(hi) << 32u) | static_cast<uint64_t>(lo));
+		}
+
+		/**
+		 * @brief Call a WASM function-table entry and return void.
+		 * @tparam N  Number of 32-bit argument slots.
+		 */
+		template <std::size_t N>
+		static void call_indirect_void(wasm_exec_env_t env, uint32_t elem_idx, std::array<uint32_t, N>& argv) {
+			wasm_runtime_call_indirect(
+					env, elem_idx, static_cast<uint32_t>(N), argv.data()
+			); // NOLINT(readability-implicit-bool-conversion) -- WAMR bool-like return ignored; errors surfaced via exceptions / return values
+		}
+
+		/**
+		 * @brief Call a WASM function-table entry and return the i32 result in argv[0].
+		 */
+		template <std::size_t N>
+		static uint32_t call_indirect_i32(wasm_exec_env_t env, uint32_t elem_idx, std::array<uint32_t, N>& argv) {
+			wasm_runtime_call_indirect(env, elem_idx, static_cast<uint32_t>(N), argv.data());
+			return argv[0];
+		}
+
+		/**
+		 * @brief Call a WASM function-table entry and return the i64 result (argv[0..1]).
+		 */
+		template <std::size_t N>
+		static int64_t call_indirect_i64(wasm_exec_env_t env, uint32_t elem_idx, std::array<uint32_t, N>& argv) {
+			wasm_runtime_call_indirect(env, elem_idx, static_cast<uint32_t>(N), argv.data());
+			return unpack_i64(argv[0], argv[1]);
+		}
+
+		/**
+		 * @brief Read a NUL-terminated C string from WASM linear memory into std::string.
+		 * @return Empty string if wasm_ptr is 0 or the address is invalid.
+		 */
+		static std::string read_wasm_cstr(wasm_module_inst_t inst, uint32_t wasm_ptr) {
+			if (wasm_ptr == 0) {
+				return {};
+			}
+			const auto* native = static_cast<const char*>(wasm_runtime_addr_app_to_native(inst, wasm_ptr));
+			if (native == nullptr) {
+				return {};
+			}
+			return std::string(native);
+		}
+
+		/**
+		 * @brief Walk a WASM null-terminated i32[] array of string pointers.
+		 * @return Vector of host-side std::string copies.
+		 */
+		static std::vector<std::string> read_wasm_string_array(wasm_module_inst_t inst, uint32_t arr_wasm_ptr) {
+			std::vector<std::string> result;
+			if (arr_wasm_ptr == 0) {
+				return result;
+			}
+			const auto* arr = static_cast<const uint32_t*>(wasm_runtime_addr_app_to_native(inst, arr_wasm_ptr));
+			if (arr == nullptr) {
+				return result;
+			}
+			// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- null-terminated WASM array; bounds are checked by the null sentinel
+			for (const uint32_t* p = arr; *p != 0; ++p) {
+				result.push_back(read_wasm_cstr(inst, *p));
+			}
+			return result;
+		}
+
+		/* -----------------------------------------------------------------
+		 * WasmByteReader
+		 * ---------------------------------------------------------------- */
+
+		/**
+		 * @brief IByteReader that calls back into a WASM plugin via function-table indices.
+		 *
+		 * @details
+		 * Buffers for read/seek operations are allocated in WASM linear memory for
+		 * each call and freed immediately after, to avoid accumulating heap usage.
+		 */
+		class WasmByteReader final : public IByteReader {
+		public:
+			/**
+			 * @param[in] env       WASM execution environment (owned by Plugin).
+			 * @param[in] inst      WASM module instance (owned by Plugin).
+			 * @param[in] handle    ttm_handle returned by the source's open() function.
+			 * @param[in] readIdx   Function-table index of the read() function.
+			 * @param[in] seekIdx   Function-table index of the seek() function (0 = not exported).
+			 * @param[in] closeIdx  Function-table index of the close() function.
+			 */
+			WasmByteReader(
+					wasm_exec_env_t env, wasm_module_inst_t inst, ttm_handle handle, uint32_t readIdx, uint32_t seekIdx,
+					uint32_t closeIdx
+			)
+					: env(env), inst(inst), handle(handle), readIdx(readIdx), seekIdx(seekIdx), closeIdx(closeIdx) {}
+
+			WasmByteReader(const WasmByteReader&) = delete;
+			WasmByteReader& operator=(const WasmByteReader&) = delete;
+			WasmByteReader(WasmByteReader&&) = delete;
+			WasmByteReader& operator=(WasmByteReader&&) = delete;
+
+			~WasmByteReader() override {
+				if (handle != TTM_INVALID_HANDLE && closeIdx != 0) {
+					std::array<uint32_t, 2> argv{};
+					pack_i64(argv[0], argv[1], handle);
+					call_indirect_void(env, closeIdx, argv);
+				}
+			}
+
+			std::streamsize read(std::byte* hostBuf, std::streamsize n) override {
+				if (readIdx == 0 || n <= 0) {
+					return 0;
+				}
+				/* Allocate a WASM-side buffer */
+				void* wasmNative = nullptr;
+				const uint32_t wasmBuf = wasm_runtime_module_malloc(inst, static_cast<uint32_t>(n), &wasmNative);
+				if (wasmBuf == 0) {
+					return -1;
+				}
+
+				/* argv: [handle_lo, handle_hi, buf_wasm_ptr, len] */
+				std::array<uint32_t, 4> argv{};
+				pack_i64(argv[0], argv[1], handle);
+				argv[2] = wasmBuf;
+				argv[3] = static_cast<uint32_t>(n);
+				const auto nRead = static_cast<std::streamsize>(call_indirect_i32(env, readIdx, argv));
+
+				/* Copy result to host buffer */
+				if (nRead > 0 && wasmNative != nullptr) {
+					std::memcpy(hostBuf, wasmNative, static_cast<std::size_t>(nRead));
+				}
+				wasm_runtime_module_free(inst, wasmBuf);
+				return nRead;
+			}
+
+			[[nodiscard]] bool seekable() const noexcept override { return seekIdx != 0; }
+
+			std::streampos seek(std::streamoff off, std::ios_base::seekdir dir) override {
+				if (seekIdx == 0) {
+					return {std::streamoff{-1}};
+				}
+				int32_t whence = 0;
+				switch (dir) {
+				case std::ios_base::beg:
+					whence = 0;
+					break;
+				case std::ios_base::cur:
+					whence = 1;
+					break;
+				case std::ios_base::end:
+					whence = 2;
+					break;
+				default:
+					return {std::streamoff{-1}};
+				}
+				/* argv: [handle_lo, handle_hi, off_lo, off_hi, whence] */
+				/* Return: i64 in argv[0..1] */
+				std::array<uint32_t, 5> argv{};
+				pack_i64(argv[0], argv[1], handle);
+				pack_i64(argv[2], argv[3], static_cast<int64_t>(off));
+				argv[4] = static_cast<uint32_t>(whence);
+				const auto pos = call_indirect_i64(env, seekIdx, argv);
+				return (pos < 0) ? std::streampos{std::streamoff{-1}}
+								 : std::streampos{static_cast<std::streamoff>(pos)};
+			}
+
+		private:
+			wasm_exec_env_t env;
+			wasm_module_inst_t inst;
+			ttm_handle handle;
+			uint32_t readIdx;
+			uint32_t seekIdx;
+			uint32_t closeIdx;
+		};
+
+		/* -----------------------------------------------------------------
+		 * WasmSourceAdapter
+		 * ---------------------------------------------------------------- */
+
+		/**
+		 * @brief IDatasetSource backed by a WASM plugin's ttm_source_vtable.
+		 *
+		 * @details
+		 * Holds function-table indices extracted from the vtable struct in WASM
+		 * linear memory.  All WASM calls are made through the env/inst pair that
+		 * is owned by the plugin's Plugin record, which lives as long as the
+		 * PluginManager.
+		 */
+		class WasmSourceAdapter final : public IDatasetSource {
+		public:
+			/**
+			 * @param[in] schemeList  Schemes this source handles.
+			 * @param[in] env         WASM execution environment (owned by Plugin).
+			 * @param[in] inst        WASM module instance (owned by Plugin).
+			 * @param[in] openIdx     Function-table index for open().
+			 * @param[in] readIdx     Function-table index for read().
+			 * @param[in] seekIdx     Function-table index for seek() (0 = not exported).
+			 * @param[in] closeIdx    Function-table index for close().
+			 */
+			WasmSourceAdapter(
+					std::vector<std::string> schemeList, wasm_exec_env_t env, wasm_module_inst_t inst, uint32_t openIdx,
+					uint32_t readIdx, uint32_t seekIdx, uint32_t closeIdx
+			)
+					: schemeList(std::move(schemeList)), env(env), inst(inst), openIdx(openIdx), readIdx(readIdx),
+					  seekIdx(seekIdx), closeIdx(closeIdx) {}
+
+			[[nodiscard]] std::vector<std::string> schemes() const override { return schemeList; }
+
+			std::unique_ptr<IByteReader> open(std::string_view uri) override {
+				if (openIdx == 0) {
+					return nullptr;
+				}
+				/* Push URI into WASM memory */
+				uint32_t uriWasmPtr = 0;
+				uint32_t uriLen = 0;
+				if (!wasm_push_string(inst, uri, uriWasmPtr, uriLen)) {
+					return nullptr;
+				}
+
+				/* Allocate error buffer in WASM memory */
+				constexpr uint32_t kErrBufCap = 256;
+				void* errNative = nullptr;
+				const uint32_t errWasmPtr = wasm_runtime_module_malloc(inst, kErrBufCap, &errNative);
+
+				ttm_handle handle = TTM_INVALID_HANDLE;
+				if (errWasmPtr != 0) {
+					/* argv: [uri_wasm_ptr, uri_len, err_wasm_ptr, err_cap] — returns i64 */
+					std::array<uint32_t, 4> argv{uriWasmPtr, uriLen, errWasmPtr, kErrBufCap};
+					handle = call_indirect_i64(env, openIdx, argv);
+
+					if (handle == TTM_INVALID_HANDLE && errNative != nullptr) {
+						std::cerr << "[ttm] WasmSourceAdapter::open error: " << static_cast<const char*>(errNative)
+								  << '\n';
+					}
+					wasm_runtime_module_free(inst, errWasmPtr);
+				}
+				wasm_runtime_module_free(inst, uriWasmPtr);
+
+				if (handle == TTM_INVALID_HANDLE) {
+					return nullptr;
+				}
+				return std::make_unique<WasmByteReader>(env, inst, handle, readIdx, seekIdx, closeIdx);
+			}
+
+		private:
+			std::vector<std::string> schemeList;
+			wasm_exec_env_t env;
+			wasm_module_inst_t inst;
+			uint32_t openIdx;
+			uint32_t readIdx;
+			uint32_t seekIdx;
+			uint32_t closeIdx;
+		};
+
+		/* -----------------------------------------------------------------
+		 * WasmTaskAdapter
+		 * ---------------------------------------------------------------- */
+
+		/**
+		 * @brief ITask backed by a WASM plugin's ttm_task_vtable.
+		 *
+		 * @details
+		 * Task vtable functions return pointers to WASM static strings.  We call
+		 * them once at construction time and cache the results as std::string so
+		 * that the ITask interface returns stable string_view values.
+		 */
+		class WasmTaskAdapter final : public ITask {
+		public:
+			/**
+			 * @brief Construct by calling each vtable function on the WASM plugin.
+			 *
+			 * @param[in] env      WASM execution environment.
+			 * @param[in] inst     WASM module instance.
+			 * @param[in] nameFn   Function-table index for name().
+			 * @param[in] aliasesFn    Function-table index for aliases().
+			 * @param[in] inputsFn     Function-table index for input_features().
+			 * @param[in] labelFn      Function-table index for label_feature().
+			 * @param[in] metricsFn    Function-table index for default_metrics().
+			 */
+			WasmTaskAdapter(
+					wasm_exec_env_t env, wasm_module_inst_t inst, uint32_t nameFn, uint32_t aliasesFn,
+					uint32_t inputsFn, uint32_t labelFn, uint32_t metricsFn
+			) {
+				auto callStr = [&](uint32_t fn) -> std::string {
+					if (fn == 0) {
+						return {};
+					}
+					std::array<uint32_t, 1> argv{};
+					call_indirect_i32(env, fn, argv);
+					return read_wasm_cstr(inst, argv[0]);
+				};
+
+				auto callStrArr = [&](uint32_t fn) -> std::vector<std::string> {
+					if (fn == 0) {
+						return {};
+					}
+					std::array<uint32_t, 1> argv{};
+					call_indirect_i32(env, fn, argv);
+					return read_wasm_string_array(inst, argv[0]);
+				};
+
+				nameStr = callStr(nameFn);
+				labelStr = callStr(labelFn);
+				aliasStrs = callStrArr(aliasesFn);
+				inputStrs = callStrArr(inputsFn);
+				metricStrs = callStrArr(metricsFn);
+			}
+
+			[[nodiscard]] std::string_view name() const override { return nameStr; }
+
+			[[nodiscard]] std::vector<std::string_view> aliases() const override {
+				std::vector<std::string_view> v;
+				v.reserve(aliasStrs.size());
+				for (const auto& s : aliasStrs) {
+					v.emplace_back(s);
+				}
+				return v;
+			}
+
+			[[nodiscard]] std::vector<std::string_view> input_features() const override {
+				std::vector<std::string_view> v;
+				v.reserve(inputStrs.size());
+				for (const auto& s : inputStrs) {
+					v.emplace_back(s);
+				}
+				return v;
+			}
+
+			[[nodiscard]] std::string_view label_feature() const override { return labelStr; }
+
+			[[nodiscard]] std::vector<std::string_view> default_metrics() const override {
+				std::vector<std::string_view> v;
+				v.reserve(metricStrs.size());
+				for (const auto& s : metricStrs) {
+					v.emplace_back(s);
+				}
+				return v;
+			}
+
+		private:
+			std::string nameStr;
+			std::string labelStr;
+			std::vector<std::string> aliasStrs;
+			std::vector<std::string> inputStrs;
+			std::vector<std::string> metricStrs;
+		};
 
 		/* ---------- log --------------------------------------------------------- */
 		// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- signature is fixed by WAMR NativeSymbol ABI; parameter names clearly distinguish them
@@ -124,11 +483,94 @@ namespace ttm::plugins {
 		}
 
 		/* ---------- register_source -------------------------------------------- */
-		int32_t host_register_source(wasm_exec_env_t /*env*/, uint32_t /*schemes_ptr*/, uint32_t /*vtable_ptr*/) {
-			/* TODO: unmarshal the scheme list and vtable from WASM linear memory,
-     * construct a CSourceAdapter, and forward to PluginManager via the
-     * ttm_host_api ctx.  Stubbed for the initial build. */
-			return TTM_ERR_UNSUPPORTED;
+		int32_t host_register_source(wasm_exec_env_t env, uint32_t schemes_ptr, uint32_t vtable_ptr) {
+			auto* inst = wasm_runtime_get_module_inst(env);
+			if (schemes_ptr == 0 || vtable_ptr == 0) {
+				return TTM_ERR_ARGS;
+			}
+
+			/* Read scheme list from WASM memory */
+			auto schemeList = read_wasm_string_array(inst, schemes_ptr);
+			if (schemeList.empty()) {
+				return TTM_ERR_ARGS;
+			}
+
+			/* Read vtable function-table indices from WASM memory.
+			 * In WASM32 each function-pointer field is a uint32_t. */
+			const auto* vtNative = static_cast<const uint32_t*>(wasm_runtime_addr_app_to_native(inst, vtable_ptr));
+			if (vtNative == nullptr) {
+				return TTM_ERR_ARGS;
+			}
+			/* Layout: [open_idx, read_idx, seek_idx, close_idx] */
+			uint32_t openIdx = 0;
+			uint32_t readIdx = 0;
+			uint32_t seekIdx = 0;
+			uint32_t closeIdx = 0;
+			std::memcpy(&openIdx, vtNative + 0, sizeof(uint32_t));
+			std::memcpy(&readIdx, vtNative + 1, sizeof(uint32_t));
+			std::memcpy(&seekIdx, vtNative + 2, sizeof(uint32_t));
+			std::memcpy(&closeIdx, vtNative + 3, sizeof(uint32_t));
+
+			/* Retrieve the registration context */
+			const auto* hostApi = static_cast<const ttm_host_api*>(wasm_runtime_get_user_data(env));
+			if (hostApi == nullptr || hostApi->ctx == nullptr) {
+				return TTM_ERR_ARGS;
+			}
+			auto* regCtx = static_cast<PluginRegistrationCtx*>(hostApi->ctx);
+			if (!regCtx->attach_source) {
+				return TTM_ERR_ARGS;
+			}
+
+			auto adapter = std::make_unique<WasmSourceAdapter>(
+					std::move(schemeList), env, inst, openIdx, readIdx, seekIdx, closeIdx
+			);
+			regCtx->attach_source(std::move(adapter));
+			return TTM_OK;
+		}
+
+		/* ---------- register_task ---------------------------------------------- */
+		int32_t host_register_task(wasm_exec_env_t env, uint32_t name_ptr, uint32_t vtable_ptr) {
+			auto* inst = wasm_runtime_get_module_inst(env);
+			if (name_ptr == 0 || vtable_ptr == 0) {
+				return TTM_ERR_ARGS;
+			}
+
+			/* Read vtable function-table indices (6 × uint32_t) */
+			const auto* vtNative = static_cast<const uint32_t*>(wasm_runtime_addr_app_to_native(inst, vtable_ptr));
+			if (vtNative == nullptr) {
+				return TTM_ERR_ARGS;
+			}
+			uint32_t nameFn = 0;
+			uint32_t aliasesFn = 0;
+			uint32_t inputsFn = 0;
+			uint32_t labelFn = 0;
+			uint32_t metricsFn = 0;
+			uint32_t lossFn = 0;
+			std::memcpy(&nameFn, vtNative + 0, sizeof(uint32_t));
+			std::memcpy(&aliasesFn, vtNative + 1, sizeof(uint32_t));
+			std::memcpy(&inputsFn, vtNative + 2, sizeof(uint32_t));
+			std::memcpy(&labelFn, vtNative + 3, sizeof(uint32_t));
+			std::memcpy(&metricsFn, vtNative + 4, sizeof(uint32_t));
+			std::memcpy(&lossFn, vtNative + 5, sizeof(uint32_t));
+
+			const auto* hostApi = static_cast<const ttm_host_api*>(wasm_runtime_get_user_data(env));
+			if (hostApi == nullptr || hostApi->ctx == nullptr) {
+				return TTM_ERR_ARGS;
+			}
+			auto* regCtx = static_cast<PluginRegistrationCtx*>(hostApi->ctx);
+			if (!regCtx->attach_task) {
+				return TTM_ERR_ARGS;
+			}
+
+			auto adapter = std::make_unique<WasmTaskAdapter>(
+					env, inst, nameFn, aliasesFn, inputsFn, labelFn, metricsFn, lossFn
+			);
+			if (adapter->name().empty()) {
+				return TTM_ERR_ARGS;
+			}
+
+			regCtx->attach_task(std::move(adapter));
+			return TTM_OK;
 		}
 
 		/* ---------- NativeSymbol table ----------------------------------------- */
@@ -143,13 +585,15 @@ namespace ttm::plugins {
 				{"ttm_free", reinterpret_cast<void*>(host_free), "(i)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
 				{"ttm_register_source", reinterpret_cast<void*>(host_register_source), "(ii)i", nullptr},
+				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
+				{"ttm_register_task", reinterpret_cast<void*>(host_register_task), "(ii)i", nullptr},
 		};
 
 	} // anonymous namespace
 
 	/* =========================================================================
- * Load / unload
- * ====================================================================== */
+	 * Load / unload
+	 * ====================================================================== */
 
 	std::expected<void, std::string> wasm_loader_load(
 			const std::filesystem::path& path, std::string_view config_json, const ttm_host_api& host_api,
@@ -166,7 +610,7 @@ namespace ttm::plugins {
 		// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay,cppcoreguidelines-pro-bounds-constant-array-index) -- WAMR API requires array-to-pointer decay for NativeSymbol table
 		if (!wasm_runtime_register_natives( // NOLINT(readability-implicit-bool-conversion) -- WAMR API returns bool-like int
 					"ttm", ttm_native_symbols, sizeof(ttm_native_symbols) / sizeof(ttm_native_symbols[0]) // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-			)) {
+				)) {
 			return std::unexpected("wasm_loader_load: failed to register host symbols");
 		}
 

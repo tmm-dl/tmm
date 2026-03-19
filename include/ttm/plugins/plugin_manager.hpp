@@ -155,6 +155,17 @@ namespace ttm::plugins {
          */
 		[[nodiscard]] IDatasetSource* find_source(std::string_view scheme) const;
 
+		/**
+         * @brief Look up a registered ML task by canonical name or alias.
+         *
+         * @param[in] name_or_alias  Task name or alias (e.g. `"text-classification"`, `"tc"`).
+         * @return Non-owning pointer to the task, or `nullptr` if not found.
+         *         Valid for the lifetime of this PluginManager.
+         *
+         * @see ITask
+         */
+		[[nodiscard]] ITask* find_task(std::string_view name_or_alias) const;
+
 		/** @} */
 
 		/* =====================================================================
@@ -238,19 +249,34 @@ namespace ttm::plugins {
 		/** @brief Private default constructor — use create() instead. */
 		PluginManager() = default;
 
-		/** @brief Internal per-plugin state — defined in plugin_manager.cpp. */
+		/** @brief Internal per-plugin state for WASM plugins — defined in plugin_manager.cpp. */
 		struct Plugin;
 
-		/** @brief Loaded plugins, in load order. */
+		/** @brief Internal per-plugin state for native plugins — defined in native_loader.hpp. */
+		struct NativePlugin;
+
+		/** @brief Loaded WASM plugins, in load order. */
 		std::vector<std::unique_ptr<Plugin>> plugins;
+
+		/** @brief Loaded native shared-library plugins, in load order. */
+		std::vector<std::unique_ptr<NativePlugin>> nativePlugins;
 
 		/**
          * @brief Source registry: scheme string → non-owning source pointer.
          *
-         * Sources are owned by their Plugin record; this map holds raw pointers
-         * for O(1) scheme lookup.
+         * Sources are owned by their Plugin / NativePlugin record; this map holds
+         * raw pointers for O(1) scheme lookup.
          */
 		std::unordered_map<std::string, IDatasetSource*> sourceRegistry;
+
+		/**
+         * @brief Task registry: name/alias string → non-owning task pointer.
+         *
+         * Tasks are owned by their Plugin / NativePlugin record; this map holds
+         * raw pointers for O(1) name lookup.  Both canonical names and aliases are
+         * inserted as separate keys mapping to the same ITask*.
+         */
+		std::unordered_map<std::string, ITask*> taskRegistry;
 
 		/**
          * @brief True if this instance owns a WAMR runtime reference.
@@ -262,7 +288,7 @@ namespace ttm::plugins {
 		bool wamrRefOwned = false;
 
 		/* -----------------------------------------------------------------
-         * Static host API callbacks (ctx == PluginManager*)
+         * Static host API callbacks (ctx == PluginRegistrationCtx*)
          * -------------------------------------------------------------- */
 
 		/// @private
@@ -282,18 +308,29 @@ namespace ttm::plugins {
 		/// @private
 		static void s_free(void* ctx, void* ptr);
 
+		/** @brief Forward declaration — full type in plugin_ctx.hpp. */
+		struct PluginRegistrationCtx;
+
 		/**
-         * @brief Construct a #ttm_host_api struct that points back to this manager.
+         * @brief Construct a #ttm_host_api struct pointing to the given ctx.
+         * @param[in] ctx  Registration context for the plugin currently being loaded.
          * @return Fully populated host API struct.
          */
-		ttm_host_api make_host_api();
+		ttm_host_api make_host_api(PluginRegistrationCtx& ctx);
 
 		/**
          * @brief Register a source object into the scheme registry.
-         * @param[in] src    Source to register (ownership transferred).
-         * @param[in] owner  Plugin record that produced this source.
+         * @param[in] src  Source to register (ownership transferred to the owning plugin record).
+         * @param[in] ctx  Registration context identifying which plugin receives ownership.
          */
-		void register_source_impl(std::unique_ptr<IDatasetSource> src, Plugin* owner);
+		void register_source_impl(std::unique_ptr<IDatasetSource> src, PluginRegistrationCtx& ctx);
+
+		/**
+         * @brief Register a task object into the task registry.
+         * @param[in] task  Task to register (ownership transferred to the owning plugin record).
+         * @param[in] ctx   Registration context identifying which plugin receives ownership.
+         */
+		void register_task_impl(std::unique_ptr<ITask> task, PluginRegistrationCtx& ctx);
 	};
 
 } // namespace ttm::plugins

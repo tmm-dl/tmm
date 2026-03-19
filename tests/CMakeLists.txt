@@ -9,12 +9,14 @@ CPMAddPackage(URI "gh:catchorg/Catch2@3.8.0" EXCLUDE_FROM_ALL YES)
 add_executable(ttm_tests
     plugins/test_byte_reader.cpp
     plugins/test_plugin_manager.cpp
+    datasets/test_dataset_info.cpp
 )
 
 target_compile_features(ttm_tests PRIVATE cxx_std_23)
 
 target_link_libraries(ttm_tests PRIVATE
     ttm_plugins
+    ttm_datasets
     Catch2::Catch2WithMain
 )
 

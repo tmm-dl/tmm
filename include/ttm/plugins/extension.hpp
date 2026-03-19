@@ -66,13 +66,13 @@ namespace ttm::plugins {
  */
 	class IByteReader {
 	public:
-		IByteReader()          = default;
+		IByteReader() = default;
 		virtual ~IByteReader();
 
-		IByteReader(const IByteReader&)            = delete;
+		IByteReader(const IByteReader&) = delete;
 		IByteReader& operator=(const IByteReader&) = delete;
-		IByteReader(IByteReader&&)                 = delete;
-		IByteReader& operator=(IByteReader&&)      = delete;
+		IByteReader(IByteReader&&) = delete;
+		IByteReader& operator=(IByteReader&&) = delete;
 
 		/**
      * @brief Read up to `n` bytes from the stream.
@@ -169,13 +169,13 @@ namespace ttm::plugins {
  */
 	class IDatasetSource {
 	public:
-		IDatasetSource()          = default;
+		IDatasetSource() = default;
 		virtual ~IDatasetSource() = default;
 
-		IDatasetSource(const IDatasetSource&)            = delete;
+		IDatasetSource(const IDatasetSource&) = delete;
 		IDatasetSource& operator=(const IDatasetSource&) = delete;
-		IDatasetSource(IDatasetSource&&)                 = delete;
-		IDatasetSource& operator=(IDatasetSource&&)      = delete;
+		IDatasetSource(IDatasetSource&&) = delete;
+		IDatasetSource& operator=(IDatasetSource&&) = delete;
 
 		/**
      * @brief URI schemes handled by this source.
@@ -217,13 +217,13 @@ namespace ttm::plugins {
  */
 	class ITransform {
 	public:
-		ITransform()          = default;
+		ITransform() = default;
 		virtual ~ITransform() = default;
 
-		ITransform(const ITransform&)            = delete;
+		ITransform(const ITransform&) = delete;
 		ITransform& operator=(const ITransform&) = delete;
-		ITransform(ITransform&&)                 = delete;
-		ITransform& operator=(ITransform&&)      = delete;
+		ITransform(ITransform&&) = delete;
+		ITransform& operator=(ITransform&&) = delete;
 
 		/* Interface to be defined. */
 	};
@@ -247,15 +247,28 @@ namespace ttm::plugins {
  */
 	class ITask {
 	public:
-		ITask()          = default;
+		ITask() = default;
 		virtual ~ITask() = default;
 
-		ITask(const ITask&)            = delete;
+		ITask(const ITask&) = delete;
 		ITask& operator=(const ITask&) = delete;
-		ITask(ITask&&)                 = delete;
-		ITask& operator=(ITask&&)      = delete;
+		ITask(ITask&&) = delete;
+		ITask& operator=(ITask&&) = delete;
 
-		/* Interface to be defined. */
+		/** Canonical task name, e.g. "text-classification". */
+		[[nodiscard]] virtual std::string_view name() const = 0;
+
+		/** All registered aliases for this task (may be empty). */
+		[[nodiscard]] virtual std::vector<std::string_view> aliases() const = 0;
+
+		/** Input feature names expected from the dataset schema. */
+		[[nodiscard]] virtual std::vector<std::string_view> input_features() const = 0;
+
+		/** Label feature name expected from the dataset schema. */
+		[[nodiscard]] virtual std::string_view label_feature() const = 0;
+
+		/** Default evaluation metric names. */
+		[[nodiscard]] virtual std::vector<std::string_view> default_metrics() const = 0;
 	};
 
 	/** @} */
@@ -275,13 +288,13 @@ namespace ttm::plugins {
  */
 	class IMetric {
 	public:
-		IMetric()          = default;
+		IMetric() = default;
 		virtual ~IMetric() = default;
 
-		IMetric(const IMetric&)            = delete;
+		IMetric(const IMetric&) = delete;
 		IMetric& operator=(const IMetric&) = delete;
-		IMetric(IMetric&&)                 = delete;
-		IMetric& operator=(IMetric&&)      = delete;
+		IMetric(IMetric&&) = delete;
+		IMetric& operator=(IMetric&&) = delete;
 
 		/* Interface to be defined. */
 	};

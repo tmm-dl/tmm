@@ -13,6 +13,7 @@ target_sources(ttm_plugins
     PRIVATE
         plugin_manager.cpp
         wasm_loader.cpp
+        native_loader.cpp
         byte_reader.cpp
 )
 
@@ -37,3 +38,6 @@ if(wasm-micro-runtime_SOURCE_DIR)
 endif()
 
 target_link_libraries(ttm_plugins PUBLIC ttm_compat)
+
+# dlopen / LoadLibrary for native plugin loading
+target_link_libraries(ttm_plugins PRIVATE ${CMAKE_DL_LIBS})

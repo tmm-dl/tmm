@@ -7,11 +7,14 @@
  * - The Plugin struct definition (declared opaque in plugin_manager.hpp).
  * - The built-in local filesystem source (FileSource / FileReader).
  * - CSourceAdapter — wraps a C ttm_source_vtable into an IDatasetSource.
+ * - CTaskAdapter   — wraps a C ttm_task_vtable into an ITask.
  * - All PluginManager member function definitions.
  */
 
 #include <ttm/plugins/plugin_manager.hpp>
 
+#include "native_loader.hpp"
+#include "plugin_ctx.hpp"
 #include "wasm_loader.hpp"
 
 #include <array>
@@ -53,6 +56,18 @@ namespace ttm::plugins {
 	 * @see wasm_loader.hpp  Origin of the Plugin type
 	 */
 	struct PluginManager::Plugin : ::ttm::plugins::Plugin {};
+
+	/**
+	 * @brief Full definition of the opaque NativePlugin struct.
+	 * @see native_loader.hpp
+	 */
+	struct PluginManager::NativePlugin : ::ttm::plugins::NativePlugin {};
+
+	/**
+	 * @brief Full definition of PluginRegistrationCtx — mirrors plugin_ctx.hpp
+	 * but uses the manager-internal derived types.
+	 */
+	struct PluginManager::PluginRegistrationCtx : ::ttm::plugins::PluginRegistrationCtx {};
 
 	/* =========================================================================
 	 * Built-in local filesystem source
@@ -227,6 +242,100 @@ namespace ttm::plugins {
 			ttm_source_vtable vt; /* Copy of the vtable struct */
 		};
 
+		/* =========================================================================
+		 * CTaskAdapter — wraps a C ttm_task_vtable into ITask
+		 * ====================================================================== */
+
+		/**
+		 * @brief Helper — walk a NULL-terminated const char** array into a vector.
+		 */
+		static std::vector<std::string_view> walk_string_array(const char** arr) {
+			std::vector<std::string_view> result;
+			if (arr == nullptr) {
+				return result;
+			}
+			// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- C ABI null-terminated array; no safer alternative
+			for (const char** p = arr; *p != nullptr; ++p) {
+				result.emplace_back(*p);
+			}
+			return result;
+		}
+
+		/**
+		 * @brief ITask that wraps a plugin's ttm_task_vtable.
+		 *
+		 * @details
+		 * The vtable function pointers return pointers into plugin-owned static
+		 * memory (valid for the lifetime of the plugin).  We cache the results as
+		 * std::string so that ITask callers receive stable std::string_view values
+		 * even if the plugin is later unloaded and reloaded.
+		 */
+		class CTaskAdapter final : public ITask {
+		public:
+			explicit CTaskAdapter(const ttm_task_vtable& vt) : vt(vt) {
+				if (vt.name != nullptr) {
+					nameStr = vt.name();
+				}
+				if (vt.label_feature != nullptr) {
+					labelStr = vt.label_feature();
+				}
+				if (vt.aliases != nullptr) {
+					for (auto sv : walk_string_array(vt.aliases())) {
+						aliasStrs.emplace_back(sv);
+					}
+				}
+				if (vt.input_features != nullptr) {
+					for (auto sv : walk_string_array(vt.input_features())) {
+						inputStrs.emplace_back(sv);
+					}
+				}
+				if (vt.default_metrics != nullptr) {
+					for (auto sv : walk_string_array(vt.default_metrics())) {
+						metricStrs.emplace_back(sv);
+					}
+				}
+			}
+
+			[[nodiscard]] std::string_view name() const override { return nameStr; }
+
+			[[nodiscard]] std::vector<std::string_view> aliases() const override {
+				std::vector<std::string_view> v;
+				v.reserve(aliasStrs.size());
+				for (const auto& s : aliasStrs) {
+					v.emplace_back(s);
+				}
+				return v;
+			}
+
+			[[nodiscard]] std::vector<std::string_view> input_features() const override {
+				std::vector<std::string_view> v;
+				v.reserve(inputStrs.size());
+				for (const auto& s : inputStrs) {
+					v.emplace_back(s);
+				}
+				return v;
+			}
+
+			[[nodiscard]] std::string_view label_feature() const override { return labelStr; }
+
+			[[nodiscard]] std::vector<std::string_view> default_metrics() const override {
+				std::vector<std::string_view> v;
+				v.reserve(metricStrs.size());
+				for (const auto& s : metricStrs) {
+					v.emplace_back(s);
+				}
+				return v;
+			}
+
+		private:
+			ttm_task_vtable vt;
+			std::string nameStr;
+			std::string labelStr;
+			std::vector<std::string> aliasStrs;
+			std::vector<std::string> inputStrs;
+			std::vector<std::string> metricStrs;
+		};
+
 	} // anonymous namespace
 
 	/* =========================================================================
@@ -255,26 +364,35 @@ namespace ttm::plugins {
 	}
 
 	/* =========================================================================
- * PluginManager — destructor and move operations
- * ====================================================================== */
+	 * PluginManager — destructor and move operations
+	 * ====================================================================== */
 
 	PluginManager::~PluginManager() {
 		if (!wamrRefOwned) {
 			return;
 		}
 
-		/* Unload all plugins (index 0 is the built-in, no WASM handles to release) */
+		/* Unload native plugins first */
+		for (auto& p : nativePlugins) {
+			native_loader_unload(*p);
+		}
+		nativePlugins.clear();
+
+		/* Unload WASM plugins (index 0 is the built-in, no WASM handles to release) */
 		for (auto& p : plugins) {
 			wasm_loader_unload(*p);
 		}
 		plugins.clear();
+
 		sourceRegistry.clear();
+		taskRegistry.clear();
 
 		wasm_loader_destroy();
 	}
 
 	PluginManager::PluginManager(PluginManager&& other) noexcept
-			: plugins(std::move(other.plugins)), sourceRegistry(std::move(other.sourceRegistry)),
+			: plugins(std::move(other.plugins)), nativePlugins(std::move(other.nativePlugins)),
+			  sourceRegistry(std::move(other.sourceRegistry)), taskRegistry(std::move(other.taskRegistry)),
 			  wamrRefOwned(other.wamrRefOwned) {
 		other.wamrRefOwned = false;
 	}
@@ -285,7 +403,9 @@ namespace ttm::plugins {
 			this->~PluginManager();
 			/* Move from other */
 			plugins = std::move(other.plugins);
+			nativePlugins = std::move(other.nativePlugins);
 			sourceRegistry = std::move(other.sourceRegistry);
+			taskRegistry = std::move(other.taskRegistry);
 			wamrRefOwned = other.wamrRefOwned;
 			other.wamrRefOwned = false;
 		}
@@ -293,38 +413,69 @@ namespace ttm::plugins {
 	}
 
 	/* =========================================================================
- * Plugin loading
- * ====================================================================== */
+	 * Plugin loading
+	 * ====================================================================== */
 
 	std::expected<void, std::string>
 	PluginManager::load(const std::filesystem::path& path, std::string_view config_json) {
-		auto p = std::make_unique<Plugin>();
-		auto hostApi = make_host_api();
+		const bool isWasm = (path.extension() == ".wasm");
 
-		if (auto r = wasm_loader_load(path, config_json, hostApi, *p); !r) {
-			return std::unexpected(r.error());
+		if (isWasm) {
+			auto p = std::make_unique<Plugin>();
+			PluginRegistrationCtx ctx;
+			ctx.manager = this;
+			ctx.wasmPlugin = p.get();
+			auto hostApi = make_host_api(ctx);
+
+			if (auto r = wasm_loader_load(path, config_json, hostApi, *p); !r) {
+				return std::unexpected(r.error());
+			}
+
+			plugins.push_back(std::move(p));
+		} else {
+			auto p = std::make_unique<NativePlugin>();
+			PluginRegistrationCtx ctx;
+			ctx.manager = this;
+			ctx.nativePlugin = p.get();
+			auto hostApi = make_host_api(ctx);
+
+			if (auto r = native_loader_load(path, config_json, hostApi, *p); !r) {
+				return std::unexpected(r.error());
+			}
+
+			nativePlugins.push_back(std::move(p));
 		}
 
-		plugins.push_back(std::move(p));
 		return {};
 	}
 
 	/* =========================================================================
- * Source registry
- * ====================================================================== */
+	 * Source and task registries
+	 * ====================================================================== */
 
 	IDatasetSource* PluginManager::find_source(std::string_view scheme) const {
 		const auto it = sourceRegistry.find(std::string(scheme));
 		return (it != sourceRegistry.end()) ? it->second : nullptr;
 	}
 
-	/* =========================================================================
- * Host API construction
- * ====================================================================== */
+	ITask* PluginManager::find_task(std::string_view name_or_alias) const {
+		const auto it = taskRegistry.find(std::string(name_or_alias));
+		return (it != taskRegistry.end()) ? it->second : nullptr;
+	}
 
-	ttm_host_api PluginManager::make_host_api() {
+	/* =========================================================================
+	 * Host API construction
+	 * ====================================================================== */
+
+	ttm_host_api PluginManager::make_host_api(PluginRegistrationCtx& ctx) {
+		/* Populate the C++ registration callbacks (called by WASM host callbacks) */
+		ctx.attach_source = [this, &ctx](std::unique_ptr<IDatasetSource> src) {
+			register_source_impl(std::move(src), ctx);
+		};
+		ctx.attach_task = [this, &ctx](std::unique_ptr<ITask> task) { register_task_impl(std::move(task), ctx); };
+
 		ttm_host_api api{};
-		api.ctx = this;
+		api.ctx = &ctx;
 		api.register_source = &PluginManager::s_register_source;
 		api.register_transform = &PluginManager::s_register_transform;
 		api.register_task = &PluginManager::s_register_task;
@@ -336,8 +487,8 @@ namespace ttm::plugins {
 	}
 
 	/* =========================================================================
- * Host API static callbacks
- * ====================================================================== */
+	 * Host API static callbacks
+	 * ====================================================================== */
 
 	ttm_error PluginManager::s_register_source(void* ctx, const char** schemes, const ttm_source_vtable* vt) {
 		if (ctx == nullptr || schemes == nullptr || vt == nullptr) {
@@ -353,40 +504,74 @@ namespace ttm::plugins {
 			return TTM_ERR_ARGS;
 		}
 
-		auto* self = static_cast<PluginManager*>(ctx);
+		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 		auto adapter = std::make_unique<CSourceAdapter>(std::move(schemeList), vt);
-
-		/* The plugin currently being loaded is always the last one pushed before
-     * the init call; we pass nullptr here and let register_source_impl
-     * attach the source to the most-recently-added plugin. */
-		self->register_source_impl(std::move(adapter), nullptr);
+		regCtx->manager->register_source_impl(std::move(adapter), *regCtx);
 		return TTM_OK;
 	}
 
-	void PluginManager::
-			register_source_impl(std::unique_ptr<IDatasetSource> src, Plugin* /*owner — reserved for future use*/) {
+	void PluginManager::register_source_impl(std::unique_ptr<IDatasetSource> src, PluginRegistrationCtx& ctx) {
 		for (const auto& scheme : src->schemes()) {
 			if (sourceRegistry.contains(scheme)) {
 				std::cerr << "[ttm] warning: source scheme '" << scheme << "' already registered; overriding.\n";
 			}
 			sourceRegistry[scheme] = src.get();
 		}
-		/* Attach to the last plugin (the one currently being initialised) */
-		assert(!plugins.empty());
-		plugins.back()->sources.push_back(std::move(src));
+		/* Attach ownership to the owning plugin record */
+		if (ctx.nativePlugin != nullptr) {
+			ctx.nativePlugin->sources.push_back(std::move(src));
+		} else if (ctx.wasmPlugin != nullptr) {
+			ctx.wasmPlugin->sources.push_back(std::move(src));
+		} else {
+			assert(!plugins.empty());
+			plugins.back()->sources.push_back(std::move(src));
+		}
+	}
+
+	ttm_error PluginManager::s_register_task(
+			void* ctx, const char* name, const char** /*aliases_unused*/, const ttm_task_vtable* vt
+	) {
+		if (ctx == nullptr || name == nullptr || vt == nullptr) {
+			return TTM_ERR_ARGS;
+		}
+		/* name and aliases come from the vtable itself; aliases_unused param is ignored */
+		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
+		auto adapter = std::make_unique<CTaskAdapter>(*vt);
+		regCtx->manager->register_task_impl(std::move(adapter), *regCtx);
+		return TTM_OK;
+	}
+
+	void PluginManager::register_task_impl(std::unique_ptr<ITask> task, PluginRegistrationCtx& ctx) {
+		auto* raw = task.get();
+
+		/* Register canonical name */
+		const auto taskName = std::string(task->name());
+		if (taskRegistry.contains(taskName)) {
+			std::cerr << "[ttm] warning: task '" << taskName << "' already registered; overriding.\n";
+		}
+		taskRegistry[taskName] = raw;
+
+		/* Register all aliases */
+		for (auto alias : task->aliases()) {
+			const auto aliasStr = std::string(alias);
+			taskRegistry[aliasStr] = raw;
+		}
+
+		/* Transfer ownership to the owning plugin record */
+		if (ctx.nativePlugin != nullptr) {
+			ctx.nativePlugin->tasks.push_back(std::move(task));
+		} else if (ctx.wasmPlugin != nullptr) {
+			ctx.wasmPlugin->tasks.push_back(std::move(task));
+		} else {
+			assert(!plugins.empty());
+			plugins.back()->tasks.push_back(std::move(task));
+		}
 	}
 
 	ttm_error PluginManager::s_register_transform(
 			void* /*ctx*/, const char* /*name*/, const char** /*aliases*/, const ttm_transform_vtable* /*vt*/
 	) {
 		/* TODO: implement transform registry */
-		return TTM_ERR_UNSUPPORTED;
-	}
-
-	ttm_error PluginManager::s_register_task(
-			void* /*ctx*/, const char* /*name*/, const char** /*aliases*/, const ttm_task_vtable* /*vt*/
-	) {
-		/* TODO: implement task registry */
 		return TTM_ERR_UNSUPPORTED;
 	}
 
@@ -432,12 +617,12 @@ namespace ttm::plugins {
 	void PluginManager::s_free(void* /*ctx*/, void* ptr) { std::free(ptr); }
 
 	/* =========================================================================
- * Lifecycle event dispatch
- *
- * Each emit_* function iterates plugins and calls the resolved hook on
- * plugins that exported it.  String arguments are pushed into WASM linear
- * memory for each call and freed immediately after.
- * ====================================================================== */
+	 * Lifecycle event dispatch
+	 *
+	 * Each emit_* function iterates both WASM and native plugins and calls the
+	 * resolved hook on plugins that exported it.  WASM plugins receive string
+	 * arguments via WASM linear memory; native plugins receive raw C string ptrs.
+	 * ====================================================================== */
 
 	/** @brief Helper — push a string to WASM memory, call fn, then free. */
 	static void call_with_string(Plugin& plug, wasm_function_inst_t fn, std::string_view str) {
@@ -458,6 +643,11 @@ namespace ttm::plugins {
 		for (auto& p : plugins) {
 			call_with_string(*p, p->fnFitBegin, ctx_json);
 		}
+		for (auto& p : nativePlugins) {
+			if (p->fnFitBegin != nullptr) {
+				p->fnFitBegin(ctx_json.data(), static_cast<uint32_t>(ctx_json.size()));
+			}
+		}
 	}
 
 	void PluginManager::emit_epoch_begin(std::uint32_t epoch, std::uint32_t total) {
@@ -468,6 +658,11 @@ namespace ttm::plugins {
 			std::array<uint32_t, 2> args{epoch, total};
 			wasm_runtime_call_wasm(p->env, p->fnEpochBegin, args.size(), args.data());
 		}
+		for (auto& p : nativePlugins) {
+			if (p->fnEpochBegin != nullptr) {
+				p->fnEpochBegin(epoch, total);
+			}
+		}
 	}
 
 	void PluginManager::emit_batch_begin(std::uint32_t batch, std::uint32_t total) {
@@ -477,6 +672,11 @@ namespace ttm::plugins {
 			}
 			std::array<uint32_t, 2> args{batch, total};
 			wasm_runtime_call_wasm(p->env, p->fnBatchBegin, args.size(), args.data());
+		}
+		for (auto& p : nativePlugins) {
+			if (p->fnBatchBegin != nullptr) {
+				p->fnBatchBegin(batch, total);
+			}
 		}
 	}
 
@@ -490,6 +690,11 @@ namespace ttm::plugins {
 			std::memcpy(&args[0], &loss, sizeof(float));
 			wasm_runtime_call_wasm(p->env, p->fnLossComputed, args.size(), args.data());
 			std::memcpy(&loss, &args[0], sizeof(float));
+		}
+		for (auto& p : nativePlugins) {
+			if (p->fnLossComputed != nullptr) {
+				loss = p->fnLossComputed(loss);
+			}
 		}
 		return loss;
 	}
@@ -511,6 +716,11 @@ namespace ttm::plugins {
 			wasm_runtime_call_wasm(p->env, p->fnBatchEnd, args.size(), args.data());
 			wasm_runtime_module_free(p->inst, metricsPtr);
 		}
+		for (auto& p : nativePlugins) {
+			if (p->fnBatchEnd != nullptr) {
+				p->fnBatchEnd(batch, loss, metrics_json.data(), static_cast<uint32_t>(metrics_json.size()));
+			}
+		}
 	}
 
 	bool PluginManager::emit_epoch_end(std::uint32_t epoch, std::string_view metrics_json) {
@@ -531,6 +741,13 @@ namespace ttm::plugins {
 				stop = true;
 			}
 		}
+		for (auto& p : nativePlugins) {
+			if (p->fnEpochEnd != nullptr) {
+				if (p->fnEpochEnd(epoch, metrics_json.data(), static_cast<uint32_t>(metrics_json.size())) != 0) {
+					stop = true;
+				}
+			}
+		}
 		return stop;
 	}
 
@@ -538,11 +755,21 @@ namespace ttm::plugins {
 		for (auto& p : plugins) {
 			call_with_string(*p, p->fnValidationEnd, metrics_json);
 		}
+		for (auto& p : nativePlugins) {
+			if (p->fnValidationEnd != nullptr) {
+				p->fnValidationEnd(metrics_json.data(), static_cast<uint32_t>(metrics_json.size()));
+			}
+		}
 	}
 
 	void PluginManager::emit_fit_end(std::string_view metrics_json) {
 		for (auto& p : plugins) {
 			call_with_string(*p, p->fnFitEnd, metrics_json);
+		}
+		for (auto& p : nativePlugins) {
+			if (p->fnFitEnd != nullptr) {
+				p->fnFitEnd(metrics_json.data(), static_cast<uint32_t>(metrics_json.size()));
+			}
 		}
 	}
 

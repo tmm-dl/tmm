@@ -5,6 +5,9 @@ cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 ##########################################################################################
 include(FeatureSummary)
 option(TMM_BUILD_TESTS "Build tests" ON)
+option(TTM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)" OFF)
+set(TTM_WASM_TOOLCHAIN "" CACHE FILEPATH
+    "Path to the WASI SDK CMake toolchain file (required for WASM extensions)")
 
 add_feature_info(tests TMM_BUILD_TESTS "Build tests")
 feature_summary(WHAT ALL)
@@ -75,6 +78,35 @@ message("Loaded CPM v${CURRENT_CPM_VERSION}")
 
 # set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_subdirectory(src)
+
+########################################################################################################################
+# Plugin Extensions                                                                                                    #
+########################################################################################################################
+if(TTM_BUILD_EXTENSIONS)
+    # Native core plugin — shares the libgit2 instance fetched by ttm_datasets.
+    # Must be added after src/ so that the libgit2 CPM package is already available.
+    add_subdirectory(extensions/core)
+
+    # WASM nlp-tasks plugin — requires WASI SDK toolchain; cross-compiled via
+    # ExternalProject so it does not pollute the host build tree.
+    if(TTM_WASM_TOOLCHAIN)
+        include(ExternalProject)
+        ExternalProject_Add(ttm_nlp_tasks_wasm
+            SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/extensions/nlp-tasks
+            BINARY_DIR  ${CMAKE_BINARY_DIR}/extensions/nlp-tasks
+            CMAKE_ARGS
+                -DCMAKE_TOOLCHAIN_FILE=${TTM_WASM_TOOLCHAIN}
+                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/extensions
+            BUILD_ALWAYS YES
+            INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+        )
+    else()
+        message(STATUS
+            "TTM_WASM_TOOLCHAIN not set; skipping nlp-tasks WASM plugin. "
+            "Set -DTTM_WASM_TOOLCHAIN=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake to enable.")
+    endif()
+endif()
 
 ########################################################################################################################
 # Coverage                                                                                                             #

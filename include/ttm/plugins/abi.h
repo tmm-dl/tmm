@@ -179,12 +179,31 @@ typedef struct ttm_transform_vtable {
 
 /**
  * @brief Vtable for ML task types (text classification, NER, …).
- * @details Full interface is TBD when the training loop design is finalised.
+ * @details
+ * Task types correspond to the "task_categories" / "tasks" fields in
+ * HuggingFace Dataset Cards.  A task may be registered under multiple
+ * aliases (e.g. "text-classification" and "text-clf").
  * @see ttm::plugins::ITask
  */
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_task_vtable {
-	void* reserved; /**< Reserved — do not use. */
+	/** Canonical task name, e.g. "text-classification" (NUL-terminated). */
+	const char* (*name)(void);
+
+	/** NULL-terminated array of alias strings, e.g. {"text-clf","tc",NULL}.
+	 *  May return NULL if there are no aliases. */
+	const char** (*aliases)(void);
+
+	/** NULL-terminated array of input feature names expected from the dataset
+	 *  schema, e.g. {"text", NULL} for single-sentence classification. */
+	const char** (*input_features)(void);
+
+	/** Label feature name expected from the dataset schema, e.g. "label". */
+	const char* (*label_feature)(void);
+
+	/** NULL-terminated array of default evaluation metric names,
+	 *  e.g. {"accuracy", "f1", NULL}. */
+	const char** (*default_metrics)(void);
 } ttm_task_vtable;
 
 /**

@@ -81,6 +81,13 @@ namespace ttm::plugins {
 		 *          non-owning raw pointers.
 		 */
 		std::vector<std::unique_ptr<IDatasetSource>> sources;
+
+		/**
+		 * @brief ML tasks registered by this plugin.
+		 * @details Ownership lives here; PluginManager::taskRegistry holds
+		 *          non-owning raw pointers.
+		 */
+		std::vector<std::unique_ptr<ITask>> tasks;
 	};
 
 	/* =========================================================================
