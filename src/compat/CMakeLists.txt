@@ -12,6 +12,7 @@ target_sources(ttm_compat
             ${CMAKE_CURRENT_LIST_DIR}/../../include
         FILES
             ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/compat/expected.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/compat/format.hpp
 )
 
 target_compile_features(ttm_compat INTERFACE cxx_std_23)
@@ -30,3 +31,14 @@ CPMAddPackage(
     OPTIONS "EXPECTED_BUILD_TESTS OFF"
 )
 target_link_libraries(ttm_compat INTERFACE tl::expected)
+
+# std::format polyfill — used when the compiler does not provide <format>.
+# The shim (ttm/compat/format.hpp) auto-detects via __cpp_lib_format and
+# falls back to fmtlib transparently; no call-site changes required.
+CPMAddPackage(
+    NAME fmt
+    GITHUB_REPOSITORY fmtlib/fmt
+    GIT_TAG 11.1.4
+    OPTIONS "FMT_INSTALL OFF" "FMT_TEST OFF" "FMT_DOC OFF"
+)
+target_link_libraries(ttm_compat INTERFACE fmt::fmt-header-only)

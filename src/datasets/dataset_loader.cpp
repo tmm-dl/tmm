@@ -14,14 +14,10 @@
 #include <ttm/datasets/dataset_info.hpp>
 #include <ttm/plugins/extension.hpp>
 
-#include <algorithm>
-#include <cstring>
 #include <filesystem>
-#include <format>
-#include <fstream>
+#include <ttm/compat/format.hpp>
 #include <iostream>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <ttm/compat/expected.hpp>
@@ -340,21 +336,10 @@ namespace ttm::datasets {
 			}
 		}
 
-		/* Read README content, write to a temp file named README.md so
-		 * parse_dataset_card() can find it at <tmp_dir>/README.md. */
 		auto& stream = readmeReader->as_stream();
-		std::string readmeContent{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>{}};
+		const std::string readmeContent{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>{}};
 
-		const auto tmpDir    = std::filesystem::temp_directory_path() / "ttm_card_tmp";
-		const auto tmpReadme = tmpDir / "README.md";
-		std::filesystem::create_directories(tmpDir);
-		{
-			std::ofstream ofs(tmpReadme, std::ios::binary);
-			ofs.write(readmeContent.data(), static_cast<std::streamsize>(readmeContent.size()));
-		}
-
-		auto infoResult = parse_dataset_card(tmpDir, config);
-		std::filesystem::remove(tmpReadme);
+		auto infoResult = parse_dataset_card_from_content(readmeContent, config);
 
 		if (!infoResult) {
 			return std::unexpected("load_dataset: failed to parse dataset card: " + infoResult.error());

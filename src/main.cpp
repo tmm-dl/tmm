@@ -31,7 +31,7 @@
 #include <arrow/type.h>
 
 #include <filesystem>
-#include <format>
+#include <ttm/compat/format.hpp>
 #include <iostream>
 #include <string_view>
 

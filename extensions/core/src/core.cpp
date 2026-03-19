@@ -29,7 +29,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -37,12 +36,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <format>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include <git2.h>
 
@@ -80,26 +76,13 @@ namespace {
 		/* Determine scheme and base URL */
 		const char* base = nullptr;
 		std::string_view rest = uri;
-		const bool isSr = uri.starts_with("sr:");
 
-		if (uri.starts_with("gh:")) {
-			base = "https://github.com/";
-			rest = uri.substr(3);
-		} else if (uri.starts_with("gl:")) {
-			base = "https://gitlab.com/";
-			rest = uri.substr(3);
-		} else if (uri.starts_with("bb:")) {
-			base = "https://bitbucket.org/";
-			rest = uri.substr(3);
-		} else if (uri.starts_with("hf:")) {
-			base = "https://huggingface.co/datasets/";
-			rest = uri.substr(3);
-		} else if (isSr) {
-			base = "https://git.sr.ht/~";
-			rest = uri.substr(3);
-		} else {
-			return std::nullopt;
-		}
+		if      (uri.starts_with("gh:")) { base = "https://github.com/";                rest = uri.substr(3); }
+		else if (uri.starts_with("gl:")) { base = "https://gitlab.com/";                rest = uri.substr(3); }
+		else if (uri.starts_with("bb:")) { base = "https://bitbucket.org/";             rest = uri.substr(3); }
+		else if (uri.starts_with("hf:")) { base = "https://huggingface.co/datasets/";   rest = uri.substr(3); }
+		else if (uri.starts_with("sr:")) { base = "https://git.sr.ht/~";                rest = uri.substr(3); }
+		else { return std::nullopt; }
 
 		/* Split owner/repo[@ref][/subpath] */
 		/* First, isolate owner/repo (before first '@' or third '/' after scheme) */
@@ -271,29 +254,23 @@ namespace {
 	 * Handle table — open file handles
 	 * ---------------------------------------------------------------------- */
 
-	struct FileEntry {
-		std::FILE* fp = nullptr;
-	};
-
 	constexpr int kMaxHandles = 64;
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- plugin-level open-file table; no safer alternative without heap allocation
-	FileEntry g_handles[kMaxHandles]{};
+	std::FILE* g_handles[kMaxHandles]{};
 
 	ttm_handle alloc_handle(std::FILE* fp) {
 		for (int i = 0; i < kMaxHandles; ++i) {
-			if (g_handles[i].fp == nullptr) {
-				g_handles[i].fp = fp;
+			if (g_handles[i] == nullptr) {
+				g_handles[i] = fp;
 				return static_cast<ttm_handle>(i);
 			}
 		}
 		return TTM_INVALID_HANDLE;
 	}
 
-	FileEntry* get_handle(ttm_handle h) {
-		if (h < 0 || h >= kMaxHandles) {
-			return nullptr;
-		}
-		return &g_handles[static_cast<int>(h)];
+	std::FILE* get_handle(ttm_handle h) {
+		if (h < 0 || h >= kMaxHandles) return nullptr;
+		return g_handles[static_cast<int>(h)];
 	}
 
 	/* =========================================================================
@@ -440,42 +417,31 @@ namespace {
 	}
 
 	int32_t core_read(ttm_handle h, void* buf, int32_t len) {
-		auto* entry = get_handle(h);
-		if (entry == nullptr || entry->fp == nullptr) {
-			return -1;
-		}
-		return static_cast<int32_t>(std::fread(buf, 1, static_cast<std::size_t>(len), entry->fp));
+		std::FILE* fp = get_handle(h);
+		if (fp == nullptr) return -1;
+		return static_cast<int32_t>(std::fread(buf, 1, static_cast<std::size_t>(len), fp));
 	}
 
 	int64_t core_seek(ttm_handle h, int64_t offset, int32_t whence) {
-		auto* entry = get_handle(h);
-		if (entry == nullptr || entry->fp == nullptr) {
-			return -1;
-		}
+		std::FILE* fp = get_handle(h);
+		if (fp == nullptr) return -1;
 		int posixWhence = SEEK_SET;
-		if (whence == 1) {
-			posixWhence = SEEK_CUR;
-		} else if (whence == 2) {
-			posixWhence = SEEK_END;
-		}
+		if      (whence == 1) posixWhence = SEEK_CUR;
+		else if (whence == 2) posixWhence = SEEK_END;
 #ifdef _WIN32
-		if (_fseeki64(entry->fp, static_cast<__int64>(offset), posixWhence) != 0) {
-			return -1;
-		}
-		return static_cast<int64_t>(_ftelli64(entry->fp));
+		if (_fseeki64(fp, static_cast<__int64>(offset), posixWhence) != 0) return -1;
+		return static_cast<int64_t>(_ftelli64(fp));
 #else
-		if (fseeko(entry->fp, static_cast<off_t>(offset), posixWhence) != 0) {
-			return -1;
-		}
-		return static_cast<int64_t>(ftello(entry->fp));
+		if (fseeko(fp, static_cast<off_t>(offset), posixWhence) != 0) return -1;
+		return static_cast<int64_t>(ftello(fp));
 #endif
 	}
 
 	void core_close(ttm_handle h) {
-		auto* entry = get_handle(h);
-		if (entry != nullptr && entry->fp != nullptr) {
-			std::fclose(entry->fp);
-			entry->fp = nullptr;
+		if (h < 0 || h >= kMaxHandles) return;
+		if (g_handles[h] != nullptr) {
+			std::fclose(g_handles[h]);
+			g_handles[h] = nullptr;
 		}
 	}
 
@@ -517,10 +483,10 @@ TTM_CORE_EXPORT ttm_error ttm_plugin_init(const ttm_host_api* host, const char* 
 
 TTM_CORE_EXPORT void ttm_plugin_teardown(void) {
 	/* Close any leftover file handles */
-	for (auto& entry : g_handles) {
-		if (entry.fp != nullptr) {
-			std::fclose(entry.fp);
-			entry.fp = nullptr;
+	for (auto& fp : g_handles) {
+		if (fp != nullptr) {
+			std::fclose(fp);
+			fp = nullptr;
 		}
 	}
 	git_libgit2_shutdown();

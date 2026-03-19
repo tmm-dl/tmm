@@ -132,6 +132,20 @@ namespace ttm::datasets {
 	parse_dataset_card(const std::filesystem::path& repo_root, std::string_view config_name = "");
 
 	/**
+	 * @brief Parse a HuggingFace Dataset Card directly from its Markdown content.
+	 *
+	 * @details
+	 * Same as `parse_dataset_card` but operates on an in-memory string rather
+	 * than a file, avoiding a disk round-trip when the card was already fetched
+	 * through a plugin source.
+	 *
+	 * @param[in] markdown     Raw Markdown text (must begin with `---` frontmatter).
+	 * @param[in] config_name  Config to select; empty → first config.
+	 */
+	[[nodiscard]] std::expected<DatasetInfo, std::string>
+	parse_dataset_card_from_content(std::string_view markdown, std::string_view config_name = "");
+
+	/**
 	 * @brief Enumerate the data files for a given split.
 	 *
 	 * @details

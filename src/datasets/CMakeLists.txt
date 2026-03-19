@@ -7,7 +7,6 @@ target_sources(ttm_datasets
         BASE_DIRS
             ${CMAKE_CURRENT_LIST_DIR}/../../include
     PRIVATE
-        datasets.cpp
         dataset_info.cpp
         dataset_loader.cpp
 )
