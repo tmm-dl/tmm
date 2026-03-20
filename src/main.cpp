@@ -1,157 +1,254 @@
 /**
- * @brief Demo: load the SCITE "causality detection" subset from HuggingFace.
+ * @file main.cpp
+ * @brief ttm — Train My Model — CLI entry point.
  *
- * Dataset: https://huggingface.co/datasets/thagen/SCITE
- * Subset:  causality detection
+ * ### Commands
+ * - `ttm fit <config.yml> [config2.yml …] [--set key=value …]`
+ *   Load config, set up plugins, and run the training loop.
  *
- * Build with extensions enabled:
- *   cmake -B build -DTTM_BUILD_EXTENSIONS=ON
- *   cmake --build build
+ * - `ttm validate <config.yml> [--set key=value …]`
+ *   Parse and print the resolved config without training.
  *
- * The hf: URI scheme is handled by extensions/core (ttm_core.so / .dylib / .dll).
- * That plugin clones the dataset repo via libgit2 into a local cache
- * ($XDG_CACHE_HOME/ttm/datasets/<hash>/) and serves files from there.
+ * - `ttm predict`  *(stub — not yet implemented)*
  *
- * HuggingFace Parquet layout for a named subset:
- *   data/<config_name>/<split>-NNNNN-of-MMMMM.parquet
+ * ### Config format (YAML)
+ * @code{.yaml}
+ * version: "1"
  *
- * So the URI we pass to load_dataset() includes the config path:
- *   hf:thagen/SCITE/causality detection
- * which causes the loader to probe:
- *   data/train-00000-of-MMMMM.parquet  (inside that subtree)
+ * dataset:
+ *   uri:    hf:thagen/SCITE
+ *   config: causality detection
+ *   split:  train
+ *   batch_size: 32
+ *
+ * model:
+ *   path:   ./model.so
+ *   device: cpu
+ *
+ * optimizer:
+ *   type: adamw
+ *   lr:   1.0e-4
+ *
+ * scheduler:
+ *   type:         cosine_warmup
+ *   warmup_steps: 100
+ *
+ * training:
+ *   epochs: 10
+ *   gradient_accumulation_steps: 4
+ *   grad_clip_norm: 1.0
+ *
+ * plugins:
+ *   - path:   plugins/csv-logger.wasm
+ *     config: '{"output":"metrics.csv"}'
+ * @endcode
  */
 
-#include <ttm/datasets/dataset_info.hpp>
+#include <ttm/conf/config.hpp>
+#include <ttm/conf/loader.hpp>
 #include <ttm/datasets/dataset_loader.hpp>
 #include <ttm/plugins/plugin_manager.hpp>
+#include <ttm/trainer/trainer.hpp>
 
-#include <arrow/array.h>
-#include <arrow/record_batch.h>
-#include <arrow/scalar.h>
-#include <arrow/type.h>
+#include <CLI/CLI.hpp>
 
 #include <filesystem>
-#include <ttm/compat/format.hpp>
 #include <iostream>
-#include <string_view>
+#include <span>
+#include <string>
+#include <vector>
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+/* =========================================================================
+ * Helpers
+ * ====================================================================== */
 
-namespace {
+/// Extract the URI scheme (everything up to and including the first `:`).
+static std::string scheme_of(const std::string& uri) {
+	const auto colon = uri.find(':');
+	return (colon != std::string::npos) ? uri.substr(0, colon + 1) : "file:";
+}
 
-	/// Print the Arrow schema (column name + type) to stdout.
-	void print_schema(const arrow::Schema& schema) {
-		std::cout << "Schema (" << schema.num_fields() << " columns):\n";
-		for (int i = 0; i < schema.num_fields(); ++i) {
-			const auto& field = *schema.field(i);
-			std::cout << std::format("  [{:2d}] {:30s}  {}\n", i, field.name(), field.type()->ToString());
-		}
-		std::cout << '\n';
-	}
-
-	/// Print up to `max_rows` rows from a single RecordBatch as a simple table.
-	void print_batch(const arrow::RecordBatch& batch, int max_rows = 5) {
-		const int rows = static_cast<int>(std::min(static_cast<int64_t>(max_rows), batch.num_rows()));
-		std::cout << std::format(
-				"  Batch: {} rows × {} columns  (showing first {})\n", batch.num_rows(), batch.num_columns(), rows
-		);
-
-		for (int r = 0; r < rows; ++r) {
-			std::cout << "  row " << r << ":";
-			for (int c = 0; c < batch.num_columns(); ++c) {
-				const auto& col = *batch.column(c);
-				const auto& name = batch.schema()->field(c)->name();
-				// Use Arrow's generic ToString (available on all array types)
-				std::cout << std::format("  {}={}", name, col.GetScalar(r).ValueOrDie()->ToString());
-			}
-			std::cout << '\n';
-		}
-		std::cout << '\n';
-	}
-
-} // namespace
-
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
-int main(int /*argc*/, char* /*argv*/[]) {
-	// ── 1. Initialise the plugin manager ──────────────────────────────────
+/// Load all plugins listed in the config into a fresh PluginManager.
+static std::expected<ttm::plugins::PluginManager, std::string>
+setup_plugins(const ttm::conf::TrainingConfig& cfg) {
 	auto mgrResult = ttm::plugins::PluginManager::create();
+	if (!mgrResult) return std::unexpected(mgrResult.error());
+
+	for (const auto& entry : cfg.plugins) {
+		if (auto r = mgrResult->load(entry.path, entry.config); !r) {
+			return std::unexpected(
+				"Failed to load plugin '" + entry.path + "': " + r.error()
+			);
+		}
+	}
+	return mgrResult;
+}
+
+/* =========================================================================
+ * ttm fit
+ * ====================================================================== */
+
+static int cmd_fit(
+	const std::vector<std::filesystem::path>& config_files,
+	const std::vector<std::string>&           set_overrides
+) {
+	// 1. Load & merge config
+	auto cfgResult = ttm::conf::load_config(
+		std::span{config_files}, std::span{set_overrides}
+	);
+	if (!cfgResult) {
+		std::cerr << "ttm fit: " << cfgResult.error() << '\n';
+		return 1;
+	}
+	const auto& cfg = *cfgResult;
+
+	// 2. Set up plugins
+	auto mgrResult = setup_plugins(cfg);
 	if (!mgrResult) {
-		std::cerr << "Failed to create PluginManager: " << mgrResult.error() << '\n';
+		std::cerr << "ttm fit: " << mgrResult.error() << '\n';
 		return 1;
 	}
 	auto& mgr = *mgrResult;
 
-	// ── 2. Load the core native plugin (provides hf:, gh:, gl:, bb:, sr:) ─
-	//
-	// The plugin is built to build/extensions/core/ttm_core.so when TTM_BUILD_EXTENSIONS=ON.
-	// Adjust the path if your build directory differs.
-	const std::filesystem::path corePath = std::filesystem::path(__FILE__)
-												   .parent_path() // src/
-												   .parent_path() // project root
-										   / "build" / "extensions" / "core" / "ttm_core.so";
-
-	if (auto r = mgr.load(corePath); !r) {
-		std::cerr << "Failed to load core plugin (" << corePath.string() << "): " << r.error() << '\n';
-		std::cerr << "Build with: cmake -B build -DTTM_BUILD_EXTENSIONS=ON && cmake --build build\n";
-		return 1;
-	}
-	std::cout << "Core plugin loaded.\n";
-
-	// ── 3. Resolve the hf: dataset source ─────────────────────────────────
-	auto* hfSource = mgr.find_source("hf:");
-	if (hfSource == nullptr) {
-		std::cerr << "hf: source not registered — is the core plugin loaded?\n";
+	// 3. Resolve dataset source
+	const std::string scheme = scheme_of(cfg.dataset.uri);
+	auto* source = mgr.find_source(scheme);
+	if (source == nullptr) {
+		std::cerr << "ttm fit: no plugin registered for dataset scheme '" << scheme << "'\n"
+		          << "         Add the appropriate plugin to the 'plugins:' section.\n";
 		return 1;
 	}
 
-	// ── 4. Load the dataset ────────────────────────────────────────────────
-	//
-	// URI format:  hf:<owner>/<repo>[@<ref>][/<subpath>]
-	//
-	// The SCITE "causality detection" config stores its Parquet files at:
-	//   data/causality detection/<split>-NNNNN-of-MMMMM.parquet
-	//
-	// We encode the config name as the subpath so load_dataset() probes the
-	// right directory.  Spaces in config names are fine; the core plugin passes
-	// the full path to libgit2's file access.
-	constexpr std::string_view kDatasetUri = "hf:thagen/SCITE";
-	constexpr std::string_view kConfig     = "causality detection";
-	constexpr std::string_view kSplit      = "train";
+	// 4. Dataset factory — invoked once per epoch for a fresh iterator
+	const auto train_ds = cfg.dataset; // capture by value
+	auto train_factory  = [source, train_ds]()
+		-> std::expected<std::unique_ptr<ttm::datasets::DatasetIterator>, std::string>
+	{
+		return ttm::datasets::load_dataset(
+			*source, train_ds.uri, train_ds.split, train_ds.config_name
+		);
+	};
 
-	std::cout << std::format("Loading dataset  : {}\n", kDatasetUri);
-	std::cout << std::format("Config           : {}\n", kConfig);
-	std::cout << std::format("Split            : {}\n\n", kSplit);
+	// 5. Optional validation factory
+	ttm::trainer::DatasetFactory val_factory;
+	if (cfg.validation) {
+		const auto val_ds  = *cfg.validation;
+		const auto val_uri = val_ds.uri.empty() ? cfg.dataset.uri : val_ds.uri;
+		const auto val_cfg = val_ds.config_name.empty()
+			? cfg.dataset.config_name : val_ds.config_name;
 
-	auto iterResult = ttm::datasets::load_dataset(*hfSource, kDatasetUri, kSplit, kConfig);
-	if (!iterResult) {
-		std::cerr << "Failed to load dataset: " << iterResult.error() << '\n';
-		return 1;
-	}
-	auto& iter = *iterResult;
-
-	// ── 5. Print schema ────────────────────────────────────────────────────
-	print_schema(iter->schema());
-
-	// ── 6. Iterate batches ─────────────────────────────────────────────────
-	std::shared_ptr<arrow::RecordBatch> batch;
-	int64_t totalRows = 0;
-	int batchCount = 0;
-
-	while (iter->next(batch)) {
-		++batchCount;
-		totalRows += batch->num_rows();
-
-		if (batchCount <= 2) {
-			std::cout << std::format("── Batch {} ────────────────────────────────\n", batchCount);
-			print_batch(*batch, /*max_rows=*/5);
+		auto* val_src = mgr.find_source(scheme_of(val_uri));
+		if (val_src == nullptr) {
+			std::cerr << "ttm fit: no plugin for validation dataset scheme '"
+			          << scheme_of(val_uri) << "'\n";
+			return 1;
 		}
+		val_factory = [val_src, val_uri, val_cfg, split = val_ds.split]()
+			-> std::expected<std::unique_ptr<ttm::datasets::DatasetIterator>, std::string>
+		{
+			return ttm::datasets::load_dataset(*val_src, val_uri, split, val_cfg);
+		};
 	}
 
-	std::cout << std::format("Done.  {} batches, {} total rows.\n", batchCount, totalRows);
+	// 6. Model loading — not yet implemented
+	//
+	//    TODO: instantiate from cfg.model.path via TVM FFI:
+	//      auto model = ttm::tvm::TVMModel::load(cfg.model).value();
+	//
+	//    Then wire up trainer:
+	//      auto trainer = ttm::trainer::Trainer(cfg, mgr, std::move(model), train_factory);
+	//      if (val_factory) trainer.validation(std::move(val_factory));
+	//      // attach optimizer / scheduler from cfg …
+	//      auto result = trainer.fit();
+	//      if (!result) { std::cerr << "Training failed: " << result.error() << '\n'; return 1; }
+	//      return 0;
+	//
+	(void)val_factory;
+	std::cerr << "ttm fit: model loading is not yet implemented.\n"
+	          << "         Set 'model.path' to a compiled TVM module to train.\n";
+	return 2;
+}
+
+/* =========================================================================
+ * ttm validate
+ * ====================================================================== */
+
+static int cmd_validate(
+	const std::vector<std::filesystem::path>& config_files,
+	const std::vector<std::string>&           set_overrides
+) {
+	auto cfgResult = ttm::conf::load_config(
+		std::span{config_files}, std::span{set_overrides}
+	);
+	if (!cfgResult) {
+		std::cerr << "ttm validate: " << cfgResult.error() << '\n';
+		return 1;
+	}
+	const auto& cfg = *cfgResult;
+
+	std::cout << "Config OK\n\n";
+	std::cout << "  dataset:    " << cfg.dataset.uri;
+	if (!cfg.dataset.config_name.empty())
+		std::cout << "  [" << cfg.dataset.config_name << "]";
+	std::cout << "  split=" << cfg.dataset.split
+	          << "  batch_size=" << cfg.dataset.batch_size << '\n';
+	if (cfg.validation) {
+		const auto& v = *cfg.validation;
+		std::cout << "  validation: "
+		          << (v.uri.empty() ? "(same dataset)" : v.uri)
+		          << "  split=" << v.split
+		          << "  batch_size=" << v.batch_size << '\n';
+	}
+	std::cout << "  model:      "
+	          << (cfg.model.path.empty() ? "(none)" : cfg.model.path)
+	          << "  device=" << cfg.model.device << '\n';
+	std::cout << "  optimizer:  " << cfg.optimizer.type
+	          << "  lr=" << cfg.optimizer.lr
+	          << "  wd=" << cfg.optimizer.weight_decay << '\n';
+	std::cout << "  scheduler:  " << cfg.scheduler.type
+	          << "  warmup=" << cfg.scheduler.warmup_steps << '\n';
+	std::cout << "  training:   epochs=" << cfg.epochs
+	          << "  grad_accum=" << cfg.gradient_accumulation_steps
+	          << "  clip=" << cfg.grad_clip_norm << '\n';
+	std::cout << "  plugins:    " << cfg.plugins.size() << '\n';
+	for (const auto& p : cfg.plugins) std::cout << "    - " << p.path << '\n';
+	return 0;
+}
+
+/* =========================================================================
+ * main
+ * ====================================================================== */
+
+int main(int argc, char** argv) {
+	CLI::App app{"ttm — Train My Model", "ttm"};
+	app.set_version_flag("--version", TTM_VERSION);
+	app.require_subcommand(1);
+
+	// ── ttm fit ────────────────────────────────────────────────────────────
+	auto* fit = app.add_subcommand("fit", "Train a model from a YAML config");
+	std::vector<std::filesystem::path> fit_configs;
+	std::vector<std::string>           fit_set;
+	fit->add_option("config", fit_configs,
+		"One or more YAML config files (deep-merged left-to-right)")->required();
+	fit->add_option("--set,-s", fit_set,
+		"Override a config value, e.g. --set optimizer.lr=1e-4");
+	fit->callback([&] { std::exit(cmd_fit(fit_configs, fit_set)); });
+
+	// ── ttm validate ───────────────────────────────────────────────────────
+	auto* validate = app.add_subcommand("validate", "Validate a config file without training");
+	std::vector<std::filesystem::path> val_configs;
+	std::vector<std::string>           val_set;
+	validate->add_option("config", val_configs, "YAML config file(s)")->required();
+	validate->add_option("--set,-s", val_set, "Override a config value");
+	validate->callback([&] { std::exit(cmd_validate(val_configs, val_set)); });
+
+	// ── ttm predict ────────────────────────────────────────────────────────
+	app.add_subcommand("predict", "Run inference (not yet implemented)")
+		->callback([&] {
+			std::cerr << "ttm predict: not yet implemented\n";
+			std::exit(2);
+		});
+
+	CLI11_PARSE(app, argc, argv);
 	return 0;
 }
