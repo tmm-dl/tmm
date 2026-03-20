@@ -6,6 +6,8 @@ target_sources(ttm_trainer
         TYPE HEADERS
         BASE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../../include
         FILES
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/callbacks/early_stopping.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/trainer/callback.hpp
             ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/trainer/interfaces.hpp
             ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/trainer/trainer.hpp
     PRIVATE

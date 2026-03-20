@@ -4,6 +4,7 @@
  */
 
 #include <ttm/trainer/trainer.hpp>
+#include <ttm/callbacks/early_stopping.hpp>
 #include <ttm/compat/format.hpp>
 #include <ttm/plugins/abi.h>
 
@@ -52,6 +53,11 @@ namespace ttm::trainer {
 
 	Trainer& Trainer::validation(DatasetFactory val) {
 		val_factory_ = std::move(val);
+		return *this;
+	}
+
+	Trainer& Trainer::add_callback(std::unique_ptr<Callback> cb) {
+		callbacks_.push_back(std::move(cb));
 		return *this;
 	}
 
@@ -119,11 +125,45 @@ namespace ttm::trainer {
 	 * ====================================================================== */
 
 	void Trainer::log(std::string_view key, float value) {
+		currentMetrics_[std::string(key)] = value;
 		plugins_.emit_metric(key, value, static_cast<int32_t>(globalStep_));
+		const CallbackMetrics cm(currentMetrics_);
+		for (auto& cb : callbacks_) {
+			cb->on_log(*this, key, value, static_cast<int32_t>(globalStep_));
+		}
 	}
 
 	std::expected<EpochMetrics, std::string> Trainer::fit() {
+		// ── One-time: load config plugins + instantiate config callbacks ──────
+		if (!configApplied_) {
+			configApplied_ = true;
+
+			for (const auto& pe : config_.plugins) {
+				if (auto r = plugins_.load(pe.path, pe.config); !r) {
+					plugins_.emit_log(TTM_LOG_WARN,
+						std::format("plugin load failed ({}): {}", pe.path, r.error()));
+				}
+			}
+
+			for (const auto& ce : config_.callbacks) {
+				if (ce.type == "early_stopping") {
+					const auto mode = (ce.mode == "max")
+						? callbacks::EarlyStopping::Mode::max
+						: callbacks::EarlyStopping::Mode::min;
+					callbacks_.push_back(std::make_unique<callbacks::EarlyStopping>(
+						ce.monitor, ce.patience, mode, ce.min_delta));
+				} else {
+					plugins_.emit_log(TTM_LOG_WARN,
+						std::format("unknown callback type: '{}'", ce.type));
+				}
+			}
+		}
+
 		plugins_.emit_fit_begin(build_fit_begin_json());
+		{
+			const CallbackMetrics cm(currentMetrics_);
+			for (auto& cb : callbacks_) cb->on_fit_begin(*this, cm);
+		}
 
 		EpochMetrics final_metrics;
 		globalStep_              = 0;  ///< Batch-level counter — also exposed via log()
@@ -137,6 +177,8 @@ namespace ttm::trainer {
 				static_cast<uint32_t>(epoch),
 				static_cast<uint32_t>(config_.epochs)
 			);
+			for (auto& cb : callbacks_)
+				cb->on_epoch_begin(*this, epoch, config_.epochs);
 
 			// ── Fresh iterator for this epoch ──────────────────────────────
 			auto iterResult = train_factory_();
@@ -185,6 +227,8 @@ namespace ttm::trainer {
 				}
 
 				// ── Per-batch metric logging ───────────────────────────────
+				currentMetrics_["train_loss"]    = loss;
+				currentMetrics_["learning_rate"] = current_lr;
 				plugins_.emit_metric("train_loss", loss, static_cast<int32_t>(globalStep_));
 				plugins_.emit_metric("learning_rate", current_lr, static_cast<int32_t>(globalStep_));
 
@@ -222,6 +266,7 @@ namespace ttm::trainer {
 			if (val_factory_) {
 				if (auto vr = run_validation(); vr) {
 					val_loss = *vr;
+					currentMetrics_["val_loss"] = val_loss;
 					plugins_.emit_metric("val_loss", val_loss, static_cast<int32_t>(globalStep_));
 				} else {
 					plugins_.emit_log(TTM_LOG_WARN,
@@ -230,12 +275,19 @@ namespace ttm::trainer {
 				plugins_.emit_validation_end(
 					build_epoch_json({epoch, globalStep_, avg_loss, val_loss, current_lr, throughput})
 				);
+				{
+					const CallbackMetrics cm(currentMetrics_);
+					for (auto& cb : callbacks_) cb->on_validation_end(*this, cm);
+				}
 			}
 
 			EpochMetrics metrics{epoch, globalStep_, avg_loss, val_loss, current_lr, throughput};
 			final_metrics = metrics;
 
 			// ── Per-epoch metric logging ───────────────────────────────────
+			currentMetrics_["epoch"]             = static_cast<float>(epoch);
+			currentMetrics_["epoch_train_loss"]  = avg_loss;
+			currentMetrics_["throughput"]        = static_cast<float>(throughput);
 			plugins_.emit_metric("epoch_train_loss", avg_loss, static_cast<int32_t>(globalStep_));
 			plugins_.emit_metric("throughput", static_cast<float>(throughput),
 			                     static_cast<int32_t>(globalStep_));
@@ -253,16 +305,27 @@ namespace ttm::trainer {
 				));
 			}
 
-			if (plugins_.emit_epoch_end(
+			bool stop = plugins_.emit_epoch_end(
 					static_cast<uint32_t>(epoch),
 					build_epoch_json(metrics)
-				)) {
-				plugins_.emit_log(TTM_LOG_INFO, "early stopping requested by plugin");
+				);
+			{
+				const CallbackMetrics cm(currentMetrics_);
+				for (auto& cb : callbacks_) {
+					if (cb->on_epoch_end(*this, epoch, cm)) stop = true;
+				}
+			}
+			if (stop) {
+				plugins_.emit_log(TTM_LOG_INFO, "early stopping triggered");
 				break;
 			}
 		}
 
 		plugins_.emit_fit_end(build_epoch_json(final_metrics));
+		{
+			const CallbackMetrics cm(currentMetrics_);
+			for (auto& cb : callbacks_) cb->on_fit_end(*this, cm);
+		}
 		return final_metrics;
 	}
 

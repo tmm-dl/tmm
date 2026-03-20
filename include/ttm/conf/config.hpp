@@ -80,6 +80,34 @@ namespace ttm::conf {
 		std::string config; ///< Arbitrary JSON passed to `ttm_plugin_init`
 	};
 
+	/**
+	 * @brief Configuration entry for a built-in C++ callback.
+	 *
+	 * @details
+	 * Supported types and their parameters:
+	 *
+	 * | `type`            | Parameters                                         |
+	 * |-------------------|----------------------------------------------------|
+	 * | `early_stopping`  | `monitor`, `patience`, `mode` (`min`/`max`), `min_delta` |
+	 *
+	 * ### YAML example
+	 * @code{.yaml}
+	 * callbacks:
+	 *   - type: early_stopping
+	 *     monitor: val_loss
+	 *     patience: 5
+	 *     mode: min
+	 *     min_delta: 0.0
+	 * @endcode
+	 */
+	struct CallbackEntry {
+		std::string type;                ///< Callback type, e.g. `"early_stopping"`
+		std::string monitor = "val_loss";///< Metric name to watch (`early_stopping`)
+		int32_t     patience  = 5;       ///< Epochs without improvement before stopping
+		std::string mode      = "min";   ///< `"min"` or `"max"`
+		float       min_delta = 0.0f;    ///< Minimum change that counts as an improvement
+	};
+
 	/* =========================================================================
 	 * Top-level config
 	 * ====================================================================== */
@@ -102,6 +130,7 @@ namespace ttm::conf {
 		SchedulerConfig                 scheduler;
 		CheckpointConfig                checkpoint;
 		std::vector<PluginEntry>        plugins;
+		std::vector<CallbackEntry>      callbacks;
 
 		/* --- training loop knobs --- */
 		int64_t epochs                      = 10;

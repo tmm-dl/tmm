@@ -32,12 +32,15 @@
 #include <ttm/conf/config.hpp>
 #include <ttm/datasets/dataset_loader.hpp>
 #include <ttm/plugins/plugin_manager.hpp>
+#include <ttm/trainer/callback.hpp>
 #include <ttm/trainer/interfaces.hpp>
 #include <ttm/compat/expected.hpp>
 
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace ttm::trainer {
 
@@ -93,6 +96,9 @@ namespace ttm::trainer {
 		/// Attach a validation dataset factory (optional).
 		Trainer& validation(DatasetFactory val);
 
+		/// Attach a callback.  Callbacks are invoked in insertion order.
+		Trainer& add_callback(std::unique_ptr<Callback> cb);
+
 		/**
 		 * @brief Run the training loop.
 		 * @return Final epoch metrics on success, or an error string on failure.
@@ -131,6 +137,12 @@ namespace ttm::trainer {
 		/** @brief Monotonically increasing batch-level step counter.
 		 *  Updated by fit(); read by log() for metric step tagging. */
 		int64_t globalStep_ = 0;
+
+		std::vector<std::unique_ptr<Callback>>  callbacks_;
+		/** @brief Snapshot of the latest metric values; read by CallbackMetrics. */
+		std::unordered_map<std::string, float>  currentMetrics_;
+		/** @brief Set to true after config plugins and callbacks have been applied. */
+		bool configApplied_ = false;
 	};
 
 } // namespace ttm::trainer

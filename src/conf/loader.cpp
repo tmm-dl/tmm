@@ -247,6 +247,18 @@ namespace ttm::conf {
 				}
 			}
 
+			if (const auto cs = root["callbacks"]; cs && cs.IsSequence()) {
+				for (const auto& c : cs) {
+					cfg.callbacks.push_back({
+						.type      = gets(c, "type"),
+						.monitor   = gets(c, "monitor",   "val_loss"),
+						.patience  = get<int32_t>(c, "patience",  5),
+						.mode      = gets(c, "mode",      "min"),
+						.min_delta = get<float>(c, "min_delta", 0.0f),
+					});
+				}
+			}
+
 			return cfg;
 		}
 
