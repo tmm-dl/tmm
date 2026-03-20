@@ -52,6 +52,18 @@ namespace ttm::plugins {
 		void* dlHandle = nullptr; ///< dlopen / LoadLibrary handle.
 
 		/* -----------------------------------------------------------------
+		 * Persistent host API copy
+		 *
+		 * native_loader_load() copies the caller's ttm_host_api here before
+		 * passing &persistentApi to ttm_plugin_init, so that native plugins
+		 * may safely retain the pointer for post-init use.  ctx is initially
+		 * the PluginRegistrationCtx* for registration; PluginManager::load()
+		 * updates it to PluginManager* after a successful load so lifecycle
+		 * callbacks receive a valid context.
+		 * -------------------------------------------------------------- */
+		ttm_host_api persistentApi{};
+
+		/* -----------------------------------------------------------------
 		 * Required entry points (non-null after successful load)
 		 * -------------------------------------------------------------- */
 		ttm_plugin_info* (*fnGetInfo)()                                        = nullptr;
@@ -60,15 +72,17 @@ namespace ttm::plugins {
 		/* -----------------------------------------------------------------
 		 * Optional entry points (nullptr = not exported by this plugin)
 		 * -------------------------------------------------------------- */
-		void    (*fnTeardown)()                                              = nullptr;
-		void    (*fnFitBegin)(const char*, uint32_t)                         = nullptr;
-		void    (*fnEpochBegin)(uint32_t, uint32_t)                          = nullptr;
-		void    (*fnBatchBegin)(uint32_t, uint32_t)                          = nullptr;
-		float   (*fnLossComputed)(float)                                     = nullptr;
-		void    (*fnBatchEnd)(uint32_t, float, const char*, uint32_t)        = nullptr;
-		int32_t (*fnEpochEnd)(uint32_t, const char*, uint32_t)               = nullptr;
-		void    (*fnValidationEnd)(const char*, uint32_t)                    = nullptr;
-		void    (*fnFitEnd)(const char*, uint32_t)                           = nullptr;
+		void    (*fnTeardown)()                                                       = nullptr;
+		void    (*fnFitBegin)(const char*, uint32_t)                                  = nullptr;
+		void    (*fnEpochBegin)(uint32_t, uint32_t)                                   = nullptr;
+		void    (*fnBatchBegin)(uint32_t, uint32_t)                                   = nullptr;
+		float   (*fnLossComputed)(float)                                              = nullptr;
+		void    (*fnBatchEnd)(uint32_t, float, const char*, uint32_t)                 = nullptr;
+		int32_t (*fnEpochEnd)(uint32_t, const char*, uint32_t)                        = nullptr;
+		void    (*fnValidationEnd)(const char*, uint32_t)                             = nullptr;
+		void    (*fnFitEnd)(const char*, uint32_t)                                    = nullptr;
+		void    (*fnOnLog)(uint32_t level, const char* msg, uint32_t len)              = nullptr;
+		void    (*fnOnMetric)(const char* key, uint32_t key_len, float v, int32_t step) = nullptr;
 
 		/* -----------------------------------------------------------------
 		 * C++ extension objects registered by this plugin

@@ -35,6 +35,11 @@
 #include <utility>
 #include <vector>
 
+#if defined(__unix__) || defined(__APPLE__)
+#	include <sys/ioctl.h>
+#	include <unistd.h>
+#endif
+
 #include <wasm_export.h>
 
 #include <ttm/plugins/abi.h>
@@ -430,6 +435,9 @@ namespace ttm::plugins {
 			if (auto r = wasm_loader_load(path, config_json, hostApi, *p); !r) {
 				return std::unexpected(r.error());
 			}
+			/* Switch persistentApi.ctx from the (now-stale) PluginRegistrationCtx*
+			 * to this manager so that post-init host callbacks work correctly. */
+			p->persistentApi.ctx = this;
 
 			plugins.push_back(std::move(p));
 		} else {
@@ -442,6 +450,9 @@ namespace ttm::plugins {
 			if (auto r = native_loader_load(path, config_json, hostApi, *p); !r) {
 				return std::unexpected(r.error());
 			}
+			/* Switch persistentApi.ctx from the (now-stale) PluginRegistrationCtx*
+			 * to this manager so that post-init host callbacks work correctly. */
+			p->persistentApi.ctx = this;
 
 			nativePlugins.push_back(std::move(p));
 		}
@@ -475,14 +486,16 @@ namespace ttm::plugins {
 		ctx.attach_task = [this, &ctx](std::unique_ptr<ITask> task) { register_task_impl(std::move(task), ctx); };
 
 		ttm_host_api api{};
-		api.ctx = &ctx;
-		api.register_source = &PluginManager::s_register_source;
+		api.ctx                = &ctx;
+		api.register_source    = &PluginManager::s_register_source;
 		api.register_transform = &PluginManager::s_register_transform;
-		api.register_task = &PluginManager::s_register_task;
-		api.register_metric = &PluginManager::s_register_metric;
-		api.log = &PluginManager::s_log;
-		api.alloc = &PluginManager::s_alloc;
-		api.free = &PluginManager::s_free;
+		api.register_task      = &PluginManager::s_register_task;
+		api.register_metric    = &PluginManager::s_register_metric;
+		api.log                = &PluginManager::s_log;
+		api.log_metric         = &PluginManager::s_log_metric;
+		api.terminal_size      = &PluginManager::s_terminal_size;
+		api.alloc              = &PluginManager::s_alloc;
+		api.free               = &PluginManager::s_free;
 		return api;
 	}
 
@@ -771,6 +784,72 @@ namespace ttm::plugins {
 				p->fnFitEnd(metrics_json.data(), static_cast<uint32_t>(metrics_json.size()));
 			}
 		}
+	}
+
+	void PluginManager::emit_log(ttm_log_level level, std::string_view msg) {
+		bool handled = false;
+
+		/* Dispatch to WASM plugins */
+		for (auto& p : plugins) {
+			if (p->fnOnLog == nullptr) continue;
+			uint32_t wasmPtr = 0, wasmLen = 0;
+			if (!wasm_push_string(p->inst, msg, wasmPtr, wasmLen)) continue;
+			std::array<uint32_t, 3> args{static_cast<uint32_t>(level), wasmPtr, wasmLen};
+			wasm_runtime_call_wasm(p->env, p->fnOnLog, args.size(), args.data());
+			wasm_runtime_module_free(p->inst, wasmPtr);
+			handled = true;
+		}
+
+		/* Dispatch to native plugins */
+		for (auto& p : nativePlugins) {
+			if (p->fnOnLog == nullptr) continue;
+			p->fnOnLog(static_cast<uint32_t>(level), msg.data(), static_cast<uint32_t>(msg.size()));
+			handled = true;
+		}
+
+		/* Fallback to stderr if no plugin consumed the message */
+		if (!handled) {
+			PluginManager::s_log(nullptr, level, msg.data(), static_cast<uint32_t>(msg.size()));
+		}
+	}
+
+	void PluginManager::emit_metric(std::string_view key, float value, int32_t step) {
+		/* Dispatch to WASM plugins */
+		for (auto& p : plugins) {
+			if (p->fnOnMetric == nullptr) continue;
+			uint32_t keyPtr = 0, keyLen = 0;
+			if (!wasm_push_string(p->inst, key, keyPtr, keyLen)) continue;
+			uint32_t valueBits = 0;
+			std::memcpy(&valueBits, &value, sizeof(float));
+			std::array<uint32_t, 4> args{keyPtr, keyLen, valueBits, static_cast<uint32_t>(step)};
+			wasm_runtime_call_wasm(p->env, p->fnOnMetric, args.size(), args.data());
+			wasm_runtime_module_free(p->inst, keyPtr);
+		}
+
+		/* Dispatch to native plugins */
+		for (auto& p : nativePlugins) {
+			if (p->fnOnMetric == nullptr) continue;
+			p->fnOnMetric(key.data(), static_cast<uint32_t>(key.size()), value, step);
+		}
+	}
+
+	void PluginManager::s_log_metric(void* ctx, const char* key, uint32_t key_len, float value, int32_t step) {
+		if (ctx == nullptr || key == nullptr || key_len == 0) return;
+		static_cast<PluginManager*>(ctx)->emit_metric({key, key_len}, value, step);
+	}
+
+	void PluginManager::s_terminal_size(void* /*ctx*/, uint32_t* out_width, uint32_t* out_height) {
+		uint32_t width = 80, height = 24;
+#if defined(TIOCGWINSZ)
+		struct winsize ws{};
+		// NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg) -- standard POSIX terminal size query
+		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+			if (ws.ws_col > 0) width  = static_cast<uint32_t>(ws.ws_col);
+			if (ws.ws_row > 0) height = static_cast<uint32_t>(ws.ws_row);
+		}
+#endif
+		if (out_width  != nullptr) *out_width  = width;
+		if (out_height != nullptr) *out_height = height;
 	}
 
 } // namespace ttm::plugins

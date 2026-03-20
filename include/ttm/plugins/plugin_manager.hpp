@@ -243,6 +243,33 @@ namespace ttm::plugins {
          */
 		void emit_fit_end(std::string_view metrics_json);
 
+		/**
+         * @brief Broadcast a log message to all plugins that export #ttm_on_log.
+         *
+         * @details
+         * Dispatches to every loaded plugin that exported `ttm_on_log`.  Falls
+         * back to writing to `stderr` if no plugin handles the message, so that
+         * log output is never silently dropped.
+         *
+         * @param[in] level  Severity level.
+         * @param[in] msg    Message text (does not need to be NUL-terminated).
+         */
+		void emit_log(ttm_log_level level, std::string_view msg);
+
+		/**
+         * @brief Broadcast a named scalar metric to all plugins that export #ttm_on_metric.
+         *
+         * @details
+         * Dispatches to every loaded plugin except the one that originated the
+         * metric (identified by the calling context).  Used by the Trainer for
+         * PyTorch Lightning–style `self.log("train_loss", loss)` calls.
+         *
+         * @param[in] key    Metric name.
+         * @param[in] value  Scalar value.
+         * @param[in] step   Global training step.
+         */
+		void emit_metric(std::string_view key, float value, int32_t step);
+
 		/** @} */
 
 	private:
@@ -303,6 +330,10 @@ namespace ttm::plugins {
 		s_register_metric(void* ctx, const char* name, const char** aliases, const ttm_metric_vtable* vt);
 		/// @private
 		static void s_log(void* ctx, ttm_log_level level, const char* msg, uint32_t len);
+		/// @private
+		static void s_log_metric(void* ctx, const char* key, uint32_t key_len, float value, int32_t step);
+		/// @private
+		static void s_terminal_size(void* ctx, uint32_t* out_width, uint32_t* out_height);
 		/// @private
 		static void* s_alloc(void* ctx, uint32_t size);
 		/// @private

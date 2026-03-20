@@ -293,6 +293,35 @@ typedef struct ttm_host_api {
 	void (*log)(void* ctx, ttm_log_level level, const char* msg, uint32_t len);
 
 	/**
+     * @brief Log a named scalar metric (PyTorch Lightning–style).
+     * @details
+     * Plugins and training code call this to record a scalar value at a given
+     * global optimiser step.  The host broadcasts the metric to every other
+     * loaded plugin via #ttm_on_metric so that UI or logging plugins can
+     * display it without knowing the source.
+     *
+     * @param ctx      Opaque host token.
+     * @param key      Metric name (not required to be NUL-terminated).
+     * @param key_len  Length of `key` in bytes.
+     * @param value    Scalar value (NaN / Inf are valid; consumers should handle them).
+     * @param step     Global training step at which the value was recorded.
+     */
+	void (*log_metric)(void* ctx, const char* key, uint32_t key_len, float value, int32_t step);
+
+	/**
+     * @brief Query the host terminal dimensions.
+     * @details
+     * WASM plugins cannot call ioctl directly; this callback lets them query
+     * the real terminal size from the host so they can size their rendering
+     * buffers accordingly.
+     *
+     * @param ctx        Opaque host token.
+     * @param out_width  Set to the number of terminal columns (default 80).
+     * @param out_height Set to the number of terminal rows    (default 24).
+     */
+	void (*terminal_size)(void* ctx, uint32_t* out_width, uint32_t* out_height);
+
+	/**
      * @brief Allocate `size` bytes in the plugin's address space.
      * @details For WASM plugins this allocates within the module's linear memory
      *          so that returned pointers are valid from the plugin side.
@@ -448,6 +477,36 @@ void ttm_on_validation_end(const char* metrics_json, uint32_t len);
  * @param len          Length of `metrics_json` in bytes.
  */
 void ttm_on_fit_end(const char* metrics_json, uint32_t len);
+
+/**
+ * @brief Called when the host emits a log message.
+ * @details
+ * Plugins that export this symbol receive every log message emitted by the
+ * host (trainer progress, warnings, errors, etc.).  This allows UI plugins
+ * to capture and display logs without redirecting file descriptors.
+ *
+ * The host skips the default stderr fallback when at least one loaded plugin
+ * exports this symbol, so the plugin is responsible for surfacing the message.
+ *
+ * @param level  Severity — one of the #ttm_log_level values.
+ * @param msg    Message bytes (not NUL-terminated).
+ * @param len    Length of `msg` in bytes.
+ */
+void ttm_on_log(uint32_t level, const char* msg, uint32_t len);
+
+/**
+ * @brief Called when a named scalar metric is logged via #ttm_host_api::log_metric.
+ * @details
+ * Plugins that export this symbol receive every metric logged by the host or
+ * by other plugins.  The originating plugin does not receive its own metric
+ * back to avoid loops.
+ *
+ * @param key      Metric name (not NUL-terminated).
+ * @param key_len  Length of `key` in bytes.
+ * @param value    Scalar value.
+ * @param step     Global training step.
+ */
+void ttm_on_metric(const char* key, uint32_t key_len, float value, int32_t step);
 
 /** @} */
 

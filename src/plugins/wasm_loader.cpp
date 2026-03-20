@@ -454,19 +454,63 @@ namespace ttm::plugins {
 			std::vector<std::string> metricStrs;
 		};
 
+		/**
+		 * @brief Retrieve the Plugin* stored as WAMR user-data.
+		 *
+		 * @details
+		 * Replaces the previous pattern of storing `ttm_host_api*` as user-data,
+		 * which caused a use-after-free when the stack-local ttm_host_api in
+		 * PluginManager::load() was deallocated while the plugin env still held a
+		 * pointer to it.  Storing `Plugin*` instead is safe because Plugin lives
+		 * in PluginManager::plugins (heap, stable address) for the process lifetime.
+		 */
+		static Plugin* get_plugin_ud(wasm_exec_env_t env) {
+			return static_cast<Plugin*>(wasm_runtime_get_user_data(env));
+		}
+
 		/* ---------- log --------------------------------------------------------- */
 		// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- signature is fixed by WAMR NativeSymbol ABI; parameter names clearly distinguish them
 		void host_log(wasm_exec_env_t env, uint32_t level, uint32_t msg_ptr, uint32_t msg_len) {
 			auto* inst = wasm_runtime_get_module_inst(env);
 			const auto* msg = static_cast<const char*>(wasm_runtime_addr_app_to_native(inst, msg_ptr));
-			if (msg == nullptr) {
-				return;
+			if (msg == nullptr) return;
+			const auto* p = get_plugin_ud(env);
+			if (p != nullptr && p->persistentApi.log != nullptr) {
+				p->persistentApi.log(p->persistentApi.ctx, static_cast<ttm_log_level>(level), msg, msg_len);
 			}
+		}
 
-			const auto* api = static_cast<const ttm_host_api*>(wasm_runtime_get_user_data(env));
-			if (api != nullptr && api->log != nullptr) {
-				api->log(api->ctx, static_cast<ttm_log_level>(level), msg, msg_len);
+		/* ---------- log_metric -------------------------------------------------- */
+		/* Route the metric back through persistentApi.log_metric (→ s_log_metric →
+		 * PluginManager::emit_metric).  This avoids a direct dependency on the full
+		 * PluginManager type, which is only forward-declared in wasm_loader.hpp. */
+		// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- fixed WAMR signature; all parameters have distinct types and clear names
+		void host_log_metric(wasm_exec_env_t env, uint32_t key_ptr, uint32_t key_len, float value, int32_t step) {
+			auto* inst = wasm_runtime_get_module_inst(env);
+			const auto* key = static_cast<const char*>(wasm_runtime_addr_app_to_native(inst, key_ptr));
+			if (key == nullptr || key_len == 0) return;
+			const auto* p = get_plugin_ud(env);
+			if (p != nullptr && p->persistentApi.log_metric != nullptr) {
+				p->persistentApi.log_metric(p->persistentApi.ctx, key, key_len, value, step);
 			}
+		}
+
+		/* ---------- terminal_size ----------------------------------------------- */
+		void host_terminal_size(wasm_exec_env_t env, uint32_t w_ptr, uint32_t h_ptr) {
+			auto* inst = wasm_runtime_get_module_inst(env);
+			auto* w = static_cast<uint32_t*>(wasm_runtime_addr_app_to_native(inst, w_ptr));
+			auto* h = static_cast<uint32_t*>(wasm_runtime_addr_app_to_native(inst, h_ptr));
+			uint32_t width = 80, height = 24;
+#if defined(TIOCGWINSZ)
+			struct winsize ws{};
+			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg) -- TIOCGWINSZ ioctl is the standard POSIX way to get terminal size; no safer alternative
+			if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+				if (ws.ws_col > 0) width  = static_cast<uint32_t>(ws.ws_col);
+				if (ws.ws_row > 0) height = static_cast<uint32_t>(ws.ws_row);
+			}
+#endif
+			if (w != nullptr) *w = width;
+			if (h != nullptr) *h = height;
 		}
 
 		/* ---------- alloc ------------------------------------------------------- */
@@ -485,41 +529,26 @@ namespace ttm::plugins {
 		/* ---------- register_source -------------------------------------------- */
 		int32_t host_register_source(wasm_exec_env_t env, uint32_t schemes_ptr, uint32_t vtable_ptr) {
 			auto* inst = wasm_runtime_get_module_inst(env);
-			if (schemes_ptr == 0 || vtable_ptr == 0) {
-				return TTM_ERR_ARGS;
-			}
+			if (schemes_ptr == 0 || vtable_ptr == 0) return TTM_ERR_ARGS;
 
 			/* Read scheme list from WASM memory */
 			auto schemeList = read_wasm_string_array(inst, schemes_ptr);
-			if (schemeList.empty()) {
-				return TTM_ERR_ARGS;
-			}
+			if (schemeList.empty()) return TTM_ERR_ARGS;
 
-			/* Read vtable function-table indices from WASM memory.
-			 * In WASM32 each function-pointer field is a uint32_t. */
+			/* Read vtable function-table indices — [open_idx, read_idx, seek_idx, close_idx] */
 			const auto* vtNative = static_cast<const uint32_t*>(wasm_runtime_addr_app_to_native(inst, vtable_ptr));
-			if (vtNative == nullptr) {
-				return TTM_ERR_ARGS;
-			}
-			/* Layout: [open_idx, read_idx, seek_idx, close_idx] */
-			uint32_t openIdx = 0;
-			uint32_t readIdx = 0;
-			uint32_t seekIdx = 0;
-			uint32_t closeIdx = 0;
-			std::memcpy(&openIdx, vtNative + 0, sizeof(uint32_t));
-			std::memcpy(&readIdx, vtNative + 1, sizeof(uint32_t));
-			std::memcpy(&seekIdx, vtNative + 2, sizeof(uint32_t));
+			if (vtNative == nullptr) return TTM_ERR_ARGS;
+			uint32_t openIdx = 0, readIdx = 0, seekIdx = 0, closeIdx = 0;
+			std::memcpy(&openIdx,  vtNative + 0, sizeof(uint32_t));
+			std::memcpy(&readIdx,  vtNative + 1, sizeof(uint32_t));
+			std::memcpy(&seekIdx,  vtNative + 2, sizeof(uint32_t));
 			std::memcpy(&closeIdx, vtNative + 3, sizeof(uint32_t));
 
-			/* Retrieve the registration context */
-			const auto* hostApi = static_cast<const ttm_host_api*>(wasm_runtime_get_user_data(env));
-			if (hostApi == nullptr || hostApi->ctx == nullptr) {
-				return TTM_ERR_ARGS;
-			}
-			auto* regCtx = static_cast<PluginRegistrationCtx*>(hostApi->ctx);
-			if (!regCtx->attach_source) {
-				return TTM_ERR_ARGS;
-			}
+			/* Registration context is valid only during ttm_plugin_init */
+			const auto* p = get_plugin_ud(env);
+			if (p == nullptr) return TTM_ERR_ARGS;
+			auto* regCtx = static_cast<PluginRegistrationCtx*>(p->persistentApi.ctx);
+			if (regCtx == nullptr || !regCtx->attach_source) return TTM_ERR_ARGS;
 
 			auto adapter = std::make_unique<WasmSourceAdapter>(
 					std::move(schemeList), env, inst, openIdx, readIdx, seekIdx, closeIdx
@@ -531,43 +560,28 @@ namespace ttm::plugins {
 		/* ---------- register_task ---------------------------------------------- */
 		int32_t host_register_task(wasm_exec_env_t env, uint32_t name_ptr, uint32_t vtable_ptr) {
 			auto* inst = wasm_runtime_get_module_inst(env);
-			if (name_ptr == 0 || vtable_ptr == 0) {
-				return TTM_ERR_ARGS;
-			}
+			if (name_ptr == 0 || vtable_ptr == 0) return TTM_ERR_ARGS;
 
 			/* Read vtable function-table indices (6 × uint32_t) */
 			const auto* vtNative = static_cast<const uint32_t*>(wasm_runtime_addr_app_to_native(inst, vtable_ptr));
-			if (vtNative == nullptr) {
-				return TTM_ERR_ARGS;
-			}
-			uint32_t nameFn = 0;
-			uint32_t aliasesFn = 0;
-			uint32_t inputsFn = 0;
-			uint32_t labelFn = 0;
-			uint32_t metricsFn = 0;
-			uint32_t lossFn = 0;
-			std::memcpy(&nameFn, vtNative + 0, sizeof(uint32_t));
+			if (vtNative == nullptr) return TTM_ERR_ARGS;
+			uint32_t nameFn = 0, aliasesFn = 0, inputsFn = 0, labelFn = 0, metricsFn = 0, lossFn = 0;
+			std::memcpy(&nameFn,    vtNative + 0, sizeof(uint32_t));
 			std::memcpy(&aliasesFn, vtNative + 1, sizeof(uint32_t));
-			std::memcpy(&inputsFn, vtNative + 2, sizeof(uint32_t));
-			std::memcpy(&labelFn, vtNative + 3, sizeof(uint32_t));
+			std::memcpy(&inputsFn,  vtNative + 2, sizeof(uint32_t));
+			std::memcpy(&labelFn,   vtNative + 3, sizeof(uint32_t));
 			std::memcpy(&metricsFn, vtNative + 4, sizeof(uint32_t));
-			std::memcpy(&lossFn, vtNative + 5, sizeof(uint32_t));
+			std::memcpy(&lossFn,    vtNative + 5, sizeof(uint32_t));
 
-			const auto* hostApi = static_cast<const ttm_host_api*>(wasm_runtime_get_user_data(env));
-			if (hostApi == nullptr || hostApi->ctx == nullptr) {
-				return TTM_ERR_ARGS;
-			}
-			auto* regCtx = static_cast<PluginRegistrationCtx*>(hostApi->ctx);
-			if (!regCtx->attach_task) {
-				return TTM_ERR_ARGS;
-			}
+			const auto* p = get_plugin_ud(env);
+			if (p == nullptr) return TTM_ERR_ARGS;
+			auto* regCtx = static_cast<PluginRegistrationCtx*>(p->persistentApi.ctx);
+			if (regCtx == nullptr || !regCtx->attach_task) return TTM_ERR_ARGS;
 
 			auto adapter = std::make_unique<WasmTaskAdapter>(
 					env, inst, nameFn, aliasesFn, inputsFn, labelFn, metricsFn
 			);
-			if (adapter->name().empty()) {
-				return TTM_ERR_ARGS;
-			}
+			if (adapter->name().empty()) return TTM_ERR_ARGS;
 
 			regCtx->attach_task(std::move(adapter));
 			return TTM_OK;
@@ -578,15 +592,19 @@ namespace ttm::plugins {
 		NativeSymbol ttm_native_symbols[] = {
 				/* { "export_name", func_ptr, "signature", attachment } */
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- WAMR NativeSymbol API requires void* function pointers; no safer alternative
-				{"ttm_log", reinterpret_cast<void*>(host_log), "(iii)", nullptr},
+				{"ttm_log",             reinterpret_cast<void*>(host_log),            "(iii)",  nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_alloc", reinterpret_cast<void*>(host_alloc), "(i)i", nullptr},
+				{"ttm_log_metric",      reinterpret_cast<void*>(host_log_metric),     "(iifi)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_free", reinterpret_cast<void*>(host_free), "(i)", nullptr},
+				{"ttm_terminal_size",   reinterpret_cast<void*>(host_terminal_size),  "(ii)",   nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_register_source", reinterpret_cast<void*>(host_register_source), "(ii)i", nullptr},
+				{"ttm_alloc",           reinterpret_cast<void*>(host_alloc),          "(i)i",   nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_register_task", reinterpret_cast<void*>(host_register_task), "(ii)i", nullptr},
+				{"ttm_free",            reinterpret_cast<void*>(host_free),           "(i)",    nullptr},
+				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
+				{"ttm_register_source", reinterpret_cast<void*>(host_register_source),"(ii)i",  nullptr},
+				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
+				{"ttm_register_task",   reinterpret_cast<void*>(host_register_task),  "(ii)i",  nullptr},
 		};
 
 	} // anonymous namespace
@@ -643,10 +661,22 @@ namespace ttm::plugins {
 			return std::unexpected("wasm_loader_load: failed to create exec env");
 		}
 
-		/* Attach host API pointer so host callbacks can retrieve it */
-		wasm_runtime_set_user_data(
-				plugin.env, const_cast<ttm_host_api*>(&host_api)
-		); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- WAMR user_data is void*; WAMR does not modify it
+		/* Copy host_api into Plugin so callbacks can access it safely after
+		 * PluginManager::load() returns and the stack-local PluginRegistrationCtx
+		 * goes out of scope.  Extract the owning PluginManager via the ctx pointer
+		 * (valid here because we are still inside wasm_loader_load).
+		 *
+		 * ctx is set to nullptr now; PluginManager::load() updates it to manager*
+		 * after a successful load so that post-init callbacks (log_metric, etc.)
+		 * receive a valid PluginManager* context. */
+		plugin.persistentApi = host_api;
+		if (const auto* regCtx = static_cast<const PluginRegistrationCtx*>(host_api.ctx)) {
+			plugin.manager = regCtx->manager;
+		}
+		plugin.persistentApi.ctx = nullptr; /* updated to manager* by PluginManager::load() */
+		/* Store Plugin* as WAMR user-data — stable: Plugin lives on the heap
+		 * inside PluginManager::plugins for the entire manager lifetime. */
+		wasm_runtime_set_user_data(plugin.env, &plugin);
 
 		/* 6. Verify ABI version ---------------------------------------------- */
 		auto* fn_info = wasm_runtime_lookup_function(plugin.inst, "ttm_plugin_get_info");
@@ -729,15 +759,17 @@ namespace ttm::plugins {
 		auto lookup = [&](const char* name) -> wasm_function_inst_t {
 			return wasm_runtime_lookup_function(plugin.inst, name);
 		};
-		plugin.fnFitBegin = lookup("ttm_on_fit_begin");
-		plugin.fnEpochBegin = lookup("ttm_on_epoch_begin");
-		plugin.fnBatchBegin = lookup("ttm_on_batch_begin");
-		plugin.fnLossComputed = lookup("ttm_on_loss_computed");
-		plugin.fnBatchEnd = lookup("ttm_on_batch_end");
-		plugin.fnEpochEnd = lookup("ttm_on_epoch_end");
+		plugin.fnFitBegin      = lookup("ttm_on_fit_begin");
+		plugin.fnEpochBegin    = lookup("ttm_on_epoch_begin");
+		plugin.fnBatchBegin    = lookup("ttm_on_batch_begin");
+		plugin.fnLossComputed  = lookup("ttm_on_loss_computed");
+		plugin.fnBatchEnd      = lookup("ttm_on_batch_end");
+		plugin.fnEpochEnd      = lookup("ttm_on_epoch_end");
 		plugin.fnValidationEnd = lookup("ttm_on_validation_end");
-		plugin.fnFitEnd = lookup("ttm_on_fit_end");
-		plugin.fnTeardown = lookup("ttm_plugin_teardown");
+		plugin.fnFitEnd        = lookup("ttm_on_fit_end");
+		plugin.fnOnLog         = lookup("ttm_on_log");
+		plugin.fnOnMetric      = lookup("ttm_on_metric");
+		plugin.fnTeardown      = lookup("ttm_plugin_teardown");
 
 		return {};
 	}

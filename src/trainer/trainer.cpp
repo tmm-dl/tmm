@@ -5,11 +5,12 @@
 
 #include <ttm/trainer/trainer.hpp>
 #include <ttm/compat/format.hpp>
+#include <ttm/plugins/abi.h>
 
 #include <chrono>
 #include <cmath>
-#include <iostream>
 #include <limits>
+#include <string>
 
 namespace ttm::trainer {
 
@@ -63,11 +64,12 @@ namespace ttm::trainer {
 #	define TTM_VERSION "unknown"
 #endif
 		return std::format(
-			R"({{"ttm_version":"{}","total_epochs":{},"dataset_uri":"{}","dataset_split":"{}"}})",
+			R"({{"ttm_version":"{}","total_epochs":{},"dataset_uri":"{}","dataset_split":"{}","model_path":"{}"}})",
 			TTM_VERSION,
 			config_.epochs,
 			config_.dataset.uri,
-			config_.dataset.split
+			config_.dataset.split,
+			config_.model.path
 		);
 	}
 
@@ -116,13 +118,17 @@ namespace ttm::trainer {
 	 * Main training loop
 	 * ====================================================================== */
 
+	void Trainer::log(std::string_view key, float value) {
+		plugins_.emit_metric(key, value, static_cast<int32_t>(globalStep_));
+	}
+
 	std::expected<EpochMetrics, std::string> Trainer::fit() {
 		plugins_.emit_fit_begin(build_fit_begin_json());
 
 		EpochMetrics final_metrics;
-		int64_t      global_step     = 0; ///< Batch-level counter (incremented every batch)
-		int64_t      global_opt_step = 0; ///< Optimizer-step counter
-		float        current_lr      = optimizer_
+		globalStep_              = 0;  ///< Batch-level counter — also exposed via log()
+		int64_t global_opt_step  = 0;  ///< Optimizer-step counter
+		float   current_lr       = optimizer_
 			? optimizer_->learning_rate()
 			: config_.optimizer.lr;
 
@@ -148,7 +154,7 @@ namespace ttm::trainer {
 			// ── Batch loop ─────────────────────────────────────────────────
 			std::shared_ptr<arrow::RecordBatch> raw;
 			while (iter->next(raw)) {
-				const Batch batch{raw, global_step, batch_idx};
+				const Batch batch{raw, globalStep_, batch_idx};
 
 				plugins_.emit_batch_begin(
 					static_cast<uint32_t>(batch_idx),
@@ -161,7 +167,7 @@ namespace ttm::trainer {
 				epoch_loss    += loss;
 				epoch_samples += raw->num_rows();
 				++accum_step;
-				++global_step;
+				++globalStep_;
 				++batch_idx;
 
 				// ── Optimizer step ─────────────────────────────────────────
@@ -178,10 +184,14 @@ namespace ttm::trainer {
 					accum_step = 0;
 				}
 
+				// ── Per-batch metric logging ───────────────────────────────
+				plugins_.emit_metric("train_loss", loss, static_cast<int32_t>(globalStep_));
+				plugins_.emit_metric("learning_rate", current_lr, static_cast<int32_t>(globalStep_));
+
 				plugins_.emit_batch_end(
 					static_cast<uint32_t>(batch_idx - 1),
 					loss,
-					build_batch_json(epoch, global_step, loss, current_lr)
+					build_batch_json(epoch, globalStep_, loss, current_lr)
 				);
 			}
 
@@ -212,35 +222,42 @@ namespace ttm::trainer {
 			if (val_factory_) {
 				if (auto vr = run_validation(); vr) {
 					val_loss = *vr;
+					plugins_.emit_metric("val_loss", val_loss, static_cast<int32_t>(globalStep_));
 				} else {
-					std::cerr << "[ttm] validation failed: " << vr.error() << '\n';
+					plugins_.emit_log(TTM_LOG_WARN,
+						"validation failed: " + vr.error());
 				}
 				plugins_.emit_validation_end(
-					build_epoch_json({epoch, global_step, avg_loss, val_loss, current_lr, throughput})
+					build_epoch_json({epoch, globalStep_, avg_loss, val_loss, current_lr, throughput})
 				);
 			}
 
-			EpochMetrics metrics{epoch, global_step, avg_loss, val_loss, current_lr, throughput};
+			EpochMetrics metrics{epoch, globalStep_, avg_loss, val_loss, current_lr, throughput};
 			final_metrics = metrics;
+
+			// ── Per-epoch metric logging ───────────────────────────────────
+			plugins_.emit_metric("epoch_train_loss", avg_loss, static_cast<int32_t>(globalStep_));
+			plugins_.emit_metric("throughput", static_cast<float>(throughput),
+			                     static_cast<int32_t>(globalStep_));
 
 			// ── Log ───────────────────────────────────────────────────────
 			if (std::isnan(val_loss)) {
-				std::cout << std::format(
-					"[ttm] epoch {}/{} — loss: {:.4f}  lr: {:.2e}  {:.0f} samples/s\n",
+				plugins_.emit_log(TTM_LOG_INFO, std::format(
+					"epoch {}/{} — loss: {:.4f}  lr: {:.2e}  {:.0f} samples/s",
 					epoch, config_.epochs, avg_loss, current_lr, throughput
-				);
+				));
 			} else {
-				std::cout << std::format(
-					"[ttm] epoch {}/{} — loss: {:.4f}  val_loss: {:.4f}  lr: {:.2e}  {:.0f} samples/s\n",
+				plugins_.emit_log(TTM_LOG_INFO, std::format(
+					"epoch {}/{} — loss: {:.4f}  val_loss: {:.4f}  lr: {:.2e}  {:.0f} samples/s",
 					epoch, config_.epochs, avg_loss, val_loss, current_lr, throughput
-				);
+				));
 			}
 
 			if (plugins_.emit_epoch_end(
 					static_cast<uint32_t>(epoch),
 					build_epoch_json(metrics)
 				)) {
-				std::cout << "[ttm] early stopping requested by plugin\n";
+				plugins_.emit_log(TTM_LOG_INFO, "early stopping requested by plugin");
 				break;
 			}
 		}

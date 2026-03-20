@@ -87,10 +87,11 @@ if(TTM_BUILD_EXTENSIONS)
     # Must be added after src/ so that the libgit2 CPM package is already available.
     add_subdirectory(extensions/core)
 
-    # WASM nlp-tasks plugin — requires WASI SDK toolchain; cross-compiled via
-    # ExternalProject so it does not pollute the host build tree.
+    # WASM plugins require WASI SDK; cross-compiled via ExternalProject so they
+    # do not pollute the host build tree.
     if(TTM_WASM_TOOLCHAIN)
         include(ExternalProject)
+
         ExternalProject_Add(ttm_nlp_tasks_wasm
             SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/extensions/nlp-tasks
             BINARY_DIR  ${CMAKE_BINARY_DIR}/extensions/nlp-tasks
@@ -101,9 +102,24 @@ if(TTM_BUILD_EXTENSIONS)
             BUILD_ALWAYS YES
             INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
         )
+
+        # console-ui: live TUI dashboard plugin (FTXUI DOM, WASI).
+        # FTXUI is fetched by the sub-project via CPM; compiled with
+        # -D__EMSCRIPTEN__=1 so Terminal::Size() skips ioctl.
+        ExternalProject_Add(ttm_console_ui_wasm
+            SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/extensions/console-ui
+            BINARY_DIR  ${CMAKE_BINARY_DIR}/extensions/console-ui
+            CMAKE_ARGS
+                -DCMAKE_TOOLCHAIN_FILE=${TTM_WASM_TOOLCHAIN}
+                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/extensions
+                -DCPM_SOURCE_CACHE=${CPM_SOURCE_CACHE}
+            BUILD_ALWAYS YES
+            INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+        )
     else()
         message(STATUS
-            "TTM_WASM_TOOLCHAIN not set; skipping nlp-tasks WASM plugin. "
+            "TTM_WASM_TOOLCHAIN not set; skipping WASM plugins (nlp-tasks, console-ui). "
             "Set -DTTM_WASM_TOOLCHAIN=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake to enable.")
     endif()
 endif()

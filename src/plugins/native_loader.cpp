@@ -145,9 +145,14 @@ namespace ttm::plugins {
 		}
 
 		/* 4. Call ttm_plugin_init ------------------------------------------- */
+		/* Copy host_api into persistentApi so that native plugins can safely
+		 * retain the host pointer for post-init lifecycle callbacks.  ctx is
+		 * initially the PluginRegistrationCtx*; PluginManager::load() updates it
+		 * to PluginManager* after we return so post-init log_metric etc. work. */
+		plugin.persistentApi = host_api;
 		const auto config_str = std::string(config_json);
 		const auto init_result =
-				plugin.fnInit(&host_api, config_str.c_str(), static_cast<uint32_t>(config_str.size()));
+				plugin.fnInit(&plugin.persistentApi, config_str.c_str(), static_cast<uint32_t>(config_str.size()));
 		if (init_result != TTM_OK) {
 			lib_close(plugin.dlHandle);
 			plugin.dlHandle = nullptr;
@@ -166,6 +171,8 @@ namespace ttm::plugins {
 		plugin.fnEpochEnd      = resolve<int32_t (*)(uint32_t, const char*, uint32_t)>(plugin.dlHandle, "ttm_on_epoch_end");
 		plugin.fnValidationEnd = resolve<void (*)(const char*, uint32_t)>(plugin.dlHandle, "ttm_on_validation_end");
 		plugin.fnFitEnd        = resolve<void (*)(const char*, uint32_t)>(plugin.dlHandle, "ttm_on_fit_end");
+		plugin.fnOnLog         = resolve<void (*)(uint32_t, const char*, uint32_t)>(plugin.dlHandle, "ttm_on_log");
+		plugin.fnOnMetric      = resolve<void (*)(const char*, uint32_t, float, int32_t)>(plugin.dlHandle, "ttm_on_metric");
 
 		return {};
 	}

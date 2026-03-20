@@ -58,6 +58,28 @@ namespace ttm::plugins {
 		wasm_module_inst_t inst = nullptr; ///< Module instance.
 		wasm_exec_env_t env = nullptr;	   ///< Execution environment.
 
+		/**
+		 * @brief Persistent copy of ttm_host_api used as WAMR user-data.
+		 *
+		 * @details
+		 * The host_api pointer stored via wasm_runtime_set_user_data must
+		 * remain valid for the entire lifetime of the plugin.  Copying it
+		 * into the Plugin struct (which lives in PluginManager::plugins)
+		 * ensures it is never dangling when lifecycle callbacks fire.
+		 */
+		ttm_host_api persistentApi{};
+
+		/**
+		 * @brief Back-reference to the owning PluginManager.
+		 *
+		 * @details
+		 * Stored alongside persistentApi so that host imports that need to
+		 * route calls back through the manager (e.g. host_log_metric) can
+		 * do so without relying on the registration-time ctx pointer, which
+		 * is only valid during ttm_plugin_init.
+		 */
+		PluginManager* manager = nullptr;
+
 		/* -----------------------------------------------------------------
 		 * Resolved optional lifecycle hooks (nullptr = not exported)
 		 * -------------------------------------------------------------- */
@@ -69,6 +91,8 @@ namespace ttm::plugins {
 		wasm_function_inst_t fnEpochEnd = nullptr;		///< @see ttm_on_epoch_end
 		wasm_function_inst_t fnValidationEnd = nullptr; ///< @see ttm_on_validation_end
 		wasm_function_inst_t fnFitEnd = nullptr;		///< @see ttm_on_fit_end
+		wasm_function_inst_t fnOnLog = nullptr;			///< @see ttm_on_log
+		wasm_function_inst_t fnOnMetric = nullptr;		///< @see ttm_on_metric
 		wasm_function_inst_t fnTeardown = nullptr;		///< @see ttm_plugin_teardown
 
 		/* -----------------------------------------------------------------

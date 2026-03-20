@@ -99,6 +99,19 @@ namespace ttm::trainer {
 		 */
 		[[nodiscard]] std::expected<EpochMetrics, std::string> fit();
 
+		/**
+		 * @brief Log a named scalar metric (PyTorch Lightning–style).
+		 *
+		 * @details
+		 * Broadcasts the metric to all loaded plugins via
+		 * @ref ttm::plugins::PluginManager::emit_metric.  Plugins that export
+		 * @c ttm_on_metric (e.g. console-ui) will receive it immediately.
+		 *
+		 * @param key    Metric name (e.g. "train_loss", "accuracy").
+		 * @param value  Scalar value.
+		 */
+		void log(std::string_view key, float value);
+
 	private:
 		[[nodiscard]] std::expected<float, std::string> run_validation();
 
@@ -114,6 +127,10 @@ namespace ttm::trainer {
 		DatasetFactory                val_factory_;
 		std::unique_ptr<IOptimizer>   optimizer_;
 		std::unique_ptr<ILRScheduler> scheduler_;
+
+		/** @brief Monotonically increasing batch-level step counter.
+		 *  Updated by fit(); read by log() for metric step tagging. */
+		int64_t globalStep_ = 0;
 	};
 
 } // namespace ttm::trainer
