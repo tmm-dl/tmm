@@ -35,6 +35,15 @@ target_include_directories(ttm_python PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+# dlpack — abi.h includes <dlpack/dlpack.h>; CPM deduplicates when built from root.
+CPMAddPackage(
+    NAME dlpack
+    GITHUB_REPOSITORY dmlc/dlpack
+    VERSION 0.8
+    EXCLUDE_FROM_ALL YES
+)
+target_link_libraries(ttm_python PRIVATE dlpack)
+
 set_target_properties(ttm_python PROPERTIES
     PREFIX ""
     CXX_VISIBILITY_PRESET hidden

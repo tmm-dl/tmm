@@ -37,8 +37,10 @@
 #include <Python.h>
 
 #include <array>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 /* ============================================================================
  * Constants
