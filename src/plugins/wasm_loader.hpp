@@ -112,6 +112,16 @@ namespace ttm::plugins {
 		 *          non-owning raw pointers.
 		 */
 		std::vector<std::unique_ptr<ITask>> tasks;
+
+		/**
+		 * @brief Model loaders registered by this plugin.
+		 */
+		std::vector<std::unique_ptr<IModelLoader>> modelLoaders;
+
+		/**
+		 * @brief Transforms registered by this plugin.
+		 */
+		std::vector<std::unique_ptr<ITransform>> transforms;
 	};
 
 	/* =========================================================================

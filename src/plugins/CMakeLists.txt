@@ -41,3 +41,14 @@ target_link_libraries(ttm_plugins PUBLIC ttm_compat)
 
 # dlopen / LoadLibrary for native plugin loading
 target_link_libraries(ttm_plugins PRIVATE ${CMAKE_DL_LIBS})
+
+# DLPack — header-only tensor ABI shared with the model system.
+# Linked PUBLIC so consumers of ttm_plugins (including ttm_model) get the
+# dlpack include path without having to add it themselves.
+CPMAddPackage(
+    NAME dlpack
+    GITHUB_REPOSITORY dmlc/dlpack
+    VERSION 0.8
+    EXCLUDE_FROM_ALL YES
+)
+target_link_libraries(ttm_plugins PUBLIC dlpack)

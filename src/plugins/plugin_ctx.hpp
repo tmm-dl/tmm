@@ -48,6 +48,12 @@ namespace ttm::plugins {
 
 		/** @brief Transfer ownership of a task into the owning plugin record + registry. */
 		std::function<void(std::unique_ptr<ITask>)> attach_task;
+
+		/** @brief Transfer ownership of a model loader into the owning plugin record + registry. */
+		std::function<void(std::unique_ptr<IModelLoader>)> attach_model_loader;
+
+		/** @brief Transfer ownership of a transform into the owning plugin record + registry. */
+		std::function<void(std::unique_ptr<ITransform>)> attach_transform;
 	};
 
 } // namespace ttm::plugins

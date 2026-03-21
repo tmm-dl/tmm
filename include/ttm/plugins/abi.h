@@ -25,6 +25,10 @@
 
 #include <stdint.h>
 
+/* DLPack — standard tensor interchange format used by the model loader ABI.
+ * dlpack.h is a self-contained, pure-C header. */
+#include <dlpack/dlpack.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -219,6 +223,150 @@ typedef struct ttm_metric_vtable {
 /** @} */
 
 /* =========================================================================
+ * @defgroup abi_model_loader Model loader vtable
+ * @{
+ *
+ * Plugins implement ttm_model_loader_vtable and register it via
+ * ttm_host_api::register_model_loader.  The host calls probe() to decide
+ * which registered loader owns a given file, then load() to instantiate
+ * the model.
+ * ====================================================================== */
+
+/**
+ * @brief Per-parameter layout descriptor returned by describe_params().
+ *
+ * @details
+ * All pointer fields are valid until the model is destroyed.  The host must
+ * not free them.
+ */
+// NOLINTNEXTLINE(modernize-use-using) -- pure C header
+typedef struct ttm_param_desc_t {
+	const char*    name;         /**< Parameter name (NUL-terminated).               */
+	int32_t        ndim;         /**< Number of tensor dimensions.                   */
+	int32_t        dtype_code;   /**< DLDataTypeCode: 0=int, 1=uint, 2=float, …     */
+	int32_t        dtype_bits;   /**< Bit-width of the element type (e.g. 32).       */
+	const int64_t* shape;        /**< Shape array of length ndim (plugin-owned).     */
+	int32_t        trainable;    /**< Non-zero if gradients should be tracked.       */
+} ttm_param_desc_t;
+
+/**
+ * @brief Model metadata broadcast to plugins via ttm_on_model_loaded.
+ */
+// NOLINTNEXTLINE(modernize-use-using) -- pure C header
+typedef struct ttm_model_info_t {
+	const char* name;               /**< Human-readable model name (NUL-terminated).   */
+	const char* arch;               /**< Architecture tag, e.g. "GPT2" (NUL-term.).   */
+	uint64_t    num_parameters;     /**< Total parameter count.                        */
+	uint64_t    num_trainable;      /**< Count of trainable parameters.                */
+	uint64_t    bytes_on_device;    /**< Memory footprint (params + grads), bytes.     */
+	const char* input_schema_json;  /**< Arrow JSON schema for expected inputs.        */
+	int32_t     device_type;        /**< DLDeviceType of the device the model lives on. */
+	int32_t     device_id;          /**< Device index (e.g. GPU ordinal).              */
+} ttm_model_info_t;
+
+/**
+ * @brief Vtable for plugin-provided model loaders.
+ *
+ * @details
+ * A plugin registers one instance of this struct via
+ * #ttm_host_api::register_model_loader.  The host uses probe() to find the
+ * right loader for a given file, then calls the remaining methods to set up,
+ * train, and tear down the model.
+ *
+ * All methods operate on an opaque #ttm_handle returned by load().  The host
+ * owns the DLTensor buffers passed to bind_params(); the plugin must not free
+ * them.
+ *
+ * @see ttm::plugins::IModelLoader  C++ wrapper around this vtable
+ */
+// NOLINTNEXTLINE(modernize-use-using) -- pure C header
+typedef struct ttm_model_loader_vtable {
+	/**
+	 * @brief Return non-zero if this loader can handle the given path.
+	 * @param path    File path (not NUL-terminated).
+	 * @param len     Length of `path` in bytes.
+	 */
+	int32_t (*probe)(const char* path, uint32_t len);
+
+	/**
+	 * @brief Load a model from disk and return a handle.
+	 * @param path      Model file path (not NUL-terminated).
+	 * @param path_len  Length of `path` in bytes.
+	 * @param cfg       Plugin-specific JSON config (not NUL-terminated).
+	 * @param cfg_len   Length of `cfg` in bytes.
+	 * @param err       Buffer for a human-readable error message on failure.
+	 * @param err_cap   Capacity of `err` in bytes.
+	 * @return A valid handle, or #TTM_INVALID_HANDLE on failure.
+	 */
+	ttm_handle (*load)(const char* path, uint32_t path_len,
+	                   const char* cfg,  uint32_t cfg_len,
+	                   char* err, uint32_t err_cap);
+
+	/**
+	 * @brief Return static metadata for a loaded model.
+	 * @details All pointer fields in the returned struct are valid until
+	 *          destroy() is called on the same handle.
+	 */
+	ttm_model_info_t (*get_info)(ttm_handle h);
+
+	/**
+	 * @brief Describe the parameter layout.
+	 * @details The returned array is valid until the next call to this method
+	 *          or until destroy().
+	 * @param[out] out_descs  Set to a plugin-owned array of descriptors.
+	 * @param[out] out_count  Set to the number of entries in `*out_descs`.
+	 */
+	ttm_error (*describe_params)(ttm_handle h,
+	                             const ttm_param_desc_t** out_descs,
+	                             uint32_t* out_count);
+
+	/**
+	 * @brief Bind host-allocated parameter and gradient buffers to the model.
+	 * @details Called once after load(), before any step()/infer() calls.
+	 *          The host retains ownership of all DLTensors.
+	 */
+	ttm_error (*bind_params)(ttm_handle h,
+	                         const DLTensor* params, uint32_t param_count,
+	                         const DLTensor* grads,  uint32_t grad_count);
+
+	/**
+	 * @brief Initialise parameter values.
+	 * @param method  Either "random" or "checkpoint:<path>" (not NUL-terminated).
+	 * @param len     Length of `method` in bytes.
+	 */
+	ttm_error (*init_params)(ttm_handle h, const char* method, uint32_t len);
+
+	/**
+	 * @brief Forward + backward pass; writes the scalar loss to `out_loss`.
+	 * @param inputs   Array of input DLTensors (host-owned).
+	 * @param n        Number of input tensors.
+	 * @param out_loss Set to the scalar loss for this batch.
+	 */
+	ttm_error (*step)(ttm_handle h,
+	                  const DLTensor* inputs, uint32_t n,
+	                  float* out_loss);
+
+	/**
+	 * @brief Forward-only pass; fills caller-provided output tensors.
+	 * @param inputs      Array of input DLTensors (host-owned).
+	 * @param in_count    Number of input tensors.
+	 * @param outputs     Array of output DLTensors to fill (host-owned).
+	 * @param out_count   On entry, capacity of `outputs`; on exit, filled count.
+	 */
+	ttm_error (*infer)(ttm_handle h,
+	                   const DLTensor* inputs,  uint32_t in_count,
+	                   DLTensor*       outputs, uint32_t* out_count);
+
+	/** @brief Zero all gradient buffers. */
+	ttm_error (*zero_grad)(ttm_handle h);
+
+	/** @brief Destroy the model and release all plugin-side resources. */
+	void (*destroy)(ttm_handle h);
+} ttm_model_loader_vtable;
+
+/** @} */
+
+/* =========================================================================
  * @defgroup abi_host_api Host API
  * @{
  *
@@ -333,6 +481,29 @@ typedef struct ttm_host_api {
      * @brief Free memory previously obtained via #ttm_host_api::alloc.
      */
 	void (*free)(void* ctx, void* ptr);
+
+	/**
+     * @brief Register a model loader.
+     * @details Called by a plugin during #ttm_plugin_init to register a
+     *          vtable that the host will use to load models matching the
+     *          files accepted by vt->probe().
+     * @param ctx  Opaque host token.
+     * @param vt   Model loader vtable.  The pointer must remain valid for the
+     *             lifetime of the plugin (i.e. until #ttm_plugin_teardown).
+     * @return #TTM_OK on success.
+     * @see ttm_model_loader_vtable
+     */
+	ttm_error (*register_model_loader)(void* ctx, const ttm_model_loader_vtable* vt);
+
+	/**
+     * @brief Broadcast model metadata to all loaded plugins.
+     * @details Called by the host after a model is successfully loaded.
+     *          Plugins that export #ttm_on_model_loaded will receive the JSON.
+     * @param ctx   Opaque host token.
+     * @param info  Model metadata to broadcast.
+     * @see ttm_on_model_loaded
+     */
+	void (*notify_model_info)(void* ctx, const ttm_model_info_t* info);
 
 	/** @brief Opaque token passed back as the first argument to every callback. */
 	void* ctx;
@@ -507,6 +678,19 @@ void ttm_on_log(uint32_t level, const char* msg, uint32_t len);
  * @param step     Global training step.
  */
 void ttm_on_metric(const char* key, uint32_t key_len, float value, int32_t step);
+
+/**
+ * @brief Called after a model is successfully loaded.
+ * @details
+ * The host serialises the #ttm_model_info_t into a JSON object and broadcasts
+ * it to every loaded plugin that exports this symbol.  UI plugins (console-ui,
+ * inspector) use this to display model metadata such as the architecture name,
+ * parameter count, and memory footprint.
+ *
+ * @param info_json  JSON-serialised #ttm_model_info_t (not NUL-terminated).
+ * @param len        Length of `info_json` in bytes.
+ */
+void ttm_on_model_loaded(const char* info_json, uint32_t len);
 
 /** @} */
 

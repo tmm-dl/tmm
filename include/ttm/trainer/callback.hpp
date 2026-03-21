@@ -134,9 +134,8 @@ namespace ttm::trainer {
 		 * @param trainer  The owning Trainer (may call @c trainer.log()).
 		 * @param metrics  Current metric snapshot (usually empty at this point).
 		 */
-		virtual void on_fit_begin(Trainer& trainer, const CallbackMetrics& metrics) {
-			(void)trainer;
-			(void)metrics;
+		virtual void on_fit_begin([[maybe_unused]] Trainer& trainer,
+		                          [[maybe_unused]] const CallbackMetrics& metrics) {
 		}
 
 		/**
@@ -144,9 +143,8 @@ namespace ttm::trainer {
 		 * @param trainer  The owning Trainer.
 		 * @param metrics  Final metric snapshot.
 		 */
-		virtual void on_fit_end(Trainer& trainer, const CallbackMetrics& metrics) {
-			(void)trainer;
-			(void)metrics;
+		virtual void on_fit_end([[maybe_unused]] Trainer& trainer,
+		                        [[maybe_unused]] const CallbackMetrics& metrics) {
 		}
 
 		/**
@@ -155,10 +153,9 @@ namespace ttm::trainer {
 		 * @param epoch         1-based epoch number.
 		 * @param total_epochs  Total planned epochs.
 		 */
-		virtual void on_epoch_begin(Trainer& trainer, int64_t epoch, int64_t total_epochs) {
-			(void)trainer;
-			(void)epoch;
-			(void)total_epochs;
+		virtual void on_epoch_begin([[maybe_unused]] Trainer& trainer,
+		                            [[maybe_unused]] int64_t epoch,
+		                            [[maybe_unused]] int64_t total_epochs) {
 		}
 
 		/**
@@ -172,10 +169,9 @@ namespace ttm::trainer {
 		 * @note All callbacks are invoked even if an earlier one returns @c true,
 		 *       mirroring the existing plugin behaviour.
 		 */
-		virtual bool on_epoch_end(Trainer& trainer, int64_t epoch, const CallbackMetrics& metrics) {
-			(void)trainer;
-			(void)epoch;
-			(void)metrics;
+		virtual bool on_epoch_end([[maybe_unused]] Trainer& trainer,
+		                          [[maybe_unused]] int64_t epoch,
+		                          [[maybe_unused]] const CallbackMetrics& metrics) {
 			return false;
 		}
 
@@ -184,9 +180,8 @@ namespace ttm::trainer {
 		 * @param trainer  The owning Trainer.
 		 * @param metrics  Metric snapshot including the freshly computed @c "val_loss".
 		 */
-		virtual void on_validation_end(Trainer& trainer, const CallbackMetrics& metrics) {
-			(void)trainer;
-			(void)metrics;
+		virtual void on_validation_end([[maybe_unused]] Trainer& trainer,
+		                               [[maybe_unused]] const CallbackMetrics& metrics) {
 		}
 
 		/**
@@ -202,11 +197,10 @@ namespace ttm::trainer {
 		 * @param value    Scalar value.
 		 * @param step     Global training step at which the metric was logged.
 		 */
-		virtual void on_log(Trainer& trainer, std::string_view key, float value, int32_t step) {
-			(void)trainer;
-			(void)key;
-			(void)value;
-			(void)step;
+		virtual void on_log([[maybe_unused]] Trainer& trainer,
+		                    [[maybe_unused]] std::string_view key,
+		                    [[maybe_unused]] float value,
+		                    [[maybe_unused]] int32_t step) {
 		}
 	};
 

@@ -101,6 +101,23 @@ namespace ttm::plugins {
 		 *          non-owning raw pointers.
 		 */
 		std::vector<std::unique_ptr<ITask>> tasks;
+
+		/**
+		 * @brief Model loaders registered by this plugin.
+		 * @details Ownership lives here; PluginManager::modelLoaderRegistry holds
+		 *          non-owning raw pointers.
+		 */
+		std::vector<std::unique_ptr<IModelLoader>> modelLoaders;
+
+		/**
+		 * @brief Transforms (preprocessors) registered by this plugin.
+		 * @details Ownership lives here; PluginManager::transformRegistry holds
+		 *          non-owning raw pointers.
+		 */
+		std::vector<std::unique_ptr<ITransform>> transforms;
+
+		/** @brief Optional: called when a model is successfully loaded. */
+		void (*fnOnModelLoaded)(const char* info_json, uint32_t len) = nullptr;
 	};
 
 	/* =========================================================================

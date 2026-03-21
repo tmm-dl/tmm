@@ -81,6 +81,28 @@ namespace ttm::conf {
 	};
 
 	/**
+	 * @brief Configuration entry for a preprocessor plugin.
+	 *
+	 * @details
+	 * Preprocessors are applied to each training batch in order before the batch
+	 * is collated into DLTensors for the model.  Each entry maps to a registered
+	 * ITransform (identified by `type`) and receives the JSON `config`.
+	 *
+	 * ### YAML example
+	 * @code{.yaml}
+	 * preprocessors:
+	 *   - type: bpe-tokenize
+	 *     config: '{"vocab": "vocab.json", "max_length": 512}'
+	 *   - type: truncate
+	 *     config: '{"max_length": 512}'
+	 * @endcode
+	 */
+	struct PreprocessorEntry {
+		std::string type;   ///< Registered transform name, e.g. `"bpe-tokenize"`.
+		std::string config; ///< JSON passed to ITransform::create() (default: `"{}"`).
+	};
+
+	/**
 	 * @brief Configuration entry for a built-in C++ callback.
 	 *
 	 * @details
@@ -130,6 +152,7 @@ namespace ttm::conf {
 		SchedulerConfig                 scheduler;
 		CheckpointConfig                checkpoint;
 		std::vector<PluginEntry>        plugins;
+		std::vector<PreprocessorEntry>  preprocessors;
 		std::vector<CallbackEntry>      callbacks;
 
 		/* --- training loop knobs --- */

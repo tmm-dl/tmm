@@ -466,6 +466,149 @@ namespace {
 } // anonymous namespace
 
 /* ============================================================================
+ * TVM model loader (optional — compiled in only when TTM_ENABLE_TVM=ON)
+ * ========================================================================= */
+
+namespace {
+
+#ifdef TTM_ENABLE_TVM
+	// Full TVM loader — requires the TVM runtime to be linked.
+	// Enabled via: cmake -DTTM_ENABLE_TVM=ON ...
+	// See extensions/core/CMakeLists.txt for CPM dependency setup.
+	// TODO: Replace with real TVM C runtime calls (tvm/runtime/c_runtime_api.h)
+
+	static int32_t tvm_probe(const char* path, uint32_t len) {
+		const std::string_view p{path, len};
+		return (p.ends_with(".so") || p.ends_with(".tar")) ? 1 : 0;
+	}
+
+	static ttm_handle tvm_load(
+		const char* /*path*/, uint32_t /*path_len*/,
+		const char* /*cfg*/,  uint32_t /*cfg_len*/,
+		char* err, uint32_t err_cap
+	) {
+		std::snprintf(err, err_cap, "TVM loader: not yet fully implemented (TTM_ENABLE_TVM=ON)");
+		return TTM_INVALID_HANDLE;
+	}
+
+	static ttm_model_info_t tvm_get_info(ttm_handle /*h*/) { return ttm_model_info_t{}; }
+
+	static ttm_error tvm_describe_params(ttm_handle /*h*/,
+	                                     const ttm_param_desc_t** out_descs,
+	                                     uint32_t* out_count) {
+		if (out_descs) *out_descs = nullptr;
+		if (out_count) *out_count = 0;
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_bind_params(ttm_handle /*h*/,
+	                                  const DLTensor* /*params*/, uint32_t /*param_count*/,
+	                                  const DLTensor* /*grads*/,  uint32_t /*grad_count*/) {
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_init_params(ttm_handle /*h*/, const char* /*method*/, uint32_t /*len*/) {
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_step(ttm_handle /*h*/,
+	                           const DLTensor* /*inputs*/, uint32_t /*n*/,
+	                           float* out_loss) {
+		if (out_loss) *out_loss = 0.0f;
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_infer(ttm_handle /*h*/,
+	                            const DLTensor* /*inputs*/,  uint32_t /*in_count*/,
+	                            DLTensor*       /*outputs*/, uint32_t* out_count) {
+		if (out_count) *out_count = 0;
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_zero_grad(ttm_handle /*h*/) { return TTM_OK; }
+
+	static void tvm_destroy(ttm_handle /*h*/) {}
+
+	static ttm_model_loader_vtable g_tvm_loader = {
+		tvm_probe, tvm_load, tvm_get_info,
+		tvm_describe_params, tvm_bind_params, tvm_init_params,
+		tvm_step, tvm_infer, tvm_zero_grad, tvm_destroy
+	};
+
+#else
+
+	/**
+	 * @brief Stub TVM loader registered when TTM_ENABLE_TVM=OFF (the default).
+	 *
+	 * @details
+	 * The stub registers itself as a probe for .so and .tar files so that the
+	 * host does not report "no loader found" — instead it reports a clear error
+	 * instructing the user to rebuild with TVM enabled.
+	 */
+	static int32_t tvm_probe(const char* path, uint32_t len) {
+		const std::string_view p{path, len};
+		return (p.ends_with(".so") || p.ends_with(".tar")) ? 1 : 0;
+	}
+
+	static ttm_handle tvm_load(
+		const char* /*path*/, uint32_t /*path_len*/,
+		const char* /*cfg*/,  uint32_t /*cfg_len*/,
+		char* err, uint32_t err_cap
+	) {
+		std::snprintf(err, err_cap,
+			"TVM model loader is not enabled in this build.\n"
+			"Rebuild with: cmake -DTTM_ENABLE_TVM=ON"
+		);
+		return TTM_INVALID_HANDLE;
+	}
+
+	static ttm_model_info_t tvm_get_info(ttm_handle /*h*/) { return ttm_model_info_t{}; }
+
+	static ttm_error tvm_describe_params(ttm_handle /*h*/,
+	                                     const ttm_param_desc_t** out, uint32_t* cnt) {
+		if (out) *out = nullptr;
+		if (cnt) *cnt = 0;
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_bind_params(ttm_handle /*h*/,
+	                                  const DLTensor* /*p*/, uint32_t /*pc*/,
+	                                  const DLTensor* /*g*/, uint32_t /*gc*/) {
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_init_params(ttm_handle /*h*/, const char* /*m*/, uint32_t /*l*/) {
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_step(ttm_handle /*h*/,
+	                           const DLTensor* /*in*/, uint32_t /*n*/,
+	                           float* loss) {
+		if (loss) *loss = 0.0f;
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_infer(ttm_handle /*h*/,
+	                            const DLTensor* /*in*/, uint32_t /*ic*/,
+	                            DLTensor* /*out*/, uint32_t* oc) {
+		if (oc) *oc = 0;
+		return TTM_ERR_UNSUPPORTED;
+	}
+
+	static ttm_error tvm_zero_grad(ttm_handle /*h*/) { return TTM_OK; }
+	static void      tvm_destroy(ttm_handle /*h*/)   {}
+
+	static ttm_model_loader_vtable g_tvm_loader = {
+		tvm_probe, tvm_load, tvm_get_info,
+		tvm_describe_params, tvm_bind_params, tvm_init_params,
+		tvm_step, tvm_infer, tvm_zero_grad, tvm_destroy
+	};
+
+#endif // TTM_ENABLE_TVM
+
+} // anonymous namespace
+
+/* ============================================================================
  * Required plugin exports
  * ========================================================================= */
 
@@ -477,8 +620,18 @@ TTM_CORE_EXPORT ttm_plugin_info* ttm_plugin_get_info(void) {
 
 TTM_CORE_EXPORT ttm_error ttm_plugin_init(const ttm_host_api* host, const char* /*cfg*/, uint32_t /*len*/) {
 	git_libgit2_init();
+
+	// Register dataset source
 	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay) -- C ABI null-terminated array
-	return host->register_source(host->ctx, g_schemes, &g_vtable);
+	const ttm_error src_err = host->register_source(host->ctx, g_schemes, &g_vtable);
+	if (src_err != TTM_OK) return src_err;
+
+	// Register TVM model loader (stub when TTM_ENABLE_TVM=OFF)
+	if (host->register_model_loader != nullptr) {
+		host->register_model_loader(host->ctx, &g_tvm_loader);
+	}
+
+	return TTM_OK;
 }
 
 TTM_CORE_EXPORT void ttm_plugin_teardown(void) {

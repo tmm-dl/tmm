@@ -173,6 +173,7 @@ namespace ttm::plugins {
 		plugin.fnFitEnd        = resolve<void (*)(const char*, uint32_t)>(plugin.dlHandle, "ttm_on_fit_end");
 		plugin.fnOnLog         = resolve<void (*)(uint32_t, const char*, uint32_t)>(plugin.dlHandle, "ttm_on_log");
 		plugin.fnOnMetric      = resolve<void (*)(const char*, uint32_t, float, int32_t)>(plugin.dlHandle, "ttm_on_metric");
+		plugin.fnOnModelLoaded = resolve<void (*)(const char*, uint32_t)>(plugin.dlHandle, "ttm_on_model_loaded");
 
 		return {};
 	}

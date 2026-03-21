@@ -1,0 +1,177 @@
+/**
+ * @defgroup ttm_model Model System
+ * @brief End-to-end model loading, parameter management, and inference pipeline.
+ *
+ * @details
+ * The TTM model system connects the dataset pipeline to a trainable model
+ * through a sequence of well-defined stages:
+ *
+ * ```
+ * DatasetIterator (Arrow RecordBatch)
+ *    │
+ *    ▼  IPreprocessor × N  (tokenisation, feature engineering, …)
+ * Preprocessed RecordBatch
+ *    │
+ *    ▼  ICollator
+ * ModelBatch { DLTensor[] inputs }
+ *    │
+ *    ▼  plugin model (TVM .so / PyTorch .py / …)
+ * StepOutput { float loss }  ← gradients written into param DLTensors in-place
+ *    │
+ *    ▼  IOptimizer::step()   (AdamW, SGD, …)
+ * Updated parameters
+ * ```
+ *
+ * ---
+ *
+ * @section model_pipeline Pipeline overview
+ *
+ * ttm::model::ModelPipeline is the main entry point.  It is constructed by
+ * the static factory ModelPipeline::load() which:
+ *
+ * 1. Finds a registered #ttm_model_loader_vtable whose `probe()` accepts the
+ *    configured model path.
+ * 2. Calls `load()` on the loader to obtain a handle and vtable pointer.
+ * 3. Resolves preprocessors from the plugin registry.
+ * 4. Builds an ICollator from the model's `input_schema_json`.
+ * 5. Allocates parameter and gradient buffers (see @ref model_params).
+ * 6. Calls `bind_params()` + `init_params("random")` on the model plugin.
+ * 7. Broadcasts the model metadata via PluginManager::emit_model_loaded().
+ *
+ * ---
+ *
+ * @section model_params Parameter lifecycle
+ *
+ * Parameters are owned by ModelPipeline and live on the target device
+ * (currently CPU; CUDA support is planned).  The lifecycle is:
+ *
+ * 1. **describe_params()** — the plugin reports the name, shape, and dtype
+ *    of every parameter tensor.
+ * 2. **allocate** — ModelPipeline allocates contiguous host buffers for both
+ *    the parameter values and the corresponding gradients using
+ *    `posix_memalign` (or `std::malloc` on MSVC).
+ * 3. **bind_params()** — the plugin receives raw DLTensor pointers into the
+ *    allocated buffers.  From this point on the plugin reads and writes
+ *    parameter/gradient data through these pointers.
+ * 4. **init_params()** — called with `"random"` (Glorot/He initialisation
+ *    by convention) or `"checkpoint:<path>"` for warm-start loading.
+ * 5. **Training** — each `step()` call accumulates gradients; each
+ *    `zero_grad()` call zeros the gradient buffers.
+ * 6. **Optimizer** — reads `grad` DLTensors and updates `tensor` DLTensors.
+ * 7. **Checkpoint** — future: serialise param buffers to disk.
+ *
+ * ---
+ *
+ * @section model_loader Writing a model loader plugin
+ *
+ * A model loader plugin registers a #ttm_model_loader_vtable during
+ * #ttm_plugin_init:
+ *
+ * @code{.c}
+ * static int32_t my_probe(const char* path, uint32_t len) {
+ *     // Return non-zero if this plugin handles this file
+ *     return strncmp(path + len - 3, ".so", 3) == 0 ? 1 : 0;
+ * }
+ *
+ * static ttm_handle my_load(const char* path, uint32_t path_len,
+ *                            const char* cfg, uint32_t cfg_len,
+ *                            char* err, uint32_t err_cap) {
+ *     MyModel* m = my_model_open(path, path_len, cfg, cfg_len, err, err_cap);
+ *     if (!m) return TTM_INVALID_HANDLE;
+ *     return (ttm_handle)(uintptr_t)m;
+ * }
+ *
+ * // ... step(), infer(), zero_grad(), destroy(), etc. ...
+ *
+ * static ttm_model_loader_vtable g_vtable = {
+ *     my_probe, my_load, my_get_info,
+ *     my_describe_params, my_bind_params, my_init_params,
+ *     my_step, my_infer, my_zero_grad, my_destroy
+ * };
+ *
+ * ttm_error ttm_plugin_init(const ttm_host_api* host, const char* cfg, uint32_t len) {
+ *     return host->register_model_loader(host->ctx, &g_vtable);
+ * }
+ * @endcode
+ *
+ * ---
+ *
+ * @section model_preprocessor Writing a preprocessor plugin
+ *
+ * Preprocessors are registered as #ttm_transform_vtable instances.  The host
+ * wraps them in ttm::plugins::ITransform adapters which implement
+ * ttm::model::IPreprocessor.
+ *
+ * @code{.yaml}
+ * preprocessors:
+ *   - type: bpe-tokenize
+ *     config: '{"vocab": "vocab.json", "max_length": 512}'
+ * @endcode
+ *
+ * The `type` field must match the name passed to
+ * `host->register_transform(ctx, "bpe-tokenize", nullptr, &g_transform_vt)`.
+ *
+ * ---
+ *
+ * @section model_inspector Inspector / model metadata
+ *
+ * Immediately after a successful load, ModelPipeline calls
+ * PluginManager::emit_model_loaded() which broadcasts a JSON string of the
+ * form:
+ *
+ * @code{.json}
+ * {
+ *   "name": "my-gpt2",
+ *   "arch": "GPT2",
+ *   "num_parameters": 124000000,
+ *   "num_trainable": 124000000,
+ *   "bytes_on_device": 496000000,
+ *   "input_schema_json": "[{\"name\":\"input_ids\",\"type\":\"int32\"}]",
+ *   "device": "cpu",
+ *   "device_id": 0
+ * }
+ * @endcode
+ *
+ * Plugins that export #ttm_on_model_loaded receive this string and can
+ * display it in a UI, store it in a log, or expose it via an API.
+ *
+ * ---
+ *
+ * @section model_device Device strings
+ *
+ * Device strings follow the `"<type>[:<id>]"` convention:
+ *
+ * | String      | DLDeviceType  | Notes                         |
+ * |-------------|---------------|-------------------------------|
+ * | `cpu`       | kDLCPU        | Default; always available.    |
+ * | `cuda:0`    | kDLCUDA       | First NVIDIA GPU.             |
+ * | `cuda:1`    | kDLCUDA       | Second NVIDIA GPU.            |
+ * | `metal:0`   | kDLMetal      | Apple Metal (macOS/iOS).      |
+ * | `opencl:0`  | kDLOpenCL     | OpenCL device 0.              |
+ *
+ * Use ttm::model::Device::from_string() to parse and Device::to_string() to
+ * serialise.
+ *
+ * ---
+ *
+ * @section model_checkpoint Checkpoint format
+ *
+ * Parameter buffers are flat contiguous arrays of their element type.  A
+ * checkpoint directory contains one `.bin` file per parameter (named by the
+ * parameter name with `/` replaced by `_`) plus a `metadata.json` describing
+ * the shapes and dtypes.  The format is intentionally simple so that it can
+ * be read from Python with `numpy.fromfile()`.
+ *
+ * ---
+ *
+ * @section model_integration Integration notes
+ *
+ * - **TVM compiled modules** (`.so` / `.tar`): load via the core plugin
+ *   (`extensions/core`).  The plugin uses the TVM C runtime API to call
+ *   the compiled forward and backward graph functions.
+ *
+ * - **PyTorch models** (`.py`): load via the Python plugin
+ *   (`extensions/python`).  The plugin embeds CPython, imports the module,
+ *   locates a `torch.nn.Module` subclass, and uses the DLPack protocol for
+ *   zero-copy tensor exchange between the host and PyTorch.
+ */

@@ -166,6 +166,38 @@ namespace ttm::plugins {
          */
 		[[nodiscard]] ITask* find_task(std::string_view name_or_alias) const;
 
+		/**
+         * @brief Find a registered model loader that accepts the given file path.
+         *
+         * @details
+         * Iterates all registered IModelLoader instances in registration order
+         * and returns the first one whose probe() method returns true for
+         * `path`.  Returns `nullptr` if no loader claims the file.
+         *
+         * @param[in] path  Model file path (e.g. `"./gpt2.so"`, `"model.py"`).
+         * @return Non-owning pointer to the loader, or `nullptr` if not found.
+         *         Valid for the lifetime of this PluginManager.
+         *
+         * @see IModelLoader
+         */
+		[[nodiscard]] IModelLoader* find_model_loader(std::string_view path) const;
+
+		/**
+         * @brief Look up a registered transform (preprocessor) by name.
+         *
+         * @param[in] name  Transform name registered via register_transform.
+         * @return Non-owning pointer to the transform, or `nullptr` if not found.
+         */
+		[[nodiscard]] ITransform* find_transform(std::string_view name) const;
+
+		/**
+         * @brief Broadcast model-loaded metadata to all plugins that export
+         *        #ttm_on_model_loaded.
+         *
+         * @param[in] info_json  JSON-serialised model info string.
+         */
+		void emit_model_loaded(std::string_view info_json);
+
 		/** @} */
 
 		/* =====================================================================
@@ -306,6 +338,21 @@ namespace ttm::plugins {
 		std::unordered_map<std::string, ITask*> taskRegistry;
 
 		/**
+         * @brief Model loader registry: ordered list of registered loaders.
+         *
+         * @details
+         * find_model_loader() iterates this list in registration order and
+         * returns the first loader whose probe() accepts the given path.
+         * Ownership lives in the owning NativePlugin record.
+         */
+		std::vector<IModelLoader*> modelLoaderRegistry;
+
+		/**
+         * @brief Transform registry: name → non-owning transform pointer.
+         */
+		std::unordered_map<std::string, ITransform*> transformRegistry;
+
+		/**
          * @brief True if this instance owns a WAMR runtime reference.
          *
          * @details Used by the move constructor/assignment and destructor to ensure
@@ -314,10 +361,21 @@ namespace ttm::plugins {
          */
 		bool wamrRefOwned = false;
 
+		/** @brief Forward declaration — full type in plugin_ctx.hpp. */
+		struct PluginRegistrationCtx;
+
 		/* -----------------------------------------------------------------
          * Static host API callbacks (ctx == PluginRegistrationCtx*)
          * -------------------------------------------------------------- */
 
+		/// @private
+		static ttm_error s_register_model_loader(void* ctx, const ttm_model_loader_vtable* vt);
+		/// @private
+		static void s_notify_model_info(void* ctx, const ttm_model_info_t* info);
+		/// @private
+		void register_model_loader_impl(std::unique_ptr<IModelLoader> loader, PluginRegistrationCtx& ctx);
+		/// @private
+		void register_transform_impl(std::unique_ptr<ITransform> transform, PluginRegistrationCtx& ctx);
 		/// @private
 		static ttm_error s_register_source(void* ctx, const char** schemes, const ttm_source_vtable* vt);
 		/// @private
@@ -338,9 +396,6 @@ namespace ttm::plugins {
 		static void* s_alloc(void* ctx, uint32_t size);
 		/// @private
 		static void s_free(void* ctx, void* ptr);
-
-		/** @brief Forward declaration — full type in plugin_ctx.hpp. */
-		struct PluginRegistrationCtx;
 
 		/**
          * @brief Construct a #ttm_host_api struct pointing to the given ctx.

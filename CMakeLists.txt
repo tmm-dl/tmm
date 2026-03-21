@@ -87,6 +87,14 @@ if(TTM_BUILD_EXTENSIONS)
     # Must be added after src/ so that the libgit2 CPM package is already available.
     add_subdirectory(extensions/core)
 
+    # Python model loader — requires Python3; PyTorch optional (stub only without it).
+    find_package(Python3 QUIET COMPONENTS Interpreter Development)
+    if(Python3_FOUND)
+        add_subdirectory(extensions/python)
+    else()
+        message(STATUS "ttm: Python3 not found — skipping extensions/python")
+    endif()
+
     # WASM plugins require WASI SDK; cross-compiled via ExternalProject so they
     # do not pollute the host build tree.
     if(TTM_WASM_TOOLCHAIN)

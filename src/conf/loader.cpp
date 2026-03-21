@@ -247,7 +247,16 @@ namespace ttm::conf {
 				}
 			}
 
-			if (const auto cs = root["callbacks"]; cs && cs.IsSequence()) {
+			if (const auto pps = root["preprocessors"]; pps && pps.IsSequence()) {
+			for (const auto& p : pps) {
+				cfg.preprocessors.push_back({
+					.type   = gets(p, "type"),
+					.config = gets(p, "config", "{}"),
+				});
+			}
+		}
+
+		if (const auto cs = root["callbacks"]; cs && cs.IsSequence()) {
 				for (const auto& c : cs) {
 					cfg.callbacks.push_back({
 						.type      = gets(c, "type"),

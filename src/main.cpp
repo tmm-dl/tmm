@@ -47,6 +47,8 @@
 #include <ttm/conf/config.hpp>
 #include <ttm/conf/loader.hpp>
 #include <ttm/datasets/dataset_loader.hpp>
+#include <ttm/model/device.hpp>
+#include <ttm/model/pipeline.hpp>
 #include <ttm/plugins/plugin_manager.hpp>
 #include <ttm/trainer/trainer.hpp>
 
@@ -150,23 +152,32 @@ static int cmd_fit(
 		};
 	}
 
-	// 6. Model loading — not yet implemented
-	//
-	//    TODO: instantiate from cfg.model.path via TVM FFI:
-	//      auto model = ttm::tvm::TVMModel::load(cfg.model).value();
-	//
-	//    Then wire up trainer:
-	//      auto trainer = ttm::trainer::Trainer(cfg, mgr, std::move(model), train_factory);
-	//      if (val_factory) trainer.validation(std::move(val_factory));
-	//      // attach optimizer / scheduler from cfg …
-	//      auto result = trainer.fit();
-	//      if (!result) { std::cerr << "Training failed: " << result.error() << '\n'; return 1; }
-	//      return 0;
-	//
-	(void)val_factory;
-	std::cerr << "ttm fit: model loading is not yet implemented.\n"
-	          << "         Set 'model.path' to a compiled TVM module to train.\n";
-	return 2;
+	// 6. Load model via plugin-registered loader
+	const auto dev = ttm::model::Device::from_string(
+		cfg.model.device + (cfg.model.device_id != 0
+			? ":" + std::to_string(cfg.model.device_id)
+			: "")
+	);
+	auto pipelineResult = ttm::model::ModelPipeline::load(
+		cfg.model, cfg.preprocessors, mgr, dev
+	);
+	if (!pipelineResult) {
+		std::cerr << "ttm fit: model load failed: " << pipelineResult.error() << '\n';
+		return 1;
+	}
+
+	// 7. Build and run trainer
+	auto trainer = ttm::trainer::Trainer(
+		cfg, mgr, std::move(*pipelineResult), train_factory
+	);
+	if (val_factory) trainer.validation(std::move(val_factory));
+
+	auto result = trainer.fit();
+	if (!result) {
+		std::cerr << "ttm fit: training failed: " << result.error() << '\n';
+		return 1;
+	}
+	return 0;
 }
 
 /* =========================================================================
