@@ -483,6 +483,77 @@ namespace ttm::plugins {
 		ttm_handle h_;
 	};
 
+	/* =========================================================================
+	 * CVtableCallback — wraps a C ttm_trainer_callback_vtable into trainer::Callback
+	 * ====================================================================== */
+
+	/**
+	 * @brief trainer::Callback that delegates all calls through a plugin vtable.
+	 *
+	 * @details
+	 * Created by PluginManager::make_callback().  Owns the vtable handle and
+	 * calls vtable->destroy() on destruction.
+	 */
+	class CVtableCallback final : public ttm::trainer::Callback {
+	public:
+		CVtableCallback(const ttm_trainer_callback_vtable& vt, ttm_handle h)
+			: vt_(vt), h_(h) {}
+
+		~CVtableCallback() override {
+			if (h_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+				vt_.destroy(h_);
+			}
+		}
+
+		void on_fit_begin(ttm::trainer::Trainer&,
+		                  const ttm::trainer::CallbackMetrics& m) override {
+			if (vt_.on_fit_begin != nullptr) {
+				const auto j = metrics_to_json(m);
+				vt_.on_fit_begin(h_, j.c_str(), static_cast<uint32_t>(j.size()));
+			}
+		}
+
+		void on_epoch_begin(ttm::trainer::Trainer&, int64_t epoch, int64_t total) override {
+			if (vt_.on_epoch_begin != nullptr) vt_.on_epoch_begin(h_, epoch, total);
+		}
+
+		bool on_epoch_end(ttm::trainer::Trainer&, int64_t epoch,
+		                  const ttm::trainer::CallbackMetrics& m) override {
+			if (vt_.on_epoch_end != nullptr) {
+				const auto j = metrics_to_json(m);
+				return vt_.on_epoch_end(h_, epoch, j.c_str(), static_cast<uint32_t>(j.size())) != 0;
+			}
+			return false;
+		}
+
+		void on_fit_end(ttm::trainer::Trainer&,
+		                const ttm::trainer::CallbackMetrics& m) override {
+			if (vt_.on_fit_end != nullptr) {
+				const auto j = metrics_to_json(m);
+				vt_.on_fit_end(h_, j.c_str(), static_cast<uint32_t>(j.size()));
+			}
+		}
+
+	private:
+		static std::string metrics_to_json(const ttm::trainer::CallbackMetrics& m) {
+			std::string out = "{";
+			bool first = true;
+			for (const auto& [k, v] : m.all()) {
+				if (!first) out += ',';
+				out += '"';
+				out += k;
+				out += "\":";
+				out += std::to_string(v);
+				first = false;
+			}
+			out += '}';
+			return out;
+		}
+
+		ttm_trainer_callback_vtable vt_;
+		ttm_handle h_;
+	};
+
 	} // anonymous namespace
 
 	/* =========================================================================
@@ -549,6 +620,7 @@ namespace ttm::plugins {
 			  transformVtableRegistry(std::move(other.transformVtableRegistry)),
 			  schedulerVtableRegistry(std::move(other.schedulerVtableRegistry)),
 			  optimizerVtableRegistry(std::move(other.optimizerVtableRegistry)),
+			  callbackVtableRegistry(std::move(other.callbackVtableRegistry)),
 			  wamrRefOwned(other.wamrRefOwned) {
 		other.wamrRefOwned = false;
 	}
@@ -567,6 +639,7 @@ namespace ttm::plugins {
 			transformVtableRegistry  = std::move(other.transformVtableRegistry);
 			schedulerVtableRegistry  = std::move(other.schedulerVtableRegistry);
 			optimizerVtableRegistry  = std::move(other.optimizerVtableRegistry);
+			callbackVtableRegistry   = std::move(other.callbackVtableRegistry);
 			wamrRefOwned             = other.wamrRefOwned;
 			other.wamrRefOwned       = false;
 		}
@@ -601,6 +674,11 @@ namespace ttm::plugins {
 			PluginRegistrationCtx ctx;
 			ctx.manager = this;
 			ctx.nativePlugin = p.get();
+			// Derive plugin name from filename: "ttm_core.so" → "core"
+			{
+				const std::string stem = path.stem().string();
+				ctx.plugin_name = stem.starts_with("ttm_") ? stem.substr(4) : stem;
+			}
 			auto hostApi = make_host_api(ctx);
 
 			if (auto r = native_loader_load(path, config_json, hostApi, *p); !r) {
@@ -680,6 +758,7 @@ namespace ttm::plugins {
 		api.notify_model_info    = &PluginManager::s_notify_model_info;
 		api.register_scheduler   = &PluginManager::s_register_scheduler;
 		api.register_optimizer   = &PluginManager::s_register_optimizer;
+		api.register_callback    = &PluginManager::s_register_callback;
 		api.log                  = &PluginManager::s_log;
 		api.log_metric           = &PluginManager::s_log_metric;
 		api.terminal_size        = &PluginManager::s_terminal_size;
@@ -777,7 +856,12 @@ namespace ttm::plugins {
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 
 		// Store vtable copy for per-config instantiation via find_transform_vtable()
-		regCtx->manager->transformVtableRegistry[name] = *vt;
+		// Always register qualified name (plugin::name); unqualified is first-wins
+		auto& tvReg = regCtx->manager->transformVtableRegistry;
+		if (!regCtx->plugin_name.empty()) {
+			tvReg.insert_or_assign(regCtx->plugin_name + "::" + name, *vt);
+		}
+		tvReg.try_emplace(std::string(name), *vt);
 
 		// Build a minimal ITransform adapter
 		class CVtableTransform final : public ITransform {
@@ -874,7 +958,12 @@ namespace ttm::plugins {
 	ttm_error PluginManager::s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt) {
 		if (ctx == nullptr || name == nullptr || vt == nullptr) return TTM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
-		regCtx->manager->schedulerVtableRegistry.insert_or_assign(std::string(name), *vt);
+		auto& reg = regCtx->manager->schedulerVtableRegistry;
+		// Always register qualified name (plugin::name); unqualified is first-wins
+		if (!regCtx->plugin_name.empty()) {
+			reg.insert_or_assign(regCtx->plugin_name + "::" + name, *vt);
+		}
+		reg.try_emplace(std::string(name), *vt);
 		return TTM_OK;
 	}
 
@@ -886,7 +975,12 @@ namespace ttm::plugins {
 	ttm_error PluginManager::s_register_optimizer(void* ctx, const char* name, const ttm_optimizer_vtable* vt) {
 		if (ctx == nullptr || name == nullptr || vt == nullptr) return TTM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
-		regCtx->manager->optimizerVtableRegistry.insert_or_assign(std::string(name), *vt);
+		auto& reg = regCtx->manager->optimizerVtableRegistry;
+		// Always register qualified name (plugin::name); unqualified is first-wins
+		if (!regCtx->plugin_name.empty()) {
+			reg.insert_or_assign(regCtx->plugin_name + "::" + name, *vt);
+		}
+		reg.try_emplace(std::string(name), *vt);
 		return TTM_OK;
 	}
 
@@ -930,6 +1024,49 @@ namespace ttm::plugins {
 			return nullptr;
 		}
 		return std::make_unique<COptimizerAdapter>(*vt, h);
+	}
+
+	ttm_error PluginManager::s_register_callback(
+		void* ctx, const char* name, const ttm_trainer_callback_vtable* vt
+	) {
+		if (ctx == nullptr || name == nullptr || vt == nullptr) return TTM_ERR_ARGS;
+		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
+		auto& reg = regCtx->manager->callbackVtableRegistry;
+		// Always register qualified name (plugin::name); unqualified is first-wins
+		if (!regCtx->plugin_name.empty()) {
+			reg.insert_or_assign(regCtx->plugin_name + "::" + name, *vt);
+		}
+		reg.try_emplace(std::string(name), *vt);
+		return TTM_OK;
+	}
+
+	const ttm_trainer_callback_vtable* PluginManager::find_callback_vtable(std::string_view name) const {
+		const auto it = callbackVtableRegistry.find(std::string(name));
+		return (it != callbackVtableRegistry.end()) ? &it->second : nullptr;
+	}
+
+	std::unique_ptr<ttm::trainer::Callback> PluginManager::make_callback(
+		std::string_view name,
+		std::string_view config_json,
+		std::string*     out_error
+	) const {
+		const ttm_trainer_callback_vtable* vt = find_callback_vtable(name);
+		if (vt == nullptr) {
+			if (out_error != nullptr) *out_error = "callback not found: " + std::string(name);
+			return nullptr;
+		}
+		if (vt->create == nullptr) {
+			if (out_error != nullptr) *out_error = "callback vtable has no create() for: " + std::string(name);
+			return nullptr;
+		}
+		const ttm_handle h = vt->create(
+			config_json.data(), static_cast<uint32_t>(config_json.size())
+		);
+		if (h == TTM_INVALID_HANDLE) {
+			if (out_error != nullptr) *out_error = "callback create() failed for: " + std::string(name);
+			return nullptr;
+		}
+		return std::make_unique<CVtableCallback>(*vt, h);
 	}
 
 	ttm_error PluginManager::s_register_metric(

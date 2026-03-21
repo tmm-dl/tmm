@@ -4,7 +4,6 @@
  */
 
 #include <ttm/trainer/trainer.hpp>
-#include <ttm/callbacks/early_stopping.hpp>
 #include <ttm/compat/format.hpp>
 #include <ttm/plugins/abi.h>
 
@@ -146,15 +145,13 @@ namespace ttm::trainer {
 			}
 
 			for (const auto& ce : config_.callbacks) {
-				if (ce.type == "early_stopping") {
-					const auto mode = (ce.mode == "max")
-						? callbacks::EarlyStopping::Mode::max
-						: callbacks::EarlyStopping::Mode::min;
-					callbacks_.push_back(std::make_unique<callbacks::EarlyStopping>(
-						ce.monitor, ce.patience, mode, ce.min_delta));
+				std::string err;
+				auto cb = plugins_.make_callback(ce.type, ce.config, &err);
+				if (cb) {
+					callbacks_.push_back(std::move(cb));
 				} else {
 					plugins_.emit_log(TTM_LOG_WARN,
-						std::format("unknown callback type: '{}'", ce.type));
+						std::format("callback '{}' not found or failed to create: {}", ce.type, err));
 				}
 			}
 		}

@@ -2,6 +2,7 @@ project: Example 01
 task: text-classification
 
 model:
+  type: python::Model
   file: model.py      # resolved relative to this config file
   device: cpu
 
@@ -11,7 +12,7 @@ data:
     split: train
     batch_size: 16
     preprocessor:
-      - type: hf-tokenize
+      - type: python::hf-tokenize
         config: >-
           {"model_name": "distilbert-base-uncased",
            "text_col": "text", "label_col": "label",
@@ -23,18 +24,19 @@ data:
 trainer:
   epochs: 5
   optimizer:
-    type: adamw
+    type: python::adamw
     lr: 2.0e-5
     weight_decay: 0.01
   lr_scheduler:
-    type: linear
+    type: core::linear
     warmup_steps: 100
-  early_stopping:
-    patience: 3
-    monitor: val_loss
-  checkpoint:
-    directory: ./checkpoints
-    every_n_epochs: 1
+  callbacks:
+    - type: core::early_stopping
+      patience: 3
+      monitor: val_loss
+    - type: core::checkpoint
+      directory: ./checkpoints
+      every_n_epochs: 1
 
 plugins:
   - name: core

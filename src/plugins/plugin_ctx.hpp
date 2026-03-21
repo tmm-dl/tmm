@@ -43,6 +43,10 @@ namespace ttm::plugins {
 		Plugin*        wasmPlugin   = nullptr; ///< Set for WASM plugins.
 		NativePlugin*  nativePlugin = nullptr; ///< Set for native plugins.
 
+		/** @brief Logical plugin name (e.g. "core", "python").
+		 *  Used to build namespace-qualified registry keys like "core::adamw". */
+		std::string    plugin_name;
+
 		/** @brief Transfer ownership of a source into the owning plugin record + registry. */
 		std::function<void(std::unique_ptr<IDatasetSource>)> attach_source;
 

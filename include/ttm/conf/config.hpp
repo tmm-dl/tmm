@@ -105,31 +105,29 @@ namespace ttm::conf {
 	};
 
 	/**
-	 * @brief Configuration entry for a built-in C++ callback.
+	 * @brief Configuration entry for a plugin-provided trainer callback.
 	 *
 	 * @details
-	 * Supported types and their parameters:
+	 * Callbacks are loaded by name from the plugin registry.  The optional
+	 * namespace qualifier selects the owning plugin explicitly:
+	 *   - `type: early_stopping`       → first plugin that registered it wins
+	 *   - `type: core::early_stopping` → always loaded from the core plugin
 	 *
-	 * | `type`            | Parameters                                         |
-	 * |-------------------|----------------------------------------------------|
-	 * | `early_stopping`  | `monitor`, `patience`, `mode` (`min`/`max`), `min_delta` |
+	 * The `config` field is passed verbatim as JSON to the callback's `create()`
+	 * vtable function.
 	 *
 	 * ### YAML example
 	 * @code{.yaml}
 	 * callbacks:
 	 *   - type: early_stopping
-	 *     monitor: val_loss
-	 *     patience: 5
-	 *     mode: min
-	 *     min_delta: 0.0
+	 *     config: '{"monitor":"val_loss","patience":5,"mode":"min","min_delta":0.0}'
+	 *   - type: core::checkpoint
+	 *     config: '{"directory":"./checkpoints","every_n_epochs":1}'
 	 * @endcode
 	 */
 	struct CallbackEntry {
-		std::string type;                ///< Callback type, e.g. `"early_stopping"`
-		std::string monitor = "val_loss";///< Metric name to watch (`early_stopping`)
-		int32_t     patience  = 5;       ///< Epochs without improvement before stopping
-		std::string mode      = "min";   ///< `"min"` or `"max"`
-		float       min_delta = 0.0f;    ///< Minimum change that counts as an improvement
+		std::string type;            ///< Callback name, optionally qualified (e.g. `"early_stopping"`, `"core::checkpoint"`)
+		std::string config = "{}";   ///< JSON passed to the callback's `create()` vtable function
 	};
 
 	/* =========================================================================

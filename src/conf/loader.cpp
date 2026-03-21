@@ -223,10 +223,69 @@ namespace ttm::conf {
 		 * New-schema helpers
 		 * ================================================================== */
 
-		/// Strip a "namespace::" prefix (e.g. "core::linear" → "linear").
-		std::string strip_ns(const std::string& s) {
-			const auto pos = s.rfind("::");
-			return (pos != std::string::npos) ? s.substr(pos + 2) : s;
+		/**
+		 * @brief Serialize a YAML node to a JSON string.
+		 *
+		 * @details
+		 * Used to build the `config` JSON for callback, preprocessor, and other
+		 * plugin entries from their YAML subtrees without custom per-type parsing.
+		 * Scalars are auto-detected as null / bool / number / string.
+		 */
+		std::string yaml_to_json(const YAML::Node& n) {
+			switch (n.Type()) {
+			case YAML::NodeType::Null:
+				return "null";
+			case YAML::NodeType::Scalar: {
+				const std::string s = n.as<std::string>();
+				if (s == "null")  return "null";
+				if (s == "true")  return "true";
+				if (s == "false") return "false";
+				// Detect numeric scalars: try integer first, then float
+				try {
+					(void)std::stoll(s);
+					return s;
+				} catch (...) {}
+				try {
+					(void)std::stod(s);
+					return s;
+				} catch (...) {}
+				// String: escape backslash, double-quote, newline
+				std::string out;
+				out.reserve(s.size() + 2);
+				out += '"';
+				for (char c : s) {
+					if      (c == '"')  { out += "\\\""; }
+					else if (c == '\\') { out += "\\\\"; }
+					else if (c == '\n') { out += "\\n";  }
+					else if (c == '\r') { out += "\\r";  }
+					else                { out += c;       }
+				}
+				out += '"';
+				return out;
+			}
+			case YAML::NodeType::Sequence: {
+				std::string out = "[";
+				bool first = true;
+				for (const auto& item : n) {
+					if (!first) out += ',';
+					out += yaml_to_json(item);
+					first = false;
+				}
+				return out + ']';
+			}
+			case YAML::NodeType::Map: {
+				std::string out = "{";
+				bool first = true;
+				for (const auto& kv : n) {
+					if (!first) out += ',';
+					out += '"' + kv.first.as<std::string>() + "\":" + yaml_to_json(kv.second);
+					first = false;
+				}
+				return out + '}';
+			}
+			default:
+				return "null";
+			}
 		}
 
 		TrainingConfig node_to_config(const YAML::Node& root,
@@ -252,7 +311,7 @@ namespace ttm::conf {
 					if (const auto pps = n["preprocessor"]; pps && pps.IsSequence()) {
 						for (const auto& p : pps) {
 							cfg.preprocessors.push_back({
-								.type   = strip_ns(gets(p, "type", gets(p, "name"))),
+								.type   = gets(p, "type", gets(p, "name")),
 								.config = gets(p, "config", "{}"),
 							});
 						}
@@ -301,7 +360,7 @@ namespace ttm::conf {
 					get<int64_t>(t, "gradient_accumulation_steps", 1);
 
 				if (const auto o = t["optimizer"]) {
-					cfg.optimizer.type         = strip_ns(gets(o, "type",         "adamw"));
+					cfg.optimizer.type         = gets(o, "type", "adamw");
 					cfg.optimizer.lr           = get<float>(o, "lr",           1e-3f);
 					cfg.optimizer.weight_decay = get<float>(o, "weight_decay", 1e-2f);
 					cfg.optimizer.beta1        = get<float>(o, "beta1",        0.9f);
@@ -310,7 +369,7 @@ namespace ttm::conf {
 					cfg.optimizer.amsgrad      = get<bool>(o,  "amsgrad",      false);
 				}
 				if (const auto s = t["lr_scheduler"]) {
-					cfg.scheduler.type         = strip_ns(gets(s, "type",         "cosine_warmup"));
+					cfg.scheduler.type         = gets(s, "type", "cosine_warmup");
 					cfg.scheduler.warmup_steps = get<int64_t>(s, "warmup_steps", 0);
 					cfg.scheduler.min_lr       = get<float>(s,   "min_lr",       0.0f);
 					cfg.scheduler.step_size    = get<int64_t>(s, "step_size",    1);
@@ -319,22 +378,31 @@ namespace ttm::conf {
 				}
 				if (const auto es = t["early_stopping"]) {
 					cfg.callbacks.push_back({
-						.type      = "early_stopping",
-						.monitor   = gets(es, "monitor",   "val_loss"),
-						.patience  = get<int32_t>(es, "patience", 5),
-						.mode      = gets(es, "mode",      "min"),
-						.min_delta = get<float>(es, "min_delta", 0.0f),
+						.type   = "early_stopping",
+						.config = yaml_to_json(es),
 					});
 				}
 				if (const auto ck = t["checkpoint"]) {
-					cfg.checkpoint.dir = gets(ck, "directory",
-					                     gets(ck, "dir", "checkpoints"));
+					cfg.checkpoint.dir = gets(ck, "directory", gets(ck, "dir", "checkpoints"));
 					cfg.checkpoint.save_every_n_epochs =
 						get<int32_t>(ck, "every_n_epochs",
 						get<int32_t>(ck, "save_every_n_epochs", 1));
-					cfg.checkpoint.keep_top_k    = get<int32_t>(ck, "keep_top_k", 3);
-					cfg.checkpoint.monitor       = gets(ck, "monitor",      "val_loss");
-					cfg.checkpoint.monitor_mode  = gets(ck, "mode",         "min");
+					cfg.checkpoint.keep_top_k   = get<int32_t>(ck, "keep_top_k", 3);
+					cfg.checkpoint.monitor      = gets(ck, "monitor",  "val_loss");
+					cfg.checkpoint.monitor_mode = gets(ck, "mode",     "min");
+					cfg.callbacks.push_back({
+						.type   = "checkpoint",
+						.config = yaml_to_json(ck),
+					});
+				}
+				// New schema: trainer.callbacks[] (takes priority over the above shorthands)
+				if (const auto cbs = t["callbacks"]; cbs && cbs.IsSequence()) {
+					for (const auto& c : cbs) {
+						cfg.callbacks.push_back({
+							.type   = gets(c, "type", gets(c, "name")),
+							.config = yaml_to_json(c),
+						});
+					}
 				}
 			} else {
 				// Old schema fallback
@@ -379,16 +447,13 @@ namespace ttm::conf {
 			}
 
 			/* ------------------------------------------------------------------
-			 * Top-level callbacks[] (old schema).
+			 * Top-level callbacks[] (old schema / standalone use).
 			 * ---------------------------------------------------------------- */
 			if (const auto cs = root["callbacks"]; cs && cs.IsSequence()) {
 				for (const auto& c : cs) {
 					cfg.callbacks.push_back({
-						.type      = strip_ns(gets(c, "type", gets(c, "name"))),
-						.monitor   = gets(c, "monitor",   "val_loss"),
-						.patience  = get<int32_t>(c, "patience",  5),
-						.mode      = gets(c, "mode",      "min"),
-						.min_delta = get<float>(c, "min_delta", 0.0f),
+						.type   = gets(c, "type", gets(c, "name")),
+						.config = yaml_to_json(c),
 					});
 				}
 			}

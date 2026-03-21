@@ -42,6 +42,7 @@
 
 #include <ttm/plugins/abi.h>
 #include <ttm/plugins/extension.hpp>
+#include <ttm/trainer/callback.hpp>
 #include <ttm/trainer/interfaces.hpp>
 
 #include <cstdint>
@@ -239,6 +240,32 @@ namespace ttm::plugins {
          * @see ttm_optimizer_vtable
          */
 		[[nodiscard]] const ttm_optimizer_vtable* find_optimizer_vtable(std::string_view name) const;
+
+		/**
+         * @brief Look up a registered trainer callback vtable by name.
+         *
+         * @param[in] name  Callback name, optionally qualified (e.g. "early_stopping",
+         *                  "core::early_stopping").
+         * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
+         *         Valid for the lifetime of this PluginManager.
+         *
+         * @see ttm_trainer_callback_vtable
+         */
+		[[nodiscard]] const ttm_trainer_callback_vtable* find_callback_vtable(std::string_view name) const;
+
+		/**
+         * @brief Create a trainer callback and wrap it as a trainer::Callback.
+         *
+         * @param[in]  name        Callback name (e.g. "early_stopping").
+         * @param[in]  config_json JSON config string passed to vtable->create().
+         * @param[out] out_error   If non-null, receives an error description on failure.
+         * @return Owning pointer to the callback, or nullptr on failure.
+         */
+		[[nodiscard]] std::unique_ptr<ttm::trainer::Callback> make_callback(
+			std::string_view name,
+			std::string_view config_json,
+			std::string*     out_error = nullptr
+		) const;
 
 		/**
          * @brief Create an optimizer and wrap it as a trainer::IOptimizer.
@@ -449,6 +476,13 @@ namespace ttm::plugins {
 		std::unordered_map<std::string, ttm_optimizer_vtable> optimizerVtableRegistry;
 
 		/**
+         * @brief Trainer callback vtable registry: name → owned vtable copy.
+         * @details Stores both "name" (first-wins unqualified) and "plugin::name"
+         *          (always stored, always wins for qualified lookup).
+         */
+		std::unordered_map<std::string, ttm_trainer_callback_vtable> callbackVtableRegistry;
+
+		/**
          * @brief True if this instance owns a WAMR runtime reference.
          *
          * @details Used by the move constructor/assignment and destructor to ensure
@@ -472,6 +506,8 @@ namespace ttm::plugins {
 		static ttm_error s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt);
 		/// @private
 		static ttm_error s_register_optimizer(void* ctx, const char* name, const ttm_optimizer_vtable* vt);
+		/// @private
+		static ttm_error s_register_callback(void* ctx, const char* name, const ttm_trainer_callback_vtable* vt);
 		/// @private
 		void register_model_loader_impl(std::unique_ptr<IModelLoader> loader, PluginRegistrationCtx& ctx);
 		/// @private

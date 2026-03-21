@@ -500,6 +500,74 @@ typedef struct ttm_optimizer_vtable {
 /** @} */
 
 /* =========================================================================
+ * @defgroup abi_callback Trainer callback vtable
+ * @{
+ *
+ * Plugins implement ttm_trainer_callback_vtable and register it by name via
+ * ttm_host_api::register_callback.  The host creates instances from the
+ * training config's callbacks[] list.
+ * ====================================================================== */
+
+/**
+ * @brief Vtable for trainer lifecycle callbacks.
+ *
+ * @details
+ * A plugin registers one or more callbacks by calling
+ * `host->register_callback(ctx, "early_stopping", &vt)`.  The training
+ * config selects callbacks by name (optionally qualified as "plugin::name").
+ */
+// NOLINTNEXTLINE(modernize-use-using) -- pure C header
+typedef struct ttm_trainer_callback_vtable {
+	/**
+	 * @brief Create a callback instance.
+	 * @param config_json  JSON with callback-specific settings (not NUL-terminated).
+	 * @param config_len   Length of config_json in bytes.
+	 * @return Opaque handle, or #TTM_INVALID_HANDLE on failure.
+	 */
+	ttm_handle (*create)(const char* config_json, uint32_t config_len);
+
+	/**
+	 * @brief Called once before the fit loop begins.
+	 * @param h            Handle returned by create().
+	 * @param metrics_json JSON object with initial metrics (may be empty).
+	 * @param len          Length of metrics_json in bytes.
+	 */
+	void (*on_fit_begin)(ttm_handle h, const char* metrics_json, uint32_t len);
+
+	/**
+	 * @brief Called at the start of each epoch.
+	 * @param h      Handle returned by create().
+	 * @param epoch  0-based epoch index.
+	 * @param total  Total number of planned epochs.
+	 */
+	void (*on_epoch_begin)(ttm_handle h, int64_t epoch, int64_t total);
+
+	/**
+	 * @brief Called at the end of each epoch.
+	 * @param h            Handle returned by create().
+	 * @param epoch        0-based epoch index.
+	 * @param metrics_json JSON object with epoch-level metrics (e.g. val_loss).
+	 * @param len          Length of metrics_json in bytes.
+	 * @return Non-zero to request early stopping.
+	 */
+	int32_t (*on_epoch_end)(ttm_handle h, int64_t epoch,
+	                        const char* metrics_json, uint32_t len);
+
+	/**
+	 * @brief Called once after the fit loop ends.
+	 * @param h            Handle returned by create().
+	 * @param metrics_json JSON object with final metrics.
+	 * @param len          Length of metrics_json in bytes.
+	 */
+	void (*on_fit_end)(ttm_handle h, const char* metrics_json, uint32_t len);
+
+	/** @brief Destroy the callback instance and release resources. */
+	void (*destroy)(ttm_handle h);
+} ttm_trainer_callback_vtable;
+
+/** @} */
+
+/* =========================================================================
  * @defgroup abi_host_api Host API
  * @{
  *
@@ -664,6 +732,19 @@ typedef struct ttm_host_api {
      * @see ttm_optimizer_vtable
      */
 	ttm_error (*register_optimizer)(void* ctx, const char* name, const ttm_optimizer_vtable* vt);
+
+	/**
+	 * @brief Register a trainer callback under a given name.
+	 * @details Called by a plugin during #ttm_plugin_init.  The training config
+	 *          selects callbacks by name (e.g. "early_stopping").
+	 * @param ctx   Opaque host token.
+	 * @param name  NUL-terminated callback name (e.g. "early_stopping").
+	 * @param vt    Callback vtable.  The function pointers must remain valid
+	 *              for the lifetime of the plugin.
+	 * @return #TTM_OK on success.
+	 * @see ttm_trainer_callback_vtable
+	 */
+	ttm_error (*register_callback)(void* ctx, const char* name, const ttm_trainer_callback_vtable* vt);
 
 	/** @brief Opaque token passed back as the first argument to every callback. */
 	void* ctx;

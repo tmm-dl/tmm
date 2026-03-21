@@ -13,6 +13,7 @@ add_library(ttm_core MODULE
     src/scheduler_cosine.cpp
     src/scheduler_cosine_warmup.cpp
     src/schedulers.cpp
+    src/callbacks.cpp
 )
 
 target_compile_features(ttm_core PRIVATE cxx_std_23)
