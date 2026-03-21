@@ -206,14 +206,6 @@ jobs:
       - name: Install PyTorch (CPU-only)
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      # ── System deps for extensions/core ───────────────────────────────────
-      # libcurl is required by extensions/core (git-lfs downloads).
-      # libgit2 is fetched by CPM; curl headers are not in the CPM package.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
-
       # ── C++ toolchain ─────────────────────────────────────────────────────
       - name: Set up C++ toolchain
         uses: aminya/setup-cpp@v1

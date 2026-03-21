@@ -3,7 +3,7 @@
  * @brief Network utility helpers for the core plugin.
  *
  * @details
- * Provides git-lfs pointer detection and libcurl-based file downloading.
+ * Provides git-lfs pointer detection and cpr-based file downloading.
  * Used by git_source.cpp to transparently resolve lfs-tracked dataset files.
  */
 
@@ -23,14 +23,14 @@
 bool isLfsPointer(std::FILE* fp);
 
 /**
- * @brief Download @p url to @p dest via libcurl.
+ * @brief Download @p url to @p dest via cpr.
  *
  * Creates parent directories as needed.  On failure the partial download is
  * removed and a descriptive message is written to @p err.
  *
  * @return true on success, false with @p err filled on failure.
  */
-bool curlDownload(const std::string& url, const std::filesystem::path& dest,
+bool httpDownload(const std::string& url, const std::filesystem::path& dest,
                   char* err, uint32_t err_cap);
 
 /**

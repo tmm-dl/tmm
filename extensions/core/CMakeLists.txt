@@ -23,12 +23,7 @@ target_include_directories(ttm_core PRIVATE
 )
 
 # dlpack — abi.h includes <dlpack/dlpack.h>; CPM deduplicates when built from root.
-CPMAddPackage(
-    NAME dlpack
-    GITHUB_REPOSITORY dmlc/dlpack
-    VERSION 0.8
-    EXCLUDE_FROM_ALL YES
-)
+CPMAddPackage(URI "gh:dmlc/dlpack@0.8" EXCLUDE_FROM_ALL YES)
 target_link_libraries(ttm_core PRIVATE dlpack)
 
 set_target_properties(ttm_core PROPERTIES
@@ -59,9 +54,9 @@ endif()
 
 target_link_libraries(ttm_core PRIVATE libgit2 libgit2package)
 
-# libcurl — for downloading git-lfs objects that libgit2 does not fetch.
-find_package(CURL REQUIRED)
-target_link_libraries(ttm_core PRIVATE CURL::libcurl)
+# cpr — C++ HTTP client used to download git-lfs objects that libgit2 skips.
+CPMAddPackage(URI "gh:libcpr/cpr#1.14.1" OPTIONS "CPR_CURL_USE_LIBPSL OFF" EXCLUDE_FROM_ALL YES)
+target_link_libraries(ttm_core PRIVATE cpr::cpr)
 
 install(TARGETS ttm_core DESTINATION .)
 
