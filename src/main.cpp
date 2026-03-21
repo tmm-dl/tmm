@@ -54,6 +54,8 @@
 
 #include <CLI/CLI.hpp>
 
+#include <atomic>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -136,15 +138,28 @@ static std::string plugin_filename(const std::string& name) {
 
 /// Resolve a plugin name to an absolute path.
 /// Search order: exe dir, then each dir in TTM_PLUGIN_PATH (colon-separated).
+/// Within each directory, also checks the `<name>/` subdirectory so that a
+/// build tree like `build/extensions/core/ttm_core.so` is found when
+/// TTM_PLUGIN_PATH=build/extensions.
 static std::expected<std::filesystem::path, std::string>
 resolve_plugin_name(const std::string& name) {
-	const std::string filename = plugin_filename(name);
+	const std::string filename     = plugin_filename(name);
+	const std::string filenameWasm = "ttm_" + name + ".wasm";
+
+	// Check `base/filename` and `base/<name>/filename` for both native and WASM.
+	auto try_dir = [&](const std::filesystem::path& base)
+	    -> std::optional<std::filesystem::path> {
+		for (const auto& fn : {filename, filenameWasm}) {
+			if (auto c = base / fn;        std::filesystem::exists(c)) return c;
+			if (auto c = base / name / fn; std::filesystem::exists(c)) return c;
+		}
+		return std::nullopt;
+	};
 
 	// 1. Next to the executable
 	const auto exd = exe_dir();
 	if (!exd.empty()) {
-		auto candidate = exd / filename;
-		if (std::filesystem::exists(candidate)) return candidate;
+		if (auto c = try_dir(exd)) return *c;
 	}
 
 	// 2. TTM_PLUGIN_PATH environment variable
@@ -163,15 +178,14 @@ resolve_plugin_name(const std::string& name) {
 			const std::string dir = dirs.substr(start, end == std::string::npos ? end : end - start);
 			start = (end == std::string::npos) ? dirs.size() : end + 1;
 			if (!dir.empty()) {
-				auto candidate = std::filesystem::path(dir) / filename;
-				if (std::filesystem::exists(candidate)) return candidate;
+				if (auto c = try_dir(std::filesystem::path(dir))) return *c;
 			}
 		}
 	}
 
 	return std::unexpected(
-		"plugin '" + name + "' not found (looked for '" + filename + "').\n"
-		"  Place " + filename + " next to the ttm binary, or set TTM_PLUGIN_PATH."
+		"plugin '" + name + "' not found (looked for '" + filename + "' or '" + filenameWasm + "').\n"
+		"  Place " + filename + " (or .wasm) next to the ttm binary, or set TTM_PLUGIN_PATH."
 	);
 }
 
@@ -186,14 +200,27 @@ setup_plugins(const ttm::conf::TrainingConfig& cfg) {
 		std::string resolved_path = entry.path;
 		if (resolved_path.empty() && !entry.name.empty()) {
 			auto r = resolve_plugin_name(entry.name);
-			if (!r) return std::unexpected(r.error());
+			if (!r) {
+				if (entry.optional) {
+					std::fprintf(stderr, "ttm: optional plugin '%s' skipped: %s\n",
+					             entry.name.c_str(), r.error().c_str());
+					continue;
+				}
+				return std::unexpected(r.error());
+			}
 			resolved_path = r->string();
 		}
 		if (resolved_path.empty()) {
+			if (entry.optional) continue;
 			return std::unexpected("Plugin entry has neither 'name' nor 'path' set.");
 		}
 
 		if (auto r = mgrResult->load(resolved_path, entry.config); !r) {
+			if (entry.optional) {
+				std::fprintf(stderr, "ttm: optional plugin '%s' skipped: %s\n",
+				             resolved_path.c_str(), r.error().c_str());
+				continue;
+			}
 			return std::unexpected(
 				"Failed to load plugin '" + resolved_path + "': " + r.error()
 			);
@@ -205,6 +232,36 @@ setup_plugins(const ttm::conf::TrainingConfig& cfg) {
 /* =========================================================================
  * ttm fit
  * ====================================================================== */
+
+/* =========================================================================
+ * SIGINT handling
+ * ====================================================================== */
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_sigint{false};
+
+#ifndef _WIN32
+// Previous handler to chain (set before we install ours).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static struct sigaction g_prevSigint {};
+#endif
+
+/// SIGINT handler: set a flag for graceful shutdown, then forward to the
+/// previous handler (typically Python's, which calls PyErr_SetInterrupt so
+/// the next bytecode tick raises KeyboardInterrupt).
+static void onSigint(int sig) {
+	g_sigint.store(true, std::memory_order_relaxed);
+#ifndef _WIN32
+	// Chain to previous handler (Python's default SIGINT handler, or SIG_DFL).
+	const auto& prev = g_prevSigint;
+	if (prev.sa_handler != SIG_DFL && prev.sa_handler != SIG_IGN
+	    && prev.sa_handler != nullptr) {
+		prev.sa_handler(sig);
+	}
+#else
+	(void)sig;
+#endif
+}
 
 static int cmd_fit(
 	const std::vector<std::filesystem::path>& config_files,
@@ -341,7 +398,30 @@ static int cmd_fit(
 		}
 	}
 
+	// Install SIGINT handler for graceful interruption during training.
+	g_sigint.store(false, std::memory_order_relaxed);
+#ifndef _WIN32
+	{
+		struct sigaction sa{};
+		sa.sa_handler = onSigint;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0;
+		sigaction(SIGINT, &sa, &g_prevSigint);
+	}
+#else
+	std::signal(SIGINT, onSigint);
+#endif
+	trainer.stopPredicate([] { return g_sigint.load(std::memory_order_relaxed); });
+
 	auto result = trainer.fit();
+
+	// Restore default SIGINT handler.
+#ifndef _WIN32
+	sigaction(SIGINT, &g_prevSigint, nullptr);
+#else
+	std::signal(SIGINT, SIG_DFL);
+#endif
+
 	if (!result) {
 		std::cerr << "ttm fit: training failed: " << result.error() << '\n';
 		return 1;

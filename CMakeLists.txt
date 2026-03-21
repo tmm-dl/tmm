@@ -8,6 +8,44 @@ option(TMM_BUILD_TESTS "Build tests" ON)
 option(TTM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)" OFF)
 set(TTM_WASM_TOOLCHAIN "" CACHE FILEPATH
     "Path to the WASI SDK CMake toolchain file (required for WASM extensions)")
+# Auto-fetch WASI SDK via FetchContent when building WASM extensions and no
+# toolchain was supplied explicitly.  The tarball is cached in CPM_SOURCE_CACHE
+# (or the build tree) and never re-downloaded on subsequent configures.
+if(TTM_BUILD_EXTENSIONS AND NOT TTM_WASM_TOOLCHAIN)
+    set(_wasi_version "32")
+    set(_wasi_base "wasi-sdk-${_wasi_version}.0")
+    # Resolve the platform-specific asset name
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+            set(_wasi_asset "${_wasi_base}-arm64-macos")
+        else()
+            set(_wasi_asset "${_wasi_base}-x86_64-macos")
+        endif()
+    else()  # Linux (and other Unix)
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(_wasi_asset "${_wasi_base}-arm64-linux")
+        else()
+            set(_wasi_asset "${_wasi_base}-x86_64-linux")
+        endif()
+    endif()
+
+    include(FetchContent)
+    FetchContent_Declare(wasi_sdk
+        URL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${_wasi_version}/${_wasi_asset}.tar.gz"
+        DOWNLOAD_EXTRACT_TIMESTAMP YES
+    )
+    FetchContent_GetProperties(wasi_sdk)
+    if(NOT wasi_sdk_POPULATED)
+        message(STATUS "ttm: Fetching WASI SDK ${_wasi_base} (${_wasi_asset})...")
+        FetchContent_Populate(wasi_sdk)
+    endif()
+    set(TTM_WASM_TOOLCHAIN "${wasi_sdk_SOURCE_DIR}/share/cmake/wasi-sdk.cmake" CACHE FILEPATH
+        "Path to the WASI SDK CMake toolchain file (required for WASM extensions)" FORCE)
+    message(STATUS "ttm: WASI SDK toolchain: ${TTM_WASM_TOOLCHAIN}")
+    unset(_wasi_version)
+    unset(_wasi_base)
+    unset(_wasi_asset)
+endif()
 
 add_feature_info(tests TMM_BUILD_TESTS "Build tests")
 feature_summary(WHAT ALL)

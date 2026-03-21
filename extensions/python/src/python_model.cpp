@@ -59,6 +59,79 @@
 static constexpr int kMaxModels = 16;
 
 /* ============================================================================
+ * Host API reference — stored during ttm_plugin_init for Python log bridge.
+ * ========================================================================= */
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static ttm_host_api g_hostApi{};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static bool g_stdoutRedirected = false;
+
+/// C function exposed to Python as _ttm_host.log(level: int, msg: str).
+static PyObject* pyHostLog(PyObject* /*self*/, PyObject* args) {
+	int         level = 0;
+	const char* msg   = nullptr;
+	if (!PyArg_ParseTuple(args, "is", &level, &msg)) return nullptr;
+	if (g_hostApi.log != nullptr) {
+		g_hostApi.log(g_hostApi.ctx, static_cast<ttm_log_level>(level),
+		              msg, static_cast<uint32_t>(std::strlen(msg)));
+	}
+	Py_RETURN_NONE;
+}
+
+static PyMethodDef kTtmHostMethods[] = {
+	{"log", pyHostLog, METH_VARARGS, "log(level, msg) — route a message via TTM host logger"},
+	{nullptr, nullptr, 0, nullptr},
+};
+static PyModuleDef kTtmHostModuleDef = {
+	PyModuleDef_HEAD_INIT, "_ttm_host", nullptr, -1, kTtmHostMethods,
+	nullptr, nullptr, nullptr, nullptr,
+};
+
+/// Inject _ttm_host into sys.modules and redirect sys.stdout/sys.stderr.
+/// Must be called after Py_Initialize().
+static void installPythonLogBridge() {
+	if (g_stdoutRedirected) return;
+	if (!Py_IsInitialized()) return;
+
+	PyObject* mod = PyModule_Create(&kTtmHostModuleDef);
+	if (mod == nullptr) { PyErr_Clear(); return; }
+	PyObject* sysModules = PyImport_GetModuleDict();
+	PyDict_SetItemString(sysModules, "_ttm_host", mod);
+	Py_DECREF(mod);
+
+	/* Redirect sys.stdout and sys.stderr through the host logger. */
+	PyRun_SimpleString(R"py(
+import sys, _ttm_host
+
+class _TtmWriter:
+    """Routes Python stdout/stderr into the TTM host logger (e.g. console-ui Logs panel)."""
+    def __init__(self, level):
+        self._level = level
+        self._buf   = ""
+    def write(self, s):
+        self._buf += s
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if line:
+                _ttm_host.log(self._level, line)
+    def flush(self):
+        if self._buf:
+            _ttm_host.log(self._level, self._buf)
+            self._buf = ""
+    def isatty(self):
+        return False
+    def fileno(self):
+        raise OSError("_TtmWriter has no file descriptor")
+
+sys.stdout = _TtmWriter(2)  # TTM_LOG_INFO
+sys.stderr = _TtmWriter(3)  # TTM_LOG_WARN
+)py");
+	PyErr_Clear(); // ignore any errors from the redirect (best-effort)
+	g_stdoutRedirected = true;
+}
+
+/* ============================================================================
  * Python state
  * ========================================================================= */
 
@@ -238,6 +311,7 @@ static ttm_handle py_load(
 #endif
 		Py_Initialize();
 	}
+	installPythonLogBridge();
 
 	const std::string path_str{path, path_len};
 
@@ -419,7 +493,10 @@ static ttm_error py_step(ttm_handle h,
 	// 2. Forward pass
 	PyObject* output = call_model_forward(st->model_obj, tensors);
 	Py_DECREF(tensors);
-	if (output == nullptr) { PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO; }
+	if (output == nullptr) {
+		if (PyErr_ExceptionMatches(PyExc_KeyboardInterrupt)) { PyErr_Clear(); return TTM_ERR_INTERRUPTED; }
+		PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO;
+	}
 
 	// 3. loss.backward()
 	PyObject* loss_tensor = PyObject_GetAttrString(output, "loss");
@@ -440,6 +517,7 @@ static ttm_error py_step(ttm_handle h,
 		if (out_loss) *out_loss = static_cast<float>(PyFloat_AsDouble(loss_val));
 		Py_DECREF(loss_val);
 	}
+	if (PyErr_ExceptionMatches(PyExc_KeyboardInterrupt)) { PyErr_Clear(); return TTM_ERR_INTERRUPTED; }
 	PyErr_Clear(); // swallow any remaining python error
 
 	// Run Python GC to collect cyclic garbage from the computation graph.
@@ -577,6 +655,7 @@ TTM_PYTHON_EXPORT ttm_plugin_info* ttm_plugin_get_info(void) {
 
 TTM_PYTHON_EXPORT ttm_error ttm_plugin_init(const ttm_host_api* host,
                                               const char* /*cfg*/, uint32_t /*len*/) {
+	if (host != nullptr) g_hostApi = *host;
 	if (host->register_model_loader != nullptr) {
 		const ttm_error rc = host->register_model_loader(host->ctx, &g_py_loader);
 		if (rc != TTM_OK) return rc;
@@ -598,6 +677,8 @@ TTM_PYTHON_EXPORT void ttm_plugin_teardown(void) {
 			st = {};
 		}
 	}
+	g_stdoutRedirected = false;
+	g_hostApi = {};
 	if (Py_IsInitialized()) {
 		Py_Finalize();
 	}

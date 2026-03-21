@@ -642,8 +642,8 @@ namespace ttm::plugins {
 		}
 
 		/* 4. Instantiate ----------------------------------------------------- */
-		constexpr uint32_t STACK_SIZE = 512 * 1024;		/* 512 KB */
-		constexpr uint32_t HEAP_SIZE = 4 * 1024 * 1024; /* 4 MB */
+		constexpr uint32_t STACK_SIZE = 512 * 1024;          /*  512 KB */
+		constexpr uint32_t HEAP_SIZE  = 32 * 1024 * 1024;   /* 32 MB — FTXUI 6.x needs room for std::deque/unordered_map */
 		plugin.inst = wasm_runtime_instantiate(plugin.module, STACK_SIZE, HEAP_SIZE, errorbuf.data(), errorbuf.size());
 		if (plugin.inst == nullptr) {
 			wasm_runtime_unload(plugin.module);

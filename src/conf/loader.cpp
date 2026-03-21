@@ -426,9 +426,10 @@ namespace ttm::conf {
 			if (const auto ps = root["plugins"]; ps && ps.IsSequence()) {
 				for (const auto& p : ps) {
 					cfg.plugins.push_back({
-						.name   = gets(p, "name"),
-						.path   = gets(p, "path"),
-						.config = gets(p, "config", "{}"),
+						.name     = gets(p, "name"),
+						.path     = gets(p, "path"),
+						.config   = gets(p, "config", "{}"),
+						.optional = get<bool>(p, "optional", false),
 					});
 				}
 			}

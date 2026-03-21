@@ -39,8 +39,8 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 /* =========================================================================
@@ -84,8 +84,8 @@ namespace {
 		}
 	};
 
-	std::deque<LogEntry>                           g_logs;
-	std::unordered_map<std::string, MetricHistory> g_metrics;
+	std::deque<LogEntry>             g_logs;
+	std::map<std::string, MetricHistory> g_metrics; // std::map avoids hash-table __next_prime overflow in 32-bit WASM
 	std::vector<std::string>                       g_metric_keys; ///< insertion-ordered keys
 
 	std::string g_model_path;

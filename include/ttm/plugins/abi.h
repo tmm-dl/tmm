@@ -75,6 +75,7 @@ typedef enum {
 	TTM_ERR_IO = 4,          /**< I/O error.                            */
 	TTM_ERR_OOM = 5,         /**< Out of memory.                        */
 	TTM_ERR_UNSUPPORTED = 6, /**< Operation not supported.              */
+	TTM_ERR_INTERRUPTED = 7, /**< Interrupted by user (SIGINT / KeyboardInterrupt). */
 } ttm_error;
 
 /**

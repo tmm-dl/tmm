@@ -99,6 +99,9 @@ namespace ttm::trainer {
 		/// Attach a callback.  Callbacks are invoked in insertion order.
 		Trainer& add_callback(std::unique_ptr<Callback> cb);
 
+		/// Set a predicate polled between batches; returning true triggers graceful stop.
+		Trainer& stopPredicate(std::function<bool()> pred);
+
 		/**
 		 * @brief Run the training loop.
 		 * @return Final epoch metrics on success, or an error string on failure.
@@ -143,6 +146,8 @@ namespace ttm::trainer {
 		std::unordered_map<std::string, float>  currentMetrics_;
 		/** @brief Set to true after config plugins and callbacks have been applied. */
 		bool configApplied_ = false;
+		/** @brief If set, called between batches; non-null return of true triggers stop. */
+		std::function<bool()> stopPredicate_;
 	};
 
 } // namespace ttm::trainer

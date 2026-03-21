@@ -24,25 +24,39 @@ endif()
 include("${_cpm_file}")
 
 # ---------------------------------------------------------------------------
+# dlpack — abi.h transitively includes <dlpack/dlpack.h>.  This ExternalProject
+# has its own build tree, so the parent's CPM dlpack instance is not visible.
+# ---------------------------------------------------------------------------
+CPMAddPackage(URI "gh:dmlc/dlpack@0.8" EXCLUDE_FROM_ALL YES)
+
+# ---------------------------------------------------------------------------
 # FTXUI — DOM-only (ftxui_screen + ftxui_dom).
 # Component is excluded because it uses pthreads / POSIX signals which are
 # unavailable in WASI.
+#
+# __EMSCRIPTEN__ is set as a global definition (not PRIVATE to the plugin)
+# so FTXUI's own sources also skip the ioctl/winsize path in terminal.cpp.
 # ---------------------------------------------------------------------------
-CPMAddPackage(
-    NAME FTXUI
-    GITHUB_REPOSITORY ArthurSonzogni/FTXUI
-    GIT_TAG v0.11.1
+add_compile_definitions(__EMSCRIPTEN__)
+add_compile_options(-fno-exceptions)  # WASI has no C++ exception runtime
+
+CPMAddPackage(URI "gh:ArthurSonzogni/FTXUI@6.1.9"
     OPTIONS
         "FTXUI_BUILD_EXAMPLES OFF"
         "FTXUI_BUILD_TESTS OFF"
         "FTXUI_BUILD_DOCS OFF"
         "FTXUI_ENABLE_INSTALL OFF"
+    EXCLUDE_FROM_ALL YES
 )
 
 # ---------------------------------------------------------------------------
-# Plugin shared library / WASM module
+# Plugin WASM module
+# Using add_executable rather than MODULE because CMake's MODULE type passes
+# -shared to the linker, which wasm-ld rejects when --export-table is also
+# present.  add_executable + -Wl,--no-entry produces a proper standalone WASM
+# module without a _start entry point.
 # ---------------------------------------------------------------------------
-add_library(ttm_console_ui MODULE src/console_ui.cpp)
+add_executable(ttm_console_ui src/console_ui.cpp)
 
 target_include_directories(ttm_console_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
@@ -51,16 +65,13 @@ target_include_directories(ttm_console_ui PRIVATE
 target_link_libraries(ttm_console_ui PRIVATE
     ftxui::screen
     ftxui::dom
+    dlpack
 )
 
 # WASM/WASI-specific settings
 target_compile_options(ttm_console_ui PRIVATE
     -Wall
     -Wextra
-    # Prevent FTXUI's Terminal::Size() from calling ioctl (unavailable in WASI).
-    # With this flag active, FTXUI falls back to a static {80,24} default;
-    # the plugin always passes an explicit Dimension::Fixed(w,h) anyway.
-    -D__EMSCRIPTEN__=1
 )
 
 set_target_properties(ttm_console_ui PROPERTIES
@@ -89,6 +100,8 @@ target_link_options(ttm_console_ui PRIVATE
     -Wl,--export=ttm_on_metric
     -Wl,--export=__heap_base
     -Wl,--export=__data_end
+    -Wl,--export=malloc
+    -Wl,--export=free
 )
 
 # ---------------------------------------------------------------------------

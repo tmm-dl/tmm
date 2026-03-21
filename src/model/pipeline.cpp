@@ -137,10 +137,11 @@ namespace ttm::model {
 				static_cast<uint32_t>(inputs.size()),
 				&loss
 			);
+			if (err == TTM_ERR_INTERRUPTED) return {.loss = 0.0f, .interrupted = true};
 			if (err != TTM_OK) {
 				std::cerr << "[ttm/pipeline] step() returned error " << err << '\n';
 			}
-			return {loss};
+			return {.loss = loss};
 		}
 
 		[[nodiscard]] trainer::StepOutput infer_with_tensors(

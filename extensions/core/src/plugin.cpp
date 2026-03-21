@@ -12,6 +12,7 @@
 
 #include "callbacks.hpp"
 #include "git_source.hpp"
+#include "loggers.hpp"
 #include "schedulers.hpp"
 #include "tvm_loader.hpp"
 
@@ -48,6 +49,7 @@ TTM_CORE_EXPORT ttm_error ttm_plugin_init(
 	tvmLoaderRegister(host);
 	schedulersRegister(host);
 	callbacksRegister(host);
+	loggersRegister(host);
 
 	return TTM_OK;
 }
@@ -56,6 +58,7 @@ TTM_CORE_EXPORT void ttm_plugin_teardown(void) {
 	gitSourceTeardown();
 	schedulersTeardown();
 	callbacksTeardown();
+	loggersTeardown();
 }
 
 } // extern "C"

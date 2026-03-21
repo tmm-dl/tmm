@@ -46,7 +46,8 @@ namespace ttm::trainer {
 	 * ====================================================================== */
 
 	struct StepOutput {
-		float loss = 0.0f;
+		float loss        = 0.0f;
+		bool  interrupted = false; ///< Set when the step was aborted by a KeyboardInterrupt / SIGINT.
 		// Gradients are accumulated inside IModel; the optimizer reads them directly.
 	};
 

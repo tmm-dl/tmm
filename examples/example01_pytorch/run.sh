@@ -21,6 +21,6 @@ if [[ ! -x "$TTM_BIN" ]]; then
 fi
 
 # Tell TTM where to find the plugin shared libraries.
-export TTM_PLUGIN_PATH="${TTM_PLUGIN_PATH:-$REPO_ROOT/build/extensions/python:$REPO_ROOT/build/extensions/core}"
+export TTM_PLUGIN_PATH="${TTM_PLUGIN_PATH:-$REPO_ROOT/build/extensions/python:$REPO_ROOT/build/extensions/core:$REPO_ROOT/build/extensions/console-ui}"
 
 exec "$TTM_BIN" fit "$SCRIPT_DIR/ttm.yaml" "$@"

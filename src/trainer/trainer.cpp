@@ -60,6 +60,11 @@ namespace ttm::trainer {
 		return *this;
 	}
 
+	Trainer& Trainer::stopPredicate(std::function<bool()> pred) {
+		stopPredicate_ = std::move(pred);
+		return *this;
+	}
+
 	/* =========================================================================
 	 * JSON helpers
 	 * ====================================================================== */
@@ -138,6 +143,7 @@ namespace ttm::trainer {
 			configApplied_ = true;
 
 			for (const auto& pe : config_.plugins) {
+				if (pe.path.empty()) continue; // already loaded by caller via name resolution
 				if (auto r = plugins_.load(pe.path, pe.config); !r) {
 					plugins_.emit_log(TTM_LOG_WARN,
 						std::format("plugin load failed ({}): {}", pe.path, r.error()));
@@ -193,6 +199,12 @@ namespace ttm::trainer {
 			// ── Batch loop ─────────────────────────────────────────────────
 			std::shared_ptr<arrow::RecordBatch> raw;
 			while (iter->next(raw)) {
+				// Check external stop request (e.g. SIGINT from main)
+				if (stopPredicate_ && stopPredicate_()) {
+					plugins_.emit_log(TTM_LOG_WARN, "training interrupted by user");
+					goto fit_interrupted;
+				}
+
 				const Batch batch{raw, globalStep_, batch_idx};
 
 				plugins_.emit_batch_begin(
@@ -200,7 +212,12 @@ namespace ttm::trainer {
 					0 /* total unknown without pre-scan */
 				);
 
-				const float raw_loss = model_->step(batch).loss;
+				const auto  step_out = model_->step(batch);
+				if (step_out.interrupted) {
+					plugins_.emit_log(TTM_LOG_WARN, "training interrupted by user");
+					goto fit_interrupted;
+				}
+				const float raw_loss = step_out.loss;
 				const float loss     = plugins_.emit_loss_computed(raw_loss);
 
 				epoch_loss    += loss;
@@ -317,6 +334,7 @@ namespace ttm::trainer {
 				break;
 			}
 		}
+		fit_interrupted:;
 
 		plugins_.emit_fit_end(build_epoch_json(final_metrics));
 		{
