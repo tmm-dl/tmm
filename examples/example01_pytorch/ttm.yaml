@@ -44,4 +44,5 @@ plugins:
   - name: core
   - name: python
   - name: console_ui
-    optional: true   # requires WASM toolchain; skipped gracefully when not built
+    optional: true   # skipped gracefully when not built
+    config: '{"interactive":true}'   # use ScreenInteractive + render thread (native only)

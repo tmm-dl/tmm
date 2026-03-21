@@ -1,38 +1,54 @@
 /**
  * @file console_ui.cpp
- * @brief TTM console-UI plugin — WASM/WASI, FTXUI DOM-only rendering.
+ * @brief TTM console-UI plugin — two rendering modes.
  *
- * @details
- * Displays a live full-screen TUI during training with three panels:
+ * ### DOM-only mode  (default / WASM build)
+ * Renders a full-screen ANSI frame on every significant event by writing
+ * directly to stdout.  No threads, no pthreads, WASI-compatible.
  *
- *  ┌ TTM Training ─────────────────────────────┐
- *  │ Model: …  Dataset: …  Epoch: 3/10  Step: … │
- *  └────────────────────────────────────────────┘
- *  ┌ Metrics ────────────────────────────────────┐
- *  │ train_loss  ▂▄▆█▇▅▃   0.4231               │
- *  │ val_loss    ▂▄▅▆▅▄▃   0.5128               │
- *  └────────────────────────────────────────────┘
- *  ┌ Logs ───────────────────────────────────────┐
- *  │ [INFO]  epoch 3/10 — loss: 0.4231  …        │
- *  └────────────────────────────────────────────┘
+ * ### Interactive mode  (native build, config `"interactive":true`)
+ * Uses `ftxui::ScreenInteractive::Fullscreen()` running in a dedicated render
+ * thread.  Callbacks post a custom event that wakes the event loop; all shared
+ * state is protected by a mutex.
  *
- * Uses FTXUI ftxui_screen + ftxui_dom (no ScreenInteractive — no pthreads).
- * Terminal size is obtained from the host via the ttm_terminal_size import.
- * FTXUI is compiled with -D__EMSCRIPTEN__=1 so Terminal::Size() returns the
- * safe default {80,24} rather than calling ioctl; we always pass an explicit
- * Dimension::Fixed(w,h) to Screen::Create() so the actual terminal dimensions
- * are used at every redraw.
- *
- * Rendering strategy: on each significant event, emit ANSI cursor-home
- * (\033[H) and overwrite the previous frame in-place.  This avoids flicker
- * from a full clear while still keeping the display current.
+ * Layout (interactive):
+ * ```
+ * ┌ Utilization ─────────────────────────────────────────────────────────┐
+ * │ RAM: |████████████░░░░░░░░░░░░░░░░░░░|  1.2 GB / 62 GB              │
+ * └──────────────────────────────────────────────────────────────────────┘
+ * ┌ [ Metrics ] [ Logs ] ───────────────┐ ┌ Info ─────────────────────── ┐
+ * │  train_loss  ▂▄▆█▇▅▃  0.4231       │ │ Model:   model.py             │
+ * │  val_loss    ▂▄▅▆▅▄▃  0.5128       │ │ Dataset: hf:thagen/SCITE      │
+ * │                                     │ │ Split:   train                │
+ * │  (or log lines)                     │ │ Epochs:  3 / 5               │
+ * │                                     │ │ Step:    1 024                │
+ * └─────────────────────────────────────┘ └──────────────────────────────┘
+ * ┌ Progress ────────────────────────────────────────────────────────────┐
+ * │ Epoch 3/5  |███████████████░░░░░░░░░░░░░░░░░|  45.2 %               │
+ * └──────────────────────────────────────────────────────────────────────┘
+ * ```
  */
 
 #include <ttm/plugins/abi.h>
 
+/* FTXUI DOM/Screen — available in both native and WASM builds. */
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/color.hpp>
 #include <ftxui/screen/screen.hpp>
+
+/* FTXUI Component API — native only (WASI has no pthreads / signals). */
+#ifndef __EMSCRIPTEN__
+#  include <ftxui/component/component.hpp>
+#  include <ftxui/component/component_base.hpp>
+#  include <ftxui/component/screen_interactive.hpp>
+#  include <atomic>
+#  include <mutex>
+#  include <thread>
+#  ifdef __linux__
+#    include <sys/resource.h>
+#    include <sys/sysinfo.h>
+#  endif
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -44,344 +60,556 @@
 #include <vector>
 
 /* =========================================================================
- * Host imports
- *
- * These are imported from the "ttm" WAMR module namespace.  Signatures must
- * match the NativeSymbol table registered in wasm_loader.cpp.
- * ====================================================================== */
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- WASM import attribute requires external linkage
-__attribute__((import_module("ttm"), import_name("ttm_terminal_size")))
-extern void ttm_terminal_size(uint32_t* out_width, uint32_t* out_height);
-
-/* =========================================================================
- * Internal state
+ * Shared state (all fields guarded by g_mtx in interactive mode)
  * ====================================================================== */
 
 namespace {
 
-	constexpr int kMaxLogs    = 200;
-	constexpr int kMaxHistory = 80;
+constexpr int kMaxLogs    = 200;
+constexpr int kMaxHistory = 80;
 
-	struct LogEntry {
-		uint32_t    level;
-		std::string message;
-	};
+struct LogEntry {
+	uint32_t    level;
+	std::string message;
+};
 
-	struct MetricHistory {
-		std::deque<float> values;
-		float             vmin = 0.0f;
-		float             vmax = 1.0f;
+struct MetricHistory {
+	std::deque<float> values;
+	float             vmin = 0.0f;
+	float             vmax = 1.0f;
 
-		void push(float v) {
-			if (static_cast<int>(values.size()) >= kMaxHistory) values.pop_front();
-			values.push_back(v);
-			vmin = vmax = values.front();
-			for (float x : values) {
-				vmin = std::min(vmin, x);
-				vmax = std::max(vmax, x);
+	void push(float v) {
+		if (static_cast<int>(values.size()) >= kMaxHistory) values.pop_front();
+		values.push_back(v);
+		vmin = vmax = values.front();
+		for (float x : values) { vmin = std::min(vmin, x); vmax = std::max(vmax, x); }
+	}
+};
+
+/* All mutable globals — zero-initialised. */
+std::deque<LogEntry>                 g_logs;
+std::map<std::string, MetricHistory> g_metrics;
+std::vector<std::string>             g_metricKeys; ///< insertion-ordered
+std::string                          g_modelPath;
+std::string                          g_datasetUri;
+std::string                          g_datasetSplit;
+uint32_t                             g_currentEpoch  = 0;
+uint32_t                             g_totalEpochs   = 0;
+int32_t                              g_globalStep    = 0;
+uint32_t                             g_batchIdx       = 0;
+uint32_t                             g_epochBatchTotal = 0; ///< batch count from last completed epoch
+bool                                 g_fitStarted    = false;
+
+/* =========================================================================
+ * JSON helpers
+ * ====================================================================== */
+
+std::string jsonStr(const std::string& json, const std::string& key) {
+	const std::string search = "\"" + key + "\":\"";
+	const auto pos = json.find(search);
+	if (pos == std::string::npos) return {};
+	const auto start = pos + search.size();
+	const auto end   = json.find('"', start);
+	if (end == std::string::npos) return {};
+	return json.substr(start, end - start);
+}
+
+int64_t jsonInt(const std::string& json, const std::string& key) {
+	const std::string search = "\"" + key + "\":";
+	const auto pos = json.find(search);
+	if (pos == std::string::npos) return 0;
+	auto p = pos + search.size();
+	bool neg = false;
+	if (p < json.size() && json[p] == '-') { neg = true; ++p; }
+	int64_t v = 0;
+	for (; p < json.size() && json[p] >= '0' && json[p] <= '9'; ++p)
+		v = v * 10 + static_cast<int64_t>(json[p] - '0');
+	return neg ? -v : v;
+}
+
+std::string stripAnsi(const std::string& s) {
+	std::string out;
+	out.reserve(s.size());
+	bool inEsc = false;
+	for (char c : s) {
+		if (c == '\033') { inEsc = true; continue; }
+		if (inEsc) { if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) inEsc = false; continue; }
+		if (c == '\n' || c == '\r') continue;
+		out += c;
+	}
+	return out;
+}
+
+/* =========================================================================
+ * Shared DOM builders — used by both rendering modes
+ * ====================================================================== */
+
+using namespace ftxui;
+
+Element makeMetricsElement() {
+	Elements rows;
+	for (const auto& key : g_metricKeys) {
+		const auto it = g_metrics.find(key);
+		if (it == g_metrics.end()) continue;
+		const MetricHistory& h = it->second;
+		if (h.values.empty()) continue;
+
+		const float latest = h.values.back();
+		const float vmin   = h.vmin;
+		const float vmax   = h.vmax;
+
+		auto spark = graph([vals = std::vector<float>(h.values.begin(), h.values.end()),
+		                    vmin, vmax](int w, int ht) {
+			std::vector<int> out(static_cast<size_t>(w), 0);
+			const int count = static_cast<int>(vals.size());
+			const float range = vmax - vmin;
+			for (int i = 0; i < w; ++i) {
+				const int src = count - w + i;
+				if (src < 0 || src >= count) continue;
+				float norm = (range > 1e-9f) ? (vals[static_cast<size_t>(src)] - vmin) / range : 0.5f;
+				norm = std::clamp(norm, 0.0f, 1.0f);
+				out[static_cast<size_t>(i)] = static_cast<int>(norm * static_cast<float>(ht));
 			}
-		}
-	};
+			return out;
+		}) | color(Color::GreenLight) | flex;
 
-	std::deque<LogEntry>             g_logs;
-	std::map<std::string, MetricHistory> g_metrics; // std::map avoids hash-table __next_prime overflow in 32-bit WASM
-	std::vector<std::string>                       g_metric_keys; ///< insertion-ordered keys
+		char buf[24]{};
+		if (latest >= 1e3f || (latest != 0.0f && latest < 1e-3f))
+			snprintf(buf, sizeof(buf), "%.3e", static_cast<double>(latest));
+		else
+			snprintf(buf, sizeof(buf), "%.4f", static_cast<double>(latest));
 
-	std::string g_model_path;
-	std::string g_dataset_uri;
-	std::string g_dataset_split;
-	uint32_t    g_current_epoch = 0;
-	uint32_t    g_total_epochs  = 0;
-	int32_t     g_global_step   = 0;
-	bool        g_fit_started   = false;
-
-	/* -----------------------------------------------------------------------
-	 * Utilities
-	 * -------------------------------------------------------------------- */
-
-	/** @brief Extract a JSON string value: "key":"value". */
-	std::string json_str(const std::string& json, const std::string& key) {
-		const std::string search = "\"" + key + "\":\"";
-		const auto        pos    = json.find(search);
-		if (pos == std::string::npos) return {};
-		const auto start = pos + search.size();
-		const auto end   = json.find('"', start);
-		if (end == std::string::npos) return {};
-		return json.substr(start, end - start);
-	}
-
-	/** @brief Extract a JSON integer value: "key":digits. */
-	int64_t json_int(const std::string& json, const std::string& key) {
-		const std::string search = "\"" + key + "\":";
-		const auto        pos    = json.find(search);
-		if (pos == std::string::npos) return 0;
-		auto p = pos + search.size();
-		bool neg = false;
-		if (p < json.size() && json[p] == '-') { neg = true; ++p; }
-		int64_t v = 0;
-		for (; p < json.size() && json[p] >= '0' && json[p] <= '9'; ++p)
-			v = v * 10 + static_cast<int64_t>(json[p] - '0');
-		return neg ? -v : v;
-	}
-
-	/** @brief Strip ANSI escape sequences from a string view. */
-	std::string strip_ansi(const std::string& s) {
-		std::string out;
-		out.reserve(s.size());
-		bool in_esc = false;
-		for (char c : s) {
-			if (c == '\033') { in_esc = true; continue; }
-			if (in_esc) {
-				if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) in_esc = false;
-				continue;
-			}
-			if (c == '\n' || c == '\r') continue; // flatten multi-line to single
-			out += c;
-		}
-		return out;
-	}
-
-	/* -----------------------------------------------------------------------
-	 * DOM builders
-	 * -------------------------------------------------------------------- */
-
-	using namespace ftxui;
-
-	Element make_header() {
-		const std::string epoch_str = g_fit_started
-		                                  ? (std::to_string(g_current_epoch) + "/" +
-		                                     std::to_string(g_total_epochs))
-		                                  : "—";
-
-		return window(
-				text(" TTM Training ") | bold,
-				vbox({
-						hbox({
-								text("Model:   ") | bold,
-								text(g_model_path.empty() ? "—" : g_model_path) | color(Color::Cyan) | flex,
-								separator(),
-								text(" Epoch: ") | bold,
-								text(epoch_str) | color(Color::Yellow),
-						}),
-						hbox({
-								text("Dataset: ") | bold,
-								text(g_dataset_uri.empty() ? "—" : g_dataset_uri) | color(Color::Cyan) | flex,
-								separator(),
-								text(" Split: ") | bold,
-								text(g_dataset_split.empty() ? "—" : g_dataset_split),
-						}),
-						hbox({
-								text("Step:    ") | bold,
-								text(std::to_string(g_global_step)) | color(Color::Green),
-								filler(),
-						}),
-				})
+		rows.push_back(
+			hbox({
+				text(key) | color(Color::Cyan) | size(WIDTH, EQUAL, 16),
+				text(" "), spark, text(" "),
+				text(buf) | color(Color::Yellow) | size(WIDTH, EQUAL, 10),
+			}) | size(HEIGHT, EQUAL, 3) | flex
 		);
 	}
+	if (rows.empty())
+		rows.push_back(text("  No metrics yet — waiting for training to start…") | dim);
+	return vbox(std::move(rows));
+}
 
-	Element make_metrics_panel() {
-		Elements rows;
-
-		for (const auto& key : g_metric_keys) {
-			const auto it = g_metrics.find(key);
-			if (it == g_metrics.end()) continue;
-			const MetricHistory& h = it->second;
-			if (h.values.empty()) continue;
-
-			const float latest = h.values.back();
-			const float vmin   = h.vmin;
-			const float vmax   = h.vmax;
-			const int   n      = static_cast<int>(h.values.size());
-
-			/* Sparkline via ftxui::graph */
-			auto sparkline = graph([vals = std::vector<float>(h.values.begin(), h.values.end()),
-			                        vmin, vmax](int w, int ht) {
-				std::vector<int> out(static_cast<size_t>(w), 0);
-				const int        count  = static_cast<int>(vals.size());
-				const float      range  = vmax - vmin;
-				for (int i = 0; i < w; ++i) {
-					const int src = count - w + i;
-					if (src < 0 || src >= count) continue;
-					float norm = (range > 1e-9f) ? (vals[static_cast<size_t>(src)] - vmin) / range : 0.5f;
-					norm = std::clamp(norm, 0.0f, 1.0f);
-					out[static_cast<size_t>(i)] = static_cast<int>(norm * static_cast<float>(ht));
-				}
-				return out;
-			}) | color(Color::GreenLight)
-			   | flex;
-
-			/* Format latest value */
-			char buf[24]{};
-			if (latest >= 1e3f || (latest != 0.0f && latest < 1e-3f))
-				snprintf(buf, sizeof(buf), "%.3e", static_cast<double>(latest));
-			else
-				snprintf(buf, sizeof(buf), "%.4f", static_cast<double>(latest));
-
-			rows.push_back(
-					hbox({
-							text(key) | color(Color::Cyan) | size(WIDTH, EQUAL, 16),
-							text(" "),
-							sparkline,
-							text(" "),
-							text(buf) | color(Color::Yellow) | size(WIDTH, EQUAL, 10),
-					}) | size(HEIGHT, EQUAL, 3)
-			);
+Element makeLogsElement() {
+	Elements lines;
+	const int total = static_cast<int>(g_logs.size());
+	const int start = std::max(0, total - kMaxLogs);
+	for (int i = start; i < total; ++i) {
+		const LogEntry& e = g_logs[static_cast<size_t>(i)];
+		Element prefix;
+		switch (e.level) {
+		case TTM_LOG_TRACE: prefix = text("[TRACE] ") | color(Color::GrayDark); break;
+		case TTM_LOG_DEBUG: prefix = text("[DEBUG] ") | color(Color::Blue); break;
+		case TTM_LOG_INFO:  prefix = text("[INFO]  ") | color(Color::Green); break;
+		case TTM_LOG_WARN:  prefix = text("[WARN]  ") | color(Color::Yellow); break;
+		case TTM_LOG_ERROR: prefix = text("[ERROR] ") | color(Color::Red) | bold; break;
+		default:            prefix = text("        "); break;
 		}
-
-		if (rows.empty()) {
-			rows.push_back(text("  No metrics yet — waiting for training to start…") | dim);
-		}
-
-		return window(text(" Metrics ") | bold, vbox(std::move(rows))) | flex;
+		lines.push_back(hbox({prefix, text(stripAnsi(e.message))}));
 	}
-
-	Element make_logs_panel() {
-		Elements lines;
-
-		const int total    = static_cast<int>(g_logs.size());
-		const int max_show = std::max(1, total);
-		const int start    = std::max(0, total - max_show);
-
-		for (int i = start; i < total; ++i) {
-			const LogEntry& e = g_logs[static_cast<size_t>(i)];
-
-			Element prefix;
-			switch (e.level) {
-			case TTM_LOG_TRACE: prefix = text("[TRACE] ") | color(Color::GrayDark); break;
-			case TTM_LOG_DEBUG: prefix = text("[DEBUG] ") | color(Color::Blue); break;
-			case TTM_LOG_INFO: prefix = text("[INFO]  ") | color(Color::Green); break;
-			case TTM_LOG_WARN: prefix = text("[WARN]  ") | color(Color::Yellow); break;
-			case TTM_LOG_ERROR: prefix = text("[ERROR] ") | color(Color::Red) | bold; break;
-			default: prefix = text("        "); break;
-			}
-			lines.push_back(hbox({prefix, text(strip_ansi(e.message))}));
-		}
-
-		if (lines.empty()) {
-			lines.push_back(text("  No log messages yet…") | dim);
-		}
-
-		return window(text(" Logs ") | bold, vbox(std::move(lines)) | frame | flex) | flex;
-	}
-
-	void redraw() {
-		uint32_t w = 80, h = 24;
-		ttm_terminal_size(&w, &h);
-		if (w < 20) w = 20;
-		if (h < 8) h = 8;
-
-		const int cols = static_cast<int>(w);
-		const int rows = static_cast<int>(h);
-
-		auto doc = vbox({
-				              make_header(),
-				              make_metrics_panel(),
-				              make_logs_panel(),
-			              }) |
-		           size(HEIGHT, EQUAL, rows) | size(WIDTH, EQUAL, cols);
-
-		Screen screen(cols, rows);
-		Render(screen, doc);
-
-		/* Cursor to top-left, then overwrite frame in-place (no full-clear flicker) */
-		fputs("\033[H", stdout);
-		fputs(screen.ToString().c_str(), stdout);
-		fflush(stdout);
-	}
+	if (lines.empty())
+		lines.push_back(text("  No log messages yet…") | dim);
+	return vbox(std::move(lines)) | frame;
+}
 
 } // anonymous namespace
 
 /* =========================================================================
- * Required plugin exports
+ * DOM-only rendering (WASM / non-interactive native)
+ * ====================================================================== */
+
+namespace {
+
+#ifdef __EMSCRIPTEN__
+__attribute__((import_module("ttm"), import_name("ttm_terminal_size")))
+extern void ttm_terminal_size(uint32_t* out_width, uint32_t* out_height);
+#endif
+
+void redrawDom() {
+	uint32_t w = 80, h = 24;
+#ifdef __EMSCRIPTEN__
+	ttm_terminal_size(&w, &h);
+#endif
+	if (w < 20) w = 20;
+	if (h < 8)  h = 8;
+	const int cols = static_cast<int>(w);
+	const int rows = static_cast<int>(h);
+
+	const std::string epochStr = g_fitStarted
+		? (std::to_string(g_currentEpoch) + "/" + std::to_string(g_totalEpochs)) : "—";
+
+	auto header = window(
+		text(" TTM Training ") | bold,
+		vbox({
+			hbox({ text("Model:   ") | bold,
+			       text(g_modelPath.empty() ? "—" : g_modelPath) | color(Color::Cyan) | flex,
+			       separator(), text(" Epoch: ") | bold,
+			       text(epochStr) | color(Color::Yellow) }),
+			hbox({ text("Dataset: ") | bold,
+			       text(g_datasetUri.empty() ? "—" : g_datasetUri) | color(Color::Cyan) | flex,
+			       separator(), text(" Split: ") | bold,
+			       text(g_datasetSplit.empty() ? "—" : g_datasetSplit) }),
+			hbox({ text("Step:    ") | bold,
+			       text(std::to_string(g_globalStep)) | color(Color::Green), filler() }),
+		})
+	);
+
+	auto metricsPanel = window(text(" Metrics ") | bold, makeMetricsElement()) | flex;
+	auto logsPanel    = window(text(" Logs "   ) | bold, makeLogsElement() | flex) | flex;
+
+	auto doc = vbox({ header, metricsPanel, logsPanel })
+		| size(HEIGHT, EQUAL, rows) | size(WIDTH, EQUAL, cols);
+
+	Screen screen(cols, rows);
+	Render(screen, doc);
+	fputs("\033[H", stdout);
+	fputs(screen.ToString().c_str(), stdout);
+	fflush(stdout);
+}
+
+} // anonymous namespace
+
+/* =========================================================================
+ * Interactive mode — native only
+ * ====================================================================== */
+
+#ifndef __EMSCRIPTEN__
+namespace interactive {
+
+static std::mutex              g_mtx;
+static std::thread             g_thread;
+static ScreenInteractive*      g_screen  = nullptr;
+static int                     g_tab     = 0;       ///< 0=Metrics, 1=Logs
+static int                     g_infoW   = 36;      ///< resizable info pane width
+
+/* -----------------------------------------------------------------------
+ * RAM utilisation
+ * -------------------------------------------------------------------- */
+
+#ifdef __linux__
+struct MemInfo { float fraction; std::string label; };
+static MemInfo queryMem() {
+	struct rusage ru{};
+	getrusage(RUSAGE_SELF, &ru);
+	struct sysinfo si{};
+	sysinfo(&si);
+	const uint64_t total = static_cast<uint64_t>(si.totalram) * si.mem_unit;
+	const uint64_t rss   = static_cast<uint64_t>(ru.ru_maxrss) * 1024; // kb→bytes
+	const float frac = total > 0 ? static_cast<float>(rss) / static_cast<float>(total) : 0.0f;
+	char buf[64];
+	snprintf(buf, sizeof(buf), "%llu MB / %llu MB",
+		(unsigned long long)(rss   / (1024*1024)),
+		(unsigned long long)(total / (1024*1024)));
+	return {frac, buf};
+}
+#else
+struct MemInfo { float fraction; std::string label; };
+static MemInfo queryMem() { return {0.0f, "N/A"}; }
+#endif
+
+/* -----------------------------------------------------------------------
+ * Component renderers
+ * -------------------------------------------------------------------- */
+
+static Component makeUtilizationComponent() {
+	return Renderer([] {
+		const auto mem = queryMem();
+		return window(
+			text(" Utilization ") | bold,
+			hbox({
+				text("RAM: ") | color(Color::Cyan),
+				gaugeRight(mem.fraction)
+					| color(LinearGradient(Color::Green, Color::Red)) | flex,
+				text("  " + mem.label) | color(Color::GrayDark),
+			})
+		);
+	});
+}
+
+static Component makeInfoComponent() {
+	return Renderer([] {
+		std::lock_guard<std::mutex> lk(g_mtx);
+		const std::string epochStr = g_fitStarted
+			? (std::to_string(g_currentEpoch) + "/" + std::to_string(g_totalEpochs)) : "—";
+
+		Elements rows;
+		auto row = [&](const std::string& k, const std::string& v) {
+			rows.push_back(hbox({
+				text(k) | color(Color::Cyan),
+				filler(),
+				text(v) | color(Color::GrayLight),
+			}));
+		};
+		if (!g_modelPath.empty())   row("Model",   g_modelPath);
+		if (!g_datasetUri.empty())  row("Dataset", g_datasetUri);
+		if (!g_datasetSplit.empty())row("Split",   g_datasetSplit);
+		if (g_fitStarted)           row("Epoch",   epochStr);
+		row("Step", std::to_string(g_globalStep));
+
+		if (rows.empty()) rows.push_back(text("—") | dim);
+		return window(text(" Info ") | bold, vbox(std::move(rows))) | flex;
+	});
+}
+
+static Component makeTabComponent() {
+	static std::vector<std::string> kTabLabels = {"  Metrics  ", "  Logs  "};
+	auto toggle  = Toggle(&kTabLabels, &g_tab);
+
+	auto metricsRenderer = Renderer([] {
+		std::lock_guard<std::mutex> lk(g_mtx);
+		return makeMetricsElement();
+	});
+	auto logsRenderer = Renderer([] {
+		std::lock_guard<std::mutex> lk(g_mtx);
+		return makeLogsElement();
+	});
+	auto tabContent = Container::Tab({metricsRenderer, logsRenderer}, &g_tab);
+
+	auto container = Container::Vertical({toggle, tabContent | flex});
+	return Renderer(container, [=] {
+		return window(
+			hbox({ toggle->Render() }),
+			tabContent->Render() | flex
+		) | flex;
+	});
+}
+
+static Component makeProgressComponent() {
+	return Renderer([] {
+		std::lock_guard<std::mutex> lk(g_mtx);
+		const float progress = (g_epochBatchTotal > 0)
+			? std::clamp(static_cast<float>(g_batchIdx) / static_cast<float>(g_epochBatchTotal), 0.0f, 1.0f)
+			: 0.0f;
+		const std::string epochStr = g_fitStarted
+			? (std::to_string(g_currentEpoch) + "/" + std::to_string(g_totalEpochs)) : "—";
+		char pct[16];
+		snprintf(pct, sizeof(pct), " %5.1f%%", static_cast<double>(progress) * 100.0);
+		return window(
+			text(" Progress ") | bold,
+			hbox({
+				text("Epoch " + epochStr + "  ") | color(Color::Yellow),
+				gaugeRight(progress) | color(LinearGradient(Color::Cyan, Color::Blue)) | flex,
+				text(pct),
+			})
+		);
+	});
+}
+
+/* -----------------------------------------------------------------------
+ * Render thread entry point
+ * -------------------------------------------------------------------- */
+
+static void runLoop() {
+	auto screen = ScreenInteractive::Fullscreen();
+	g_screen = &screen;
+
+	auto utilComp  = makeUtilizationComponent();
+	auto tabComp   = makeTabComponent();
+	auto infoComp  = makeInfoComponent();
+	auto progComp  = makeProgressComponent();
+
+	auto centreLeft = Container::Vertical({tabComp | flex});
+	auto split      = ResizableSplitRight(infoComp, centreLeft, &g_infoW);
+	auto root       = Container::Vertical({
+		utilComp,
+		split | flex,
+		progComp,
+	});
+
+	/* Quit on 'q' or Ctrl-C (Ctrl-C is handled by SIGINT; q for convenience). */
+	auto withQuit = CatchEvent(root, [&](Event ev) {
+		if (ev == Event::Character('q') || ev == Event::Escape) {
+			screen.Exit();
+			return true;
+		}
+		return false;
+	});
+
+	screen.Loop(withQuit);
+	g_screen = nullptr;
+}
+
+static void postRedraw() {
+	if (g_screen != nullptr) g_screen->PostEvent(Event::Custom);
+}
+
+} // namespace interactive
+#endif // !__EMSCRIPTEN__
+
+/* =========================================================================
+ * Plugin globals — mode selection
+ * ====================================================================== */
+
+namespace {
+	bool g_interactive = false;
+}
+
+/* =========================================================================
+ * ABI exports
  * ====================================================================== */
 
 extern "C" {
 
 static ttm_plugin_info g_info = {
-		TTM_ABI_VERSION, "console-ui", "0.1.0",
-		"Live TUI training dashboard — FTXUI DOM, WASI"};
+	TTM_ABI_VERSION, "console-ui", "0.2.0",
+	"Live TUI training dashboard — FTXUI, WASI/native"
+};
 
 ttm_plugin_info* ttm_plugin_get_info(void) { return &g_info; }
 
 ttm_error ttm_plugin_init(
-		const ttm_host_api* /*host*/, const char* /*cfg*/, uint32_t /*len*/
+	const ttm_host_api* /*host*/, const char* cfg, uint32_t len
 ) {
-	/* Reserve terminal area: clear screen once, then use cursor-home overwrites. */
+	/* Parse "interactive" option from config JSON (native only). */
+#ifndef __EMSCRIPTEN__
+	if (cfg != nullptr && len > 0) {
+		const std::string cfgStr(cfg, len);
+		/* Simple check: "interactive":true */
+		g_interactive = (cfgStr.find("\"interactive\":true") != std::string::npos
+		              || cfgStr.find("\"interactive\": true") != std::string::npos);
+	}
+	if (g_interactive) {
+		interactive::g_thread = std::thread(interactive::runLoop);
+		return TTM_OK;
+	}
+#endif
 	fputs("\033[2J\033[H", stdout);
 	fflush(stdout);
-	redraw(); /* Show empty dashboard immediately. */
+	redrawDom();
 	return TTM_OK;
 }
 
 void ttm_plugin_teardown(void) {
-	/* Position cursor below the TUI so the shell prompt appears cleanly. */
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) {
+		if (interactive::g_screen != nullptr) interactive::g_screen->Exit();
+		if (interactive::g_thread.joinable()) interactive::g_thread.join();
+		g_interactive  = false;
+		interactive::g_screen = nullptr;
+		return;
+	}
+#endif
 	uint32_t w = 80, h = 24;
+#ifdef __EMSCRIPTEN__
 	ttm_terminal_size(&w, &h);
+#endif
 	char buf[32]{};
 	snprintf(buf, sizeof(buf), "\033[%u;0H\n", h);
 	fputs(buf, stdout);
 	fflush(stdout);
 }
 
-/* =========================================================================
- * Optional lifecycle hooks
- * ====================================================================== */
+/* -----------------------------------------------------------------------
+ * Lifecycle callbacks
+ * -------------------------------------------------------------------- */
 
 void ttm_on_fit_begin(const char* ctx_json, uint32_t len) {
-	g_fit_started   = true;
-	g_current_epoch = 0;
-	g_global_step   = 0;
-
 	const std::string json(ctx_json, len);
-	g_dataset_uri   = json_str(json, "dataset_uri");
-	g_dataset_split = json_str(json, "dataset_split");
-	g_model_path    = json_str(json, "model_path");
-	g_total_epochs  = static_cast<uint32_t>(json_int(json, "total_epochs"));
-
-	redraw();
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) {
+		std::lock_guard<std::mutex> lk(interactive::g_mtx);
+		g_fitStarted    = true;
+		g_currentEpoch  = 0;
+		g_globalStep    = 0;
+		g_datasetUri    = jsonStr(json, "dataset_uri");
+		g_datasetSplit  = jsonStr(json, "dataset_split");
+		g_modelPath     = jsonStr(json, "model_path");
+		g_totalEpochs   = static_cast<uint32_t>(jsonInt(json, "total_epochs"));
+		interactive::postRedraw(); return;
+	}
+#endif
+	g_fitStarted    = true;
+	g_currentEpoch  = 0;
+	g_globalStep    = 0;
+	g_datasetUri    = jsonStr(json, "dataset_uri");
+	g_datasetSplit  = jsonStr(json, "dataset_split");
+	g_modelPath     = jsonStr(json, "model_path");
+	g_totalEpochs   = static_cast<uint32_t>(jsonInt(json, "total_epochs"));
+	redrawDom();
 }
 
 void ttm_on_epoch_begin(uint32_t epoch, uint32_t /*total*/) {
-	g_current_epoch = epoch;
-	redraw();
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) {
+		std::lock_guard<std::mutex> lk(interactive::g_mtx);
+		g_currentEpoch = epoch;
+		g_batchIdx = 0;
+		interactive::postRedraw(); return;
+	}
+#endif
+	g_currentEpoch = epoch;
+	g_batchIdx = 0;
+	redrawDom();
 }
 
 void ttm_on_batch_end(
-		uint32_t /*batch*/, float /*loss*/, const char* /*json*/, uint32_t /*len*/
+	uint32_t batch, float /*loss*/, const char* /*json*/, uint32_t /*len*/
 ) {
-	/* Throttle redraws to every 10 batches to reduce output volume. */
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) {
+		std::lock_guard<std::mutex> lk(interactive::g_mtx);
+		g_batchIdx = batch + 1;
+		interactive::postRedraw(); return;
+	}
+#endif
 	static uint32_t s_count = 0;
-	if ((++s_count % 10u) == 0u) redraw();
+	if ((++s_count % 10u) == 0u) redrawDom();
 }
 
 int32_t ttm_on_epoch_end(uint32_t epoch, const char* /*json*/, uint32_t /*len*/) {
-	g_current_epoch = epoch;
-	redraw();
-	return 0; /* 0 = do not request early stopping */
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) {
+		std::lock_guard<std::mutex> lk(interactive::g_mtx);
+		g_currentEpoch = epoch;
+		g_epochBatchTotal = g_batchIdx; // freeze total for next epoch's progress bar
+		interactive::postRedraw(); return 0;
+	}
+#endif
+	g_epochBatchTotal = g_batchIdx;
+	g_currentEpoch = epoch;
+	redrawDom();
+	return 0;
 }
 
-void ttm_on_fit_end(const char* /*json*/, uint32_t /*len*/) { redraw(); }
-
-/* =========================================================================
- * Log + metric receive hooks
- * ====================================================================== */
+void ttm_on_fit_end(const char* /*json*/, uint32_t /*len*/) {
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) { interactive::postRedraw(); return; }
+#endif
+	redrawDom();
+}
 
 void ttm_on_log(uint32_t level, const char* msg, uint32_t len) {
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) {
+		std::lock_guard<std::mutex> lk(interactive::g_mtx);
+		if (static_cast<int>(g_logs.size()) >= kMaxLogs) g_logs.pop_front();
+		g_logs.push_back({level, std::string(msg, len)});
+		interactive::postRedraw(); return;
+	}
+#endif
 	if (static_cast<int>(g_logs.size()) >= kMaxLogs) g_logs.pop_front();
 	g_logs.push_back({level, std::string(msg, len)});
-	redraw();
+	redrawDom();
 }
 
 void ttm_on_metric(const char* key, uint32_t key_len, float value, int32_t step) {
-	g_global_step = step;
-
-	const std::string k(key, key_len);
-	if (g_metrics.find(k) == g_metrics.end()) {
-		g_metric_keys.push_back(k);
+#ifndef __EMSCRIPTEN__
+	if (g_interactive) {
+		std::lock_guard<std::mutex> lk(interactive::g_mtx);
+		g_globalStep = step;
+		const std::string k(key, key_len);
+		if (g_metrics.find(k) == g_metrics.end()) g_metricKeys.push_back(k);
+		g_metrics[k].push(value);
+		interactive::postRedraw(); return;
 	}
+#endif
+	g_globalStep = step;
+	const std::string k(key, key_len);
+	if (g_metrics.find(k) == g_metrics.end()) g_metricKeys.push_back(k);
 	g_metrics[k].push(value);
-	redraw();
+	redrawDom();
 }
 
 } // extern "C"

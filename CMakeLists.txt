@@ -133,6 +133,39 @@ if(TTM_BUILD_EXTENSIONS)
         message(STATUS "ttm: Python3 not found — skipping extensions/python")
     endif()
 
+    # console-ui native plugin — full FTXUI component API (ScreenInteractive,
+    # pthreads) for the optional "interactive":true mode.  The resolver prefers
+    # .so over .wasm, so this automatically supersedes the WASM build when both
+    # are present.
+    CPMAddPackage(URI "gh:ArthurSonzogni/FTXUI@6.1.9"
+        NAME FTXUI
+        OPTIONS
+            "FTXUI_BUILD_EXAMPLES OFF"
+            "FTXUI_BUILD_TESTS    OFF"
+            "FTXUI_BUILD_DOCS     OFF"
+            "FTXUI_ENABLE_INSTALL OFF"
+        EXCLUDE_FROM_ALL YES
+    )
+    add_library(ttm_console_ui MODULE
+        extensions/console-ui/src/console_ui.cpp
+    )
+    set_target_properties(ttm_console_ui PROPERTIES
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/extensions/console-ui"
+    )
+    target_compile_features(ttm_console_ui PRIVATE cxx_std_20)
+    target_include_directories(ttm_console_ui PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    # dlpack is already fetched by extensions/core above; CPM deduplicates.
+    CPMAddPackage(URI "gh:dmlc/dlpack@0.8" EXCLUDE_FROM_ALL YES)
+    target_link_libraries(ttm_console_ui PRIVATE
+        ftxui::screen
+        ftxui::dom
+        ftxui::component
+        dlpack
+    )
+
     # WASM plugins require WASI SDK; cross-compiled via ExternalProject so they
     # do not pollute the host build tree.
     if(TTM_WASM_TOOLCHAIN)
