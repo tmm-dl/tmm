@@ -99,8 +99,9 @@ namespace ttm::datasets {
 	[[nodiscard]] std::expected<std::unique_ptr<DatasetIterator>, std::string> load_dataset(
 			ttm::plugins::IDatasetSource& source,
 			std::string_view uri,
-			std::string_view split  = "train",
-			std::string_view config = ""
+			std::string_view split      = "train",
+			std::string_view config     = "",
+			int64_t          batch_size = 0   ///< 0 = return full row groups as-is
 	);
 
 } // namespace ttm::datasets

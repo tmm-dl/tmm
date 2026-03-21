@@ -30,17 +30,27 @@
  * plugin registers itself but returns a helpful error at load time.
  */
 
+#include "python_plugin.hpp"
+
 #include <ttm/plugins/abi.h>
 #include <ttm_python_export.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#ifdef TTM_PYTHON_HAS_TORCH
+#include <dlpack/dlpack.h>
+#endif
+
 #include <array>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string>
+
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 /* ============================================================================
  * Constants
@@ -80,6 +90,114 @@ namespace {
 
 } // anonymous namespace
 
+// Non-static accessor for python_optimizer.cpp (declared in python_plugin.hpp).
+PyObject* py_get_model_obj(ttm_handle h) {
+	const auto* st = (h >= 0 && h < kMaxModels && g_models[static_cast<int>(h)].used)
+	                     ? &g_models[static_cast<int>(h)]
+	                     : nullptr;
+	return st ? st->model_obj : nullptr;
+}
+
+/* ============================================================================
+ * DLPack helpers
+ * ========================================================================= */
+
+#ifdef TTM_PYTHON_HAS_TORCH
+
+/// Heap-allocated DLManagedTensor that copies the shape from a DLTensor.
+/// Freed by managed_dlpack_deleter() which PyTorch calls when it releases the tensor.
+struct OwnedDLManaged {
+	DLManagedTensor mgd;
+	int64_t         shape_buf[8]; // supports up to 8-D tensors
+};
+
+static void managed_dlpack_deleter(DLManagedTensor* p) {
+	// `mgd` is the first member of OwnedDLManaged → reinterpret_cast is safe.
+	// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+	delete reinterpret_cast<OwnedDLManaged*>(p);
+}
+
+/// Called when the PyCapsule is GC-collected without PyTorch having consumed it.
+/// Prevents memory leak on error paths.
+static void capsule_dlpack_destructor(PyObject* cap) {
+	void* ptr = PyCapsule_GetPointer(cap, "dltensor");
+	if (ptr != nullptr) {
+		auto* mgd = static_cast<DLManagedTensor*>(ptr);
+		if (mgd->deleter != nullptr) {
+			mgd->deleter(mgd);
+		}
+	}
+}
+
+/// Wrap a host-owned DLTensor as a "dltensor" PyCapsule for torch.utils.dlpack.from_dlpack().
+/// PyTorch takes ownership via the DLManagedTensor::deleter.
+static PyObject* make_dlpack_capsule(const DLTensor& t) {
+	auto* owned = new OwnedDLManaged{};
+	// Copy shape into embedded buffer (host's shape array may not outlive this call)
+	for (int i = 0; i < t.ndim && i < 8; ++i) {
+		owned->shape_buf[i] = t.shape[i];
+	}
+	owned->mgd.dl_tensor          = t;
+	owned->mgd.dl_tensor.shape    = owned->shape_buf;
+	owned->mgd.dl_tensor.strides  = nullptr; // contiguous
+	owned->mgd.manager_ctx        = nullptr;
+	owned->mgd.deleter            = managed_dlpack_deleter;
+	return PyCapsule_New(&owned->mgd, "dltensor", capsule_dlpack_destructor);
+}
+
+/// Convert n DLTensors to a Python list of torch.Tensors via DLPack.
+/// Returns a new reference list, or nullptr on error (sets Python exception).
+static PyObject* tensors_to_torch(const DLTensor* inputs, uint32_t n) {
+	PyObject* dlpack_mod = PyImport_ImportModule("torch.utils.dlpack");
+	if (dlpack_mod == nullptr) return nullptr;
+
+	PyObject* lst = PyList_New(static_cast<Py_ssize_t>(n));
+	for (uint32_t i = 0; i < n; ++i) {
+		PyObject* cap    = make_dlpack_capsule(inputs[i]);
+		PyObject* tensor = PyObject_CallMethod(dlpack_mod, "from_dlpack", "O", cap);
+		Py_DECREF(cap);
+		if (tensor == nullptr) {
+			Py_DECREF(dlpack_mod);
+			Py_DECREF(lst);
+			return nullptr;
+		}
+		PyList_SET_ITEM(lst, static_cast<Py_ssize_t>(i), tensor); // steals ref
+	}
+	Py_DECREF(dlpack_mod);
+	return lst;
+}
+
+/// Call model(input_ids=..., attention_mask=..., labels=...) and return output.
+/// `tensors` must have at least 2 elements; element 2 is optional labels.
+static PyObject* call_model_forward(PyObject* model_obj, PyObject* tensors) {
+	const Py_ssize_t ntensors = PyList_GET_SIZE(tensors);
+
+	PyObject* input_ids      = PyList_GET_ITEM(tensors, 0);       // borrowed
+	PyObject* attention_mask = (ntensors >= 2)
+	    ? PyList_GET_ITEM(tensors, 1) : Py_None;                  // borrowed
+
+	PyObject* kwargs = PyDict_New();
+	PyDict_SetItemString(kwargs, "input_ids",      input_ids);
+	PyDict_SetItemString(kwargs, "attention_mask", attention_mask);
+
+	if (ntensors >= 3) {
+		PyObject* raw_labels = PyList_GET_ITEM(tensors, 2);       // borrowed [B,1]
+		// Squeeze trailing dim-1 → [B] as DistilBERT's forward() expects
+		PyObject* labels = PyObject_CallMethod(raw_labels, "squeeze", "i", -1);
+		if (labels == nullptr) { PyErr_Clear(); labels = raw_labels; Py_INCREF(labels); }
+		PyDict_SetItemString(kwargs, "labels", labels);
+		Py_DECREF(labels);
+	}
+
+	PyObject* empty_args = PyTuple_New(0);
+	PyObject* output     = PyObject_Call(model_obj, empty_args, kwargs);
+	Py_DECREF(empty_args);
+	Py_DECREF(kwargs);
+	return output;
+}
+
+#endif // TTM_PYTHON_HAS_TORCH
+
 /* ============================================================================
  * Model loader vtable implementations
  * ========================================================================= */
@@ -104,6 +222,20 @@ static ttm_handle py_load(
 #else
 	/* Ensure Python is initialised */
 	if (!Py_IsInitialized()) {
+#ifndef _WIN32
+		// Re-open libpython with RTLD_GLOBAL so Python extension modules
+		// (e.g. _ctypes, torch) can resolve PyXxx symbols at dlopen time.
+		// Without this, embedded Python loaded inside a MODULE shared library
+		// does not expose its symbols globally, breaking C-extension imports.
+		void* pylib = dlopen("libpython3.12.so.1.0", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+		if (!pylib) {
+			pylib = dlopen("libpython3.12.so.1.0", RTLD_NOW | RTLD_GLOBAL);
+		}
+		if (!pylib) {
+			pylib = dlopen("libpython3.12.so", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+		}
+		// pylib intentionally not closed — we want the RTLD_GLOBAL flag to persist.
+#endif
 		Py_Initialize();
 	}
 
@@ -181,7 +313,9 @@ static ttm_handle py_load(
 		return TTM_INVALID_HANDLE;
 	}
 
-	/* Find first torch.nn.Module subclass in the module's dict */
+	/* Find first torch.nn.Module subclass DEFINED in this module's dict.
+	 * We filter by __module__ == "model" to skip imported classes
+	 * (e.g. DistilBertForSequenceClassification imported at module top-level). */
 	PyObject* mod_dict = PyModule_GetDict(pymod); // borrowed ref
 	PyObject* model_class = nullptr;
 	PyObject* key = nullptr;
@@ -190,6 +324,17 @@ static ttm_handle py_load(
 	while (PyDict_Next(mod_dict, &pos, &key, &value)) {
 		if (!PyType_Check(value)) continue;
 		if (value == Module_class) continue;
+		// Only consider classes defined in this module, not imported ones
+		PyObject* cls_module = PyObject_GetAttrString(value, "__module__");
+		bool local = false;
+		if (cls_module != nullptr) {
+			const char* cm = PyUnicode_AsUTF8(cls_module);
+			local = (cm != nullptr && std::strcmp(cm, "model") == 0);
+			Py_DECREF(cls_module);
+		} else {
+			PyErr_Clear();
+		}
+		if (!local) continue;
 		const int is_sub = PyObject_IsSubclass(value, Module_class);
 		if (is_sub == 1) {
 			model_class = value;
@@ -258,28 +403,130 @@ static ttm_error py_init_params(ttm_handle /*h*/, const char* /*method*/, uint32
 }
 
 static ttm_error py_step(ttm_handle h,
-                          const DLTensor* /*inputs*/, uint32_t /*n*/,
+                          const DLTensor* inputs, uint32_t n,
                           float* out_loss) {
 	if (out_loss) *out_loss = 0.0f;
-	[[maybe_unused]] auto* st = get_model(h);
+	auto* st = get_model(h);
 	if (st == nullptr) return TTM_ERR_NOT_FOUND;
 
 #ifdef TTM_PYTHON_HAS_TORCH
-	/* TODO: convert DLTensors → torch.Tensor via DLPack capsule, call forward,
-	 * compute loss.backward(), return loss.item(). */
+	if (n < 1) return TTM_ERR_ARGS;
+
+	// 1. Convert DLTensors → torch.Tensors via DLPack
+	PyObject* tensors = tensors_to_torch(inputs, n);
+	if (tensors == nullptr) { PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO; }
+
+	// 2. Forward pass
+	PyObject* output = call_model_forward(st->model_obj, tensors);
+	Py_DECREF(tensors);
+	if (output == nullptr) { PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO; }
+
+	// 3. loss.backward()
+	PyObject* loss_tensor = PyObject_GetAttrString(output, "loss");
+	Py_DECREF(output);
+	if (loss_tensor == nullptr || loss_tensor == Py_None) {
+		Py_XDECREF(loss_tensor);
+		PyErr_Clear();
+		return TTM_OK; // no loss (inference-only model?)
+	}
+	PyObject* bwd = PyObject_CallMethod(loss_tensor, "backward", nullptr);
+	Py_XDECREF(bwd);
+	if (PyErr_Occurred()) { PyErr_Print(); PyErr_Clear(); }
+
+	// 4. *out_loss = loss.item()
+	PyObject* loss_val = PyObject_CallMethod(loss_tensor, "item", nullptr);
+	Py_DECREF(loss_tensor);
+	if (loss_val != nullptr) {
+		if (out_loss) *out_loss = static_cast<float>(PyFloat_AsDouble(loss_val));
+		Py_DECREF(loss_val);
+	}
+	PyErr_Clear(); // swallow any remaining python error
+
+	// Run Python GC to collect cyclic garbage from the computation graph.
+	// Without this, short-lived activation tensors held in reference cycles
+	// accumulate until CPython's generational collector runs (which may be
+	// infrequent during heavy C-extension use), causing unbounded memory growth.
+	static int s_step_count = 0;
+	if ((++s_step_count & 0x1F) == 0) { // every 32 steps
+		PyObject* gc = PyImport_ImportModule("gc");
+		if (gc != nullptr) {
+			PyObject* r = PyObject_CallMethod(gc, "collect", nullptr);
+			Py_XDECREF(r);
+			Py_DECREF(gc);
+		}
+		PyErr_Clear();
+	}
 #endif
 	return TTM_OK;
 }
 
+// thread_local float so py_infer can pass validation loss back to the caller
+// via outputs[0].data without allocating heap memory per batch.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static thread_local float g_infer_loss = 0.0f;
+
 static ttm_error py_infer(ttm_handle h,
-                           const DLTensor* /*inputs*/,  uint32_t /*in_count*/,
-                           DLTensor*       /*outputs*/, uint32_t* out_count) {
+                           const DLTensor* inputs, uint32_t in_count,
+                           DLTensor* outputs, uint32_t* out_count) {
 	if (out_count) *out_count = 0;
-	[[maybe_unused]] auto* st = get_model(h);
+	auto* st = get_model(h);
 	if (st == nullptr) return TTM_ERR_NOT_FOUND;
 
 #ifdef TTM_PYTHON_HAS_TORCH
-	/* TODO: wrap in torch.no_grad(), call forward, convert outputs back via DLPack. */
+	if (in_count < 1) return TTM_ERR_ARGS;
+
+	// Disable gradient computation for inference
+	PyObject* torch_mod   = PyImport_ImportModule("torch");
+	if (torch_mod == nullptr) { PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO; }
+	PyObject* no_grad_cls = PyObject_GetAttrString(torch_mod, "no_grad");
+	Py_DECREF(torch_mod);
+	if (no_grad_cls == nullptr) { PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO; }
+	PyObject* no_grad_ctx = PyObject_CallObject(no_grad_cls, nullptr);
+	Py_DECREF(no_grad_cls);
+	if (no_grad_ctx == nullptr) { PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO; }
+	PyObject* enter_result = PyObject_CallMethod(no_grad_ctx, "__enter__", nullptr);
+	Py_XDECREF(enter_result);
+	if (PyErr_Occurred()) { PyErr_Print(); PyErr_Clear(); Py_DECREF(no_grad_ctx); return TTM_ERR_IO; }
+
+	// Convert DLTensors → torch.Tensors and run forward
+	PyObject* tensors = tensors_to_torch(inputs, in_count);
+	PyObject* output  = (tensors != nullptr)
+	    ? call_model_forward(st->model_obj, tensors)
+	    : nullptr;
+	Py_XDECREF(tensors);
+
+	// Exit no_grad context (always, even on error)
+	PyObject* py_none     = Py_None;
+	PyObject* exit_result = PyObject_CallMethod(
+		no_grad_ctx, "__exit__", "OOO", py_none, py_none, py_none);
+	Py_XDECREF(exit_result);
+	Py_DECREF(no_grad_ctx);
+
+	if (output == nullptr) { PyErr_Print(); PyErr_Clear(); return TTM_ERR_IO; }
+
+	// Extract validation loss → store in thread_local so caller can memcpy it
+	PyObject* loss_tensor = PyObject_GetAttrString(output, "loss");
+	Py_DECREF(output);
+	if (loss_tensor != nullptr && loss_tensor != Py_None) {
+		PyObject* loss_val = PyObject_CallMethod(loss_tensor, "item", nullptr);
+		Py_DECREF(loss_tensor);
+		if (loss_val != nullptr) {
+			g_infer_loss = static_cast<float>(PyFloat_AsDouble(loss_val));
+			Py_DECREF(loss_val);
+			if (outputs != nullptr && out_count != nullptr && *out_count >= 1) {
+				DLTensor& t = outputs[0];
+				t.data   = &g_infer_loss;
+				t.device = {kDLCPU, 0};
+				t.ndim   = 0; // scalar
+				t.dtype  = {kDLFloat, 32, 1};
+				t.shape  = nullptr;
+				*out_count = 1;
+			}
+		}
+	} else {
+		Py_XDECREF(loss_tensor);
+	}
+	PyErr_Clear();
 #endif
 	return TTM_OK;
 }
@@ -331,12 +578,19 @@ TTM_PYTHON_EXPORT ttm_plugin_info* ttm_plugin_get_info(void) {
 TTM_PYTHON_EXPORT ttm_error ttm_plugin_init(const ttm_host_api* host,
                                               const char* /*cfg*/, uint32_t /*len*/) {
 	if (host->register_model_loader != nullptr) {
-		return host->register_model_loader(host->ctx, &g_py_loader);
+		const ttm_error rc = host->register_model_loader(host->ctx, &g_py_loader);
+		if (rc != TTM_OK) return rc;
 	}
-	return TTM_OK;
+	{
+		const ttm_error rc = pyOptimizerRegister(host);
+		if (rc != TTM_OK) return rc;
+	}
+	return pyTransformRegister(host);
 }
 
 TTM_PYTHON_EXPORT void ttm_plugin_teardown(void) {
+	pyOptimizerTeardown();
+	pyTransformTeardown();
 	for (auto& st : g_models) {
 		if (st.used) {
 			Py_XDECREF(st.model_obj);

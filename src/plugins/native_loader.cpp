@@ -39,7 +39,10 @@ namespace ttm::plugins {
 #ifdef _WIN32
 			return static_cast<void*>(LoadLibraryW(path.wstring().c_str()));
 #else
-			return dlopen(path.string().c_str(), RTLD_NOW | RTLD_LOCAL);
+			// RTLD_GLOBAL is required for plugins that embed an interpreter
+			// (e.g. Python): extension modules loaded by the interpreter
+			// must be able to resolve the interpreter's symbols at dlopen time.
+			return dlopen(path.string().c_str(), RTLD_NOW | RTLD_GLOBAL);
 #endif
 		}
 

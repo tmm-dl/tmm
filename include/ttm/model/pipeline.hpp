@@ -11,6 +11,7 @@
 #include <ttm/model/model.hpp>
 #include <ttm/model/params.hpp>
 #include <ttm/model/preprocessor.hpp>
+#include <ttm/plugins/abi.h>
 #include <ttm/plugins/plugin_manager.hpp>
 #include <ttm/compat/expected.hpp>
 
@@ -60,6 +61,9 @@ namespace ttm::model {
 		ModelPipeline(ModelPipeline&&)            = default;
 		ModelPipeline& operator=(ModelPipeline&&) = default;
 		~ModelPipeline() override;
+
+		/** @brief Return the underlying plugin model handle (e.g. for optimizer creation). */
+		[[nodiscard]] ttm_handle model_handle() const { return handle_; }
 
 		/**
 		 * @brief Load a model and set up the full preprocessing pipeline.
@@ -127,9 +131,10 @@ namespace ttm::model {
 		std::unique_ptr<IModel>             inner_;         ///< Plugin-provided model.
 		std::unique_ptr<ICollator>          collator_;      ///< Arrow → DLTensor collator.
 		std::vector<ParamBuffer>            params_;        ///< Param + grad buffers.
+		ttm_handle                          handle_ = TTM_INVALID_HANDLE; ///< Underlying model handle.
 
-		// Non-owning references to plugin-registered preprocessors (valid for process lifetime)
-		std::vector<const IPreprocessor*>   preprocessors_;
+		// Owned preprocessors (instantiated with per-entry config at load time)
+		std::vector<std::unique_ptr<IPreprocessor>> preprocessors_;
 
 		ModelInfo                           info_;
 	};

@@ -441,6 +441,48 @@ namespace ttm::plugins {
 		ttm_model_loader_vtable vt_;
 	};
 
+	/* =========================================================================
+	 * COptimizerAdapter — wraps a C ttm_optimizer_vtable into trainer::IOptimizer
+	 * ====================================================================== */
+
+	/**
+	 * @brief trainer::IOptimizer that delegates all calls through a plugin vtable.
+	 *
+	 * @details
+	 * Created by PluginManager::make_optimizer().  Owns the vtable handle and
+	 * calls vtable->destroy() on destruction.
+	 */
+	class COptimizerAdapter final : public ttm::trainer::IOptimizer {
+	public:
+		COptimizerAdapter(const ttm_optimizer_vtable& vt, ttm_handle h) : vt_(vt), h_(h) {}
+
+		~COptimizerAdapter() override {
+			if (h_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+				vt_.destroy(h_);
+			}
+		}
+
+		void step() override {
+			if (vt_.step != nullptr) vt_.step(h_);
+		}
+
+		void zero_grad() override {
+			if (vt_.zero_grad != nullptr) vt_.zero_grad(h_);
+		}
+
+		[[nodiscard]] float learning_rate() const override {
+			return (vt_.get_lr != nullptr) ? vt_.get_lr(h_) : 0.0f;
+		}
+
+		void set_learning_rate(float lr) override {
+			if (vt_.set_lr != nullptr) vt_.set_lr(h_, lr);
+		}
+
+	private:
+		ttm_optimizer_vtable vt_;
+		ttm_handle h_;
+	};
+
 	} // anonymous namespace
 
 	/* =========================================================================
@@ -493,6 +535,7 @@ namespace ttm::plugins {
 		taskRegistry.clear();
 		modelLoaderRegistry.clear();
 		transformRegistry.clear();
+		transformVtableRegistry.clear();
 
 		wasm_loader_destroy();
 	}
@@ -503,7 +546,9 @@ namespace ttm::plugins {
 			  taskRegistry(std::move(other.taskRegistry)),
 			  modelLoaderRegistry(std::move(other.modelLoaderRegistry)),
 			  transformRegistry(std::move(other.transformRegistry)),
+			  transformVtableRegistry(std::move(other.transformVtableRegistry)),
 			  schedulerVtableRegistry(std::move(other.schedulerVtableRegistry)),
+			  optimizerVtableRegistry(std::move(other.optimizerVtableRegistry)),
 			  wamrRefOwned(other.wamrRefOwned) {
 		other.wamrRefOwned = false;
 	}
@@ -519,7 +564,9 @@ namespace ttm::plugins {
 			taskRegistry             = std::move(other.taskRegistry);
 			modelLoaderRegistry      = std::move(other.modelLoaderRegistry);
 			transformRegistry        = std::move(other.transformRegistry);
+			transformVtableRegistry  = std::move(other.transformVtableRegistry);
 			schedulerVtableRegistry  = std::move(other.schedulerVtableRegistry);
+			optimizerVtableRegistry  = std::move(other.optimizerVtableRegistry);
 			wamrRefOwned             = other.wamrRefOwned;
 			other.wamrRefOwned       = false;
 		}
@@ -632,6 +679,7 @@ namespace ttm::plugins {
 		api.register_model_loader = &PluginManager::s_register_model_loader;
 		api.notify_model_info    = &PluginManager::s_notify_model_info;
 		api.register_scheduler   = &PluginManager::s_register_scheduler;
+		api.register_optimizer   = &PluginManager::s_register_optimizer;
 		api.log                  = &PluginManager::s_log;
 		api.log_metric           = &PluginManager::s_log_metric;
 		api.terminal_size        = &PluginManager::s_terminal_size;
@@ -728,6 +776,9 @@ namespace ttm::plugins {
 		if (ctx == nullptr || name == nullptr || vt == nullptr) return TTM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 
+		// Store vtable copy for per-config instantiation via find_transform_vtable()
+		regCtx->manager->transformVtableRegistry[name] = *vt;
+
 		// Build a minimal ITransform adapter
 		class CVtableTransform final : public ITransform {
 		public:
@@ -758,6 +809,11 @@ namespace ttm::plugins {
 		auto adapter = std::make_unique<CVtableTransform>(name, *vt);
 		regCtx->manager->register_transform_impl(std::move(adapter), *regCtx);
 		return TTM_OK;
+	}
+
+	const ttm_transform_vtable* PluginManager::find_transform_vtable(std::string_view name) const {
+		const auto it = transformVtableRegistry.find(std::string(name));
+		return (it != transformVtableRegistry.end()) ? &it->second : nullptr;
 	}
 
 	void PluginManager::register_transform_impl(std::unique_ptr<ITransform> transform, PluginRegistrationCtx& ctx) {
@@ -825,6 +881,55 @@ namespace ttm::plugins {
 	const ttm_scheduler_vtable* PluginManager::find_scheduler_vtable(std::string_view name) const {
 		const auto it = schedulerVtableRegistry.find(std::string(name));
 		return (it != schedulerVtableRegistry.end()) ? &it->second : nullptr;
+	}
+
+	ttm_error PluginManager::s_register_optimizer(void* ctx, const char* name, const ttm_optimizer_vtable* vt) {
+		if (ctx == nullptr || name == nullptr || vt == nullptr) return TTM_ERR_ARGS;
+		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
+		regCtx->manager->optimizerVtableRegistry.insert_or_assign(std::string(name), *vt);
+		return TTM_OK;
+	}
+
+	const ttm_optimizer_vtable* PluginManager::find_optimizer_vtable(std::string_view name) const {
+		const auto it = optimizerVtableRegistry.find(std::string(name));
+		return (it != optimizerVtableRegistry.end()) ? &it->second : nullptr;
+	}
+
+	std::unique_ptr<ttm::trainer::IOptimizer> PluginManager::make_optimizer(
+			std::string_view name,
+			ttm_handle       model_h,
+			const DLTensor*  params,
+			uint32_t         param_count,
+			const DLTensor*  grads,
+			std::string_view cfg_json,
+			std::string*     out_error
+	) const {
+		const ttm_optimizer_vtable* vt = find_optimizer_vtable(name);
+		if (vt == nullptr) {
+			if (out_error != nullptr) *out_error = "optimizer not found: " + std::string(name);
+			return nullptr;
+		}
+		if (vt->create == nullptr) {
+			if (out_error != nullptr) *out_error = "optimizer vtable has no create() for: " + std::string(name);
+			return nullptr;
+		}
+		constexpr std::size_t kErrCap = 512;
+		std::array<char, kErrCap> errBuf{};
+		const ttm_handle h = vt->create(
+			model_h,
+			params, param_count, grads,
+			cfg_json.data(), static_cast<uint32_t>(cfg_json.size()),
+			errBuf.data(), kErrCap
+		);
+		if (h == TTM_INVALID_HANDLE) {
+			if (out_error != nullptr) {
+				*out_error = errBuf[0] != '\0'
+					? std::string(errBuf.data())
+					: "optimizer create failed (no error message)";
+			}
+			return nullptr;
+		}
+		return std::make_unique<COptimizerAdapter>(*vt, h);
 	}
 
 	ttm_error PluginManager::s_register_metric(

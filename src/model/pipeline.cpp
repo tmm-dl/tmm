@@ -20,6 +20,10 @@
 #include <ttm/plugins/extension.hpp>
 #include <ttm/plugins/plugin_manager.hpp>
 
+#include <arrow/buffer.h>
+#include <arrow/ipc/reader.h>
+#include <arrow/ipc/writer.h>
+#include <arrow/io/memory.h>
 #include <arrow/record_batch.h>
 
 #include <cstdlib>
@@ -244,6 +248,133 @@ namespace ttm::model {
 	} // anonymous namespace
 
 	/* =========================================================================
+	 * TransformPreprocessorAdapter — wraps ttm_transform_vtable as IPreprocessor
+	 * ====================================================================== */
+
+	/**
+	 * @brief Adapts a plugin-registered ttm_transform_vtable as an IPreprocessor.
+	 *
+	 * @details
+	 * Creates a new transform instance using the per-preprocessor config JSON
+	 * (not the empty-config default instance stored in the transform registry).
+	 * Serialises the input RecordBatch to Arrow IPC, calls apply(), then
+	 * deserialises the output back to a RecordBatch.
+	 */
+	class TransformPreprocessorAdapter final : public model::IPreprocessor {
+	public:
+		TransformPreprocessorAdapter(
+			std::string                  type_name,
+			const ttm_transform_vtable&  vt,
+			std::string_view             config_json
+		)
+			: name_(std::move(type_name)), vt_(vt), handle_(TTM_INVALID_HANDLE)
+		{
+			if (vt_.create != nullptr) {
+				handle_ = vt_.create(config_json.data(),
+				                     static_cast<uint32_t>(config_json.size()));
+			}
+		}
+
+		~TransformPreprocessorAdapter() override {
+			if (handle_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+				vt_.destroy(handle_);
+			}
+		}
+
+		TransformPreprocessorAdapter(const TransformPreprocessorAdapter&) = delete;
+		TransformPreprocessorAdapter& operator=(const TransformPreprocessorAdapter&) = delete;
+		TransformPreprocessorAdapter(TransformPreprocessorAdapter&&) = delete;
+		TransformPreprocessorAdapter& operator=(TransformPreprocessorAdapter&&) = delete;
+
+		[[nodiscard]] std::string_view name() const override { return name_; }
+
+		[[nodiscard]] std::expected<std::shared_ptr<arrow::RecordBatch>, std::string>
+		apply(const arrow::RecordBatch& batch) const override {
+			if (handle_ == TTM_INVALID_HANDLE) {
+				return std::unexpected(std::format(
+					"TransformPreprocessorAdapter('{}'): handle is invalid (create failed?)", name_));
+			}
+			if (vt_.apply == nullptr) {
+				return std::unexpected(std::format(
+					"TransformPreprocessorAdapter('{}'): vtable has no apply() function", name_));
+			}
+
+			// 1. Serialize input batch to Arrow IPC stream format
+			auto sink = arrow::io::BufferOutputStream::Create().ValueOrDie();
+			{
+				auto writer = arrow::ipc::MakeStreamWriter(sink.get(), batch.schema()).ValueOrDie();
+				auto st = writer->WriteRecordBatch(batch);
+				if (!st.ok()) {
+					return std::unexpected(std::format(
+						"TransformPreprocessorAdapter('{}'): IPC serialise failed: {}",
+						name_, st.ToString()));
+				}
+				st = writer->Close();
+				if (!st.ok()) {
+					return std::unexpected(std::format(
+						"TransformPreprocessorAdapter('{}'): IPC writer close failed: {}",
+						name_, st.ToString()));
+				}
+			}
+			auto in_buf = sink->Finish().ValueOrDie();
+
+			// 2. Call transform
+			void*    out_raw = nullptr;
+			uint32_t out_len = 0;
+			const auto err = vt_.apply(
+				handle_,
+				in_buf->data(), static_cast<uint32_t>(in_buf->size()),
+				&out_raw, &out_len
+			);
+			if (err != TTM_OK) {
+				return std::unexpected(std::format(
+					"TransformPreprocessorAdapter('{}'): apply() returned error {}", name_, static_cast<int>(err)));
+			}
+
+			// 3. Deserialize output — wrap the malloc'd buffer in an owning Arrow
+			// Buffer so that RecordBatch column slices (zero-copy IPC) keep the
+			// underlying memory alive for as long as the batch is referenced.
+			// Arrow's IPC reader takes shared_ptr slices of the input buffer;
+			// without this, `out_raw` would be freed when `apply()` returns while
+			// the column arrays still hold dangling pointers into it.
+			class MallocBuffer final : public arrow::Buffer {
+			public:
+				MallocBuffer(void* ptr, int64_t size)
+					: arrow::Buffer(static_cast<const uint8_t*>(ptr), size), ptr_(ptr) {}
+				~MallocBuffer() override { std::free(ptr_); }
+			private:
+				void* ptr_;
+			};
+			auto out_buf = std::shared_ptr<arrow::Buffer>(
+				new MallocBuffer(out_raw, static_cast<int64_t>(out_len)));
+			// Ownership transferred to out_buf — do not free out_raw separately.
+			out_raw = nullptr;
+
+			auto buf_reader = std::make_shared<arrow::io::BufferReader>(out_buf);
+			auto reader_result = arrow::ipc::RecordBatchStreamReader::Open(buf_reader);
+			if (!reader_result.ok()) {
+				return std::unexpected(std::format(
+					"TransformPreprocessorAdapter('{}'): IPC deserialise failed: {}",
+					name_, reader_result.status().ToString()));
+			}
+			auto reader = std::move(reader_result).ValueOrDie();
+
+			std::shared_ptr<arrow::RecordBatch> out_batch;
+			auto st = reader->ReadNext(&out_batch);
+			if (!st.ok() || out_batch == nullptr) {
+				return std::unexpected(std::format(
+					"TransformPreprocessorAdapter('{}'): no batch in IPC output", name_));
+			}
+			return out_batch;
+		}
+
+	private:
+		std::string          name_;
+		ttm_transform_vtable vt_;
+		ttm_handle           handle_;
+	};
+
+	/* =========================================================================
 	 * ModelPipeline::~ModelPipeline
 	 * ====================================================================== */
 
@@ -295,10 +426,18 @@ namespace ttm::model {
 		auto inner = std::make_unique<CVtableModel>(loader, handle, info);
 
 		// 5. Resolve preprocessors from plugin registry ───────────────────────
-		std::vector<const IPreprocessor*> preprocessors;
-		for ([[maybe_unused]] const auto& pe : preprocessor_entries) {
-			// Preprocessors are not yet implemented via plugin registry;
-			// this is a placeholder for future ITransform → IPreprocessor wiring.
+		std::vector<std::unique_ptr<IPreprocessor>> preprocessors;
+		for (const auto& pe : preprocessor_entries) {
+			const auto* vt = mgr.find_transform_vtable(pe.type);
+			if (vt == nullptr) {
+				return std::unexpected(std::format(
+					"ModelPipeline: no transform registered for '{}'. "
+					"Make sure the plugin providing this transform is loaded.", pe.type));
+			}
+			const std::string cfg = pe.config.empty() ? "{}" : pe.config;
+			preprocessors.push_back(std::make_unique<TransformPreprocessorAdapter>(
+				pe.type, *vt, cfg
+			));
 		}
 
 		// 6. Build collator ───────────────────────────────────────────────────
@@ -372,6 +511,7 @@ namespace ttm::model {
 
 		// 10. Build pipeline object ───────────────────────────────────────────
 		auto pipe = std::unique_ptr<ModelPipeline>(new ModelPipeline());
+		pipe->handle_       = handle;
 		pipe->inner_        = std::move(inner);
 		pipe->collator_     = std::move(collator);
 		pipe->params_       = std::move(params);
@@ -396,7 +536,7 @@ namespace ttm::model {
 			const_cast<arrow::RecordBatch*>(&raw), // NOLINT -- non-owning alias
 			[](arrow::RecordBatch*) {}             // no-op deleter
 		};
-		for (const auto* pp : preprocessors_) {
+		for (const auto& pp : preprocessors_) {
 			auto result = pp->apply(*batch);
 			if (!result) return std::unexpected(result.error());
 			batch = std::move(*result);

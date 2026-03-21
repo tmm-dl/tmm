@@ -42,6 +42,7 @@
 
 #include <ttm/plugins/abi.h>
 #include <ttm/plugins/extension.hpp>
+#include <ttm/trainer/interfaces.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -191,6 +192,20 @@ namespace ttm::plugins {
 		[[nodiscard]] ITransform* find_transform(std::string_view name) const;
 
 		/**
+         * @brief Look up a registered transform vtable by name.
+         *
+         * @details
+         * Unlike find_transform(), which returns a pre-created instance with
+         * empty config, this returns the raw vtable so callers can create new
+         * instances with per-invocation configuration.
+         *
+         * @param[in] name  Transform name registered via register_transform.
+         * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
+         *         Valid for the lifetime of this PluginManager.
+         */
+		[[nodiscard]] const ttm_transform_vtable* find_transform_vtable(std::string_view name) const;
+
+		/**
          * @brief Broadcast model-loaded metadata to all plugins that export
          *        #ttm_on_model_loaded.
          *
@@ -213,6 +228,46 @@ namespace ttm::plugins {
          * @see ttm_scheduler_vtable
          */
 		[[nodiscard]] const ttm_scheduler_vtable* find_scheduler_vtable(std::string_view name) const;
+
+		/**
+         * @brief Look up a registered optimizer vtable by name.
+         *
+         * @param[in] name  Optimizer name from the training config (e.g. "adamw").
+         * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
+         *         Valid for the lifetime of this PluginManager.
+         *
+         * @see ttm_optimizer_vtable
+         */
+		[[nodiscard]] const ttm_optimizer_vtable* find_optimizer_vtable(std::string_view name) const;
+
+		/**
+         * @brief Create an optimizer and wrap it as a trainer::IOptimizer.
+         *
+         * @details
+         * Looks up the vtable by @p name, calls vtable->create() with the
+         * supplied parameters, and wraps the resulting handle in an adapter
+         * that implements trainer::IOptimizer.  On success the returned
+         * unique_ptr owns the optimizer handle and will destroy it on
+         * destruction.
+         *
+         * @param[in]  name         Optimizer name (e.g. "adamw").
+         * @param[in]  model_h      Model handle (from IModelLoader::open).
+         * @param[in]  params       Host-allocated param DLTensors (may be nullptr).
+         * @param[in]  param_count  Number of param/grad tensor pairs.
+         * @param[in]  grads        Host-allocated grad DLTensors (may be nullptr).
+         * @param[in]  cfg_json     JSON string with optimizer hyperparameters.
+         * @param[out] out_error    If non-null, receives an error description on failure.
+         * @return Owning pointer to the optimizer, or nullptr on failure.
+         */
+		[[nodiscard]] std::unique_ptr<ttm::trainer::IOptimizer> make_optimizer(
+			std::string_view name,
+			ttm_handle       model_h,
+			const DLTensor*  params,
+			uint32_t         param_count,
+			const DLTensor*  grads,
+			std::string_view cfg_json,
+			std::string*     out_error = nullptr
+		) const;
 
 		/** @} */
 
@@ -369,6 +424,16 @@ namespace ttm::plugins {
 		std::unordered_map<std::string, ITransform*> transformRegistry;
 
 		/**
+         * @brief Transform vtable registry: name → owned vtable copy.
+         *
+         * @details
+         * Stored by value so callers can create new instances with per-invocation
+         * configuration via find_transform_vtable(). The function pointers remain
+         * valid as long as the plugin is loaded.
+         */
+		std::unordered_map<std::string, ttm_transform_vtable> transformVtableRegistry;
+
+		/**
          * @brief Scheduler vtable registry: name → owned vtable copy.
          *
          * @details
@@ -376,6 +441,12 @@ namespace ttm::plugins {
          * The function pointers within remain valid as long as the plugin is loaded.
          */
 		std::unordered_map<std::string, ttm_scheduler_vtable> schedulerVtableRegistry;
+
+		/**
+         * @brief Optimizer vtable registry: name → owned vtable copy.
+         * @details The function pointers remain valid as long as the plugin is loaded.
+         */
+		std::unordered_map<std::string, ttm_optimizer_vtable> optimizerVtableRegistry;
 
 		/**
          * @brief True if this instance owns a WAMR runtime reference.
@@ -399,6 +470,8 @@ namespace ttm::plugins {
 		static void s_notify_model_info(void* ctx, const ttm_model_info_t* info);
 		/// @private
 		static ttm_error s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt);
+		/// @private
+		static ttm_error s_register_optimizer(void* ctx, const char* name, const ttm_optimizer_vtable* vt);
 		/// @private
 		void register_model_loader_impl(std::unique_ptr<IModelLoader> loader, PluginRegistrationCtx& ctx);
 		/// @private

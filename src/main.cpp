@@ -63,6 +63,13 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#   define WIN32_LEAN_AND_MEAN
+#   include <windows.h>  // GetModuleFileNameW
+#else
+#   include <unistd.h>   // readlink
+#endif
+
 /* =========================================================================
  * Helpers
  * ====================================================================== */
@@ -99,6 +106,75 @@ private:
 	ttm_handle           h_;
 };
 
+/// Return the directory containing the running executable.
+static std::filesystem::path exe_dir() {
+#ifdef _WIN32
+	wchar_t buf[4096];
+	DWORD   n = GetModuleFileNameW(nullptr, buf, static_cast<DWORD>(std::size(buf)));
+	if (n == 0 || n == std::size(buf)) return {};
+	return std::filesystem::path(buf).parent_path();
+#else
+	char buf[4096];
+	const ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+	if (n <= 0) return {};
+	buf[n] = '\0';
+	return std::filesystem::path(buf).parent_path();
+#endif
+}
+
+/// Return the platform-specific filename for a plugin named `name`.
+/// E.g. "core" → "ttm_core.so" (Linux) / "ttm_core.dylib" (macOS) / "ttm_core.dll" (Windows)
+static std::string plugin_filename(const std::string& name) {
+#ifdef _WIN32
+	return "ttm_" + name + ".dll";
+#elif defined(__APPLE__)
+	return "ttm_" + name + ".dylib";
+#else
+	return "ttm_" + name + ".so";
+#endif
+}
+
+/// Resolve a plugin name to an absolute path.
+/// Search order: exe dir, then each dir in TTM_PLUGIN_PATH (colon-separated).
+static std::expected<std::filesystem::path, std::string>
+resolve_plugin_name(const std::string& name) {
+	const std::string filename = plugin_filename(name);
+
+	// 1. Next to the executable
+	const auto exd = exe_dir();
+	if (!exd.empty()) {
+		auto candidate = exd / filename;
+		if (std::filesystem::exists(candidate)) return candidate;
+	}
+
+	// 2. TTM_PLUGIN_PATH environment variable
+	// NOLINTNEXTLINE(concurrency-mt-unsafe)
+	const char* env = std::getenv("TTM_PLUGIN_PATH");
+	if (env != nullptr) {
+		std::string dirs{env};
+		std::size_t start = 0;
+		while (start < dirs.size()) {
+#ifdef _WIN32
+			const char sep = ';';
+#else
+			const char sep = ':';
+#endif
+			const auto end = dirs.find(sep, start);
+			const std::string dir = dirs.substr(start, end == std::string::npos ? end : end - start);
+			start = (end == std::string::npos) ? dirs.size() : end + 1;
+			if (!dir.empty()) {
+				auto candidate = std::filesystem::path(dir) / filename;
+				if (std::filesystem::exists(candidate)) return candidate;
+			}
+		}
+	}
+
+	return std::unexpected(
+		"plugin '" + name + "' not found (looked for '" + filename + "').\n"
+		"  Place " + filename + " next to the ttm binary, or set TTM_PLUGIN_PATH."
+	);
+}
+
 /// Load all plugins listed in the config into a fresh PluginManager.
 static std::expected<ttm::plugins::PluginManager, std::string>
 setup_plugins(const ttm::conf::TrainingConfig& cfg) {
@@ -106,9 +182,20 @@ setup_plugins(const ttm::conf::TrainingConfig& cfg) {
 	if (!mgrResult) return std::unexpected(mgrResult.error());
 
 	for (const auto& entry : cfg.plugins) {
-		if (auto r = mgrResult->load(entry.path, entry.config); !r) {
+		// Resolve name → path when only a name is given
+		std::string resolved_path = entry.path;
+		if (resolved_path.empty() && !entry.name.empty()) {
+			auto r = resolve_plugin_name(entry.name);
+			if (!r) return std::unexpected(r.error());
+			resolved_path = r->string();
+		}
+		if (resolved_path.empty()) {
+			return std::unexpected("Plugin entry has neither 'name' nor 'path' set.");
+		}
+
+		if (auto r = mgrResult->load(resolved_path, entry.config); !r) {
 			return std::unexpected(
-				"Failed to load plugin '" + entry.path + "': " + r.error()
+				"Failed to load plugin '" + resolved_path + "': " + r.error()
 			);
 		}
 	}
@@ -156,7 +243,7 @@ static int cmd_fit(
 		-> std::expected<std::unique_ptr<ttm::datasets::DatasetIterator>, std::string>
 	{
 		return ttm::datasets::load_dataset(
-			*source, train_ds.uri, train_ds.split, train_ds.config_name
+			*source, train_ds.uri, train_ds.split, train_ds.config_name, train_ds.batch_size
 		);
 	};
 
@@ -174,10 +261,11 @@ static int cmd_fit(
 			          << scheme_of(val_uri) << "'\n";
 			return 1;
 		}
-		val_factory = [val_src, val_uri, val_cfg, split = val_ds.split]()
+		const int64_t val_batch = val_ds.batch_size > 0 ? val_ds.batch_size : cfg.dataset.batch_size;
+		val_factory = [val_src, val_uri, val_cfg, split = val_ds.split, val_batch]()
 			-> std::expected<std::unique_ptr<ttm::datasets::DatasetIterator>, std::string>
 		{
-			return ttm::datasets::load_dataset(*val_src, val_uri, split, val_cfg);
+			return ttm::datasets::load_dataset(*val_src, val_uri, split, val_cfg, val_batch);
 		};
 	}
 
@@ -196,12 +284,46 @@ static int cmd_fit(
 	}
 
 	// 7. Build and run trainer
+	// Capture handle before move (model_handle() unavailable after std::move)
+	const ttm_handle model_h = (*pipelineResult)->model_handle();
 	auto trainer = ttm::trainer::Trainer(
 		cfg, mgr, std::move(*pipelineResult), train_factory
 	);
 	if (val_factory) trainer.validation(std::move(val_factory));
 
-	// 8. Attach LR scheduler if one is registered for the configured type
+	// 8. Create and attach the optimizer (required for parameter updates)
+	if (!cfg.optimizer.type.empty()) {
+		char opt_cfg[512];
+		std::snprintf(opt_cfg, sizeof(opt_cfg),
+			"{\"lr\":%g,\"weight_decay\":%g,\"beta1\":%g,\"beta2\":%g,"
+			"\"eps\":%g,\"amsgrad\":%d,\"device\":\"%s\"}",
+			static_cast<double>(cfg.optimizer.lr),
+			static_cast<double>(cfg.optimizer.weight_decay),
+			static_cast<double>(cfg.optimizer.beta1),
+			static_cast<double>(cfg.optimizer.beta2),
+			static_cast<double>(cfg.optimizer.eps),
+			cfg.optimizer.amsgrad ? 1 : 0,
+			cfg.model.device.c_str());
+
+		std::string opt_err;
+		auto optimizer = mgr.make_optimizer(
+			cfg.optimizer.type,
+			model_h,
+			nullptr, 0, nullptr,
+			opt_cfg,
+			&opt_err
+		);
+		if (optimizer) {
+			trainer.optimizer(std::move(optimizer));
+		} else {
+			std::cerr << "ttm fit: optimizer '" << cfg.optimizer.type
+			          << "' unavailable: " << opt_err << "\n"
+			          << "  Make sure the plugin providing this optimizer is loaded.\n";
+			return 1;
+		}
+	}
+
+	// 9. Attach LR scheduler if one is registered for the configured type
 	if (const auto* vt = mgr.find_scheduler_vtable(cfg.scheduler.type)) {
 		char sched_cfg[256];
 		std::snprintf(sched_cfg, sizeof(sched_cfg),

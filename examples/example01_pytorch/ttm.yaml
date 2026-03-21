@@ -1,0 +1,41 @@
+project: Example 01
+task: text-classification
+
+model:
+  file: model.py      # resolved relative to this config file
+  device: cpu
+
+data:
+  train: &train_data
+    url: hf:thagen/SCITE
+    split: train
+    batch_size: 16
+    preprocessor:
+      - type: hf-tokenize
+        config: >-
+          {"model_name": "distilbert-base-uncased",
+           "text_col": "text", "label_col": "label",
+           "max_length": 128}
+  validation:
+    <<: *train_data
+    split: valid
+
+trainer:
+  epochs: 5
+  optimizer:
+    type: adamw
+    lr: 2.0e-5
+    weight_decay: 0.01
+  lr_scheduler:
+    type: linear
+    warmup_steps: 100
+  early_stopping:
+    patience: 3
+    monitor: val_loss
+  checkpoint:
+    directory: ./checkpoints
+    every_n_epochs: 1
+
+plugins:
+  - name: core
+  - name: python

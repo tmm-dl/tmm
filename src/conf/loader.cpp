@@ -219,48 +219,172 @@ namespace ttm::conf {
 			};
 		}
 
-		TrainingConfig node_to_config(const YAML::Node& root) {
+		/* =====================================================================
+		 * New-schema helpers
+		 * ================================================================== */
+
+		/// Strip a "namespace::" prefix (e.g. "core::linear" → "linear").
+		std::string strip_ns(const std::string& s) {
+			const auto pos = s.rfind("::");
+			return (pos != std::string::npos) ? s.substr(pos + 2) : s;
+		}
+
+		TrainingConfig node_to_config(const YAML::Node& root,
+		                              const std::filesystem::path& config_dir) {
 			TrainingConfig cfg;
 			cfg.version = gets(root, "version", "1");
 
-			if (const auto n = root["dataset"])    cfg.dataset    = parse_dataset(n);
-			if (const auto n = root["validation"]) cfg.validation = parse_validation(n);
-			if (const auto n = root["model"])      cfg.model      = parse_model(n);
-			if (const auto n = root["optimizer"])  cfg.optimizer  = parse_optimizer(n);
-			if (const auto n = root["scheduler"])  cfg.scheduler  = parse_scheduler(n);
-			if (const auto n = root["checkpoint"]) cfg.checkpoint = parse_checkpoint(n);
+			/* ------------------------------------------------------------------
+			 * New schema: data.train.* / data.validation.*
+			 * Old schema: dataset.* / validation.*  (still supported as fallback)
+			 * ---------------------------------------------------------------- */
+			if (const auto data = root["data"]) {
+				if (const auto n = data["train"]) {
+					cfg.dataset.uri         = gets(n, "url",        gets(n, "uri"));
+					cfg.dataset.split       = gets(n, "split",      "train");
+					cfg.dataset.batch_size  = get<int64_t>(n, "batch_size", 32);
+					cfg.dataset.shuffle     = get<bool>(n, "shuffle", true);
+					cfg.dataset.shuffle_buffer_size = get<int64_t>(n, "shuffle_buffer_size", 10'000);
+					cfg.dataset.num_workers = get<int64_t>(n, "num_workers", 4);
+					cfg.dataset.prefetch    = get<int64_t>(n, "prefetch", 2);
 
-			if (const auto t = root["training"]) {
-				cfg.epochs                      = get<int64_t>(t, "epochs",                      10);
-				cfg.gradient_accumulation_steps = get<int64_t>(t, "gradient_accumulation_steps", 1);
-				cfg.grad_clip_norm              = get<float>(t,   "grad_clip_norm",               0.0f);
-				cfg.fp16                        = get<bool>(t,    "fp16",                         false);
-				cfg.seed                        = get<int64_t>(t, "seed",                         42);
-				cfg.log_level                   = gets(t,         "log_level",                    "info");
+					// Per-dataset preprocessors: data.train.preprocessor[]
+					if (const auto pps = n["preprocessor"]; pps && pps.IsSequence()) {
+						for (const auto& p : pps) {
+							cfg.preprocessors.push_back({
+								.type   = strip_ns(gets(p, "type", gets(p, "name"))),
+								.config = gets(p, "config", "{}"),
+							});
+						}
+					}
+				}
+				if (const auto n = data["validation"]) {
+					ValidationConfig vc;
+					vc.uri         = gets(n, "url",    gets(n, "uri",
+					                   cfg.dataset.uri.empty() ? "" : cfg.dataset.uri));
+					vc.split       = gets(n, "split",  "validation");
+					vc.batch_size  = get<int64_t>(n, "batch_size", 32);
+					cfg.validation = vc;
+				}
+			} else {
+				// Old schema fallback
+				if (const auto n = root["dataset"])    cfg.dataset    = parse_dataset(n);
+				if (const auto n = root["validation"]) cfg.validation = parse_validation(n);
 			}
 
+			/* ------------------------------------------------------------------
+			 * Model: new schema uses model.file (relative path) + model.device.
+			 * Old schema uses model.path.
+			 * ---------------------------------------------------------------- */
+			if (const auto n = root["model"]) {
+				const std::string file   = gets(n, "file");
+				const std::string path   = gets(n, "path");
+				if (!file.empty()) {
+					// Resolve relative to the config file's directory
+					cfg.model.path = (config_dir / file).string();
+				} else {
+					cfg.model.path = path;
+				}
+				cfg.model.function_name = gets(n, "function", "main");
+				cfg.model.device        = gets(n, "device",   "cpu");
+				cfg.model.device_id     = get<int32_t>(n, "device_id", 0);
+			}
+
+			/* ------------------------------------------------------------------
+			 * Trainer block (new schema): trainer.optimizer, trainer.lr_scheduler,
+			 * trainer.early_stopping, trainer.checkpoint, trainer.epochs, …
+			 * Old schema: optimizer.*, scheduler.*, checkpoint.*, training.*
+			 * ---------------------------------------------------------------- */
+			if (const auto t = root["trainer"]) {
+				cfg.epochs = get<int64_t>(t, "epochs", 10);
+				cfg.gradient_accumulation_steps =
+					get<int64_t>(t, "gradient_accumulation_steps", 1);
+
+				if (const auto o = t["optimizer"]) {
+					cfg.optimizer.type         = strip_ns(gets(o, "type",         "adamw"));
+					cfg.optimizer.lr           = get<float>(o, "lr",           1e-3f);
+					cfg.optimizer.weight_decay = get<float>(o, "weight_decay", 1e-2f);
+					cfg.optimizer.beta1        = get<float>(o, "beta1",        0.9f);
+					cfg.optimizer.beta2        = get<float>(o, "beta2",        0.999f);
+					cfg.optimizer.eps          = get<float>(o, "eps",          1e-8f);
+					cfg.optimizer.amsgrad      = get<bool>(o,  "amsgrad",      false);
+				}
+				if (const auto s = t["lr_scheduler"]) {
+					cfg.scheduler.type         = strip_ns(gets(s, "type",         "cosine_warmup"));
+					cfg.scheduler.warmup_steps = get<int64_t>(s, "warmup_steps", 0);
+					cfg.scheduler.min_lr       = get<float>(s,   "min_lr",       0.0f);
+					cfg.scheduler.step_size    = get<int64_t>(s, "step_size",    1);
+					cfg.scheduler.gamma        = get<float>(s,   "gamma",        0.1f);
+					cfg.scheduler.total_steps  = get<int64_t>(s, "total_steps",  0);
+				}
+				if (const auto es = t["early_stopping"]) {
+					cfg.callbacks.push_back({
+						.type      = "early_stopping",
+						.monitor   = gets(es, "monitor",   "val_loss"),
+						.patience  = get<int32_t>(es, "patience", 5),
+						.mode      = gets(es, "mode",      "min"),
+						.min_delta = get<float>(es, "min_delta", 0.0f),
+					});
+				}
+				if (const auto ck = t["checkpoint"]) {
+					cfg.checkpoint.dir = gets(ck, "directory",
+					                     gets(ck, "dir", "checkpoints"));
+					cfg.checkpoint.save_every_n_epochs =
+						get<int32_t>(ck, "every_n_epochs",
+						get<int32_t>(ck, "save_every_n_epochs", 1));
+					cfg.checkpoint.keep_top_k    = get<int32_t>(ck, "keep_top_k", 3);
+					cfg.checkpoint.monitor       = gets(ck, "monitor",      "val_loss");
+					cfg.checkpoint.monitor_mode  = gets(ck, "mode",         "min");
+				}
+			} else {
+				// Old schema fallback
+				if (const auto n = root["optimizer"])  cfg.optimizer  = parse_optimizer(n);
+				if (const auto n = root["scheduler"])  cfg.scheduler  = parse_scheduler(n);
+				if (const auto n = root["checkpoint"]) cfg.checkpoint = parse_checkpoint(n);
+				if (const auto tr = root["training"]) {
+					cfg.epochs = get<int64_t>(tr, "epochs", 10);
+					cfg.gradient_accumulation_steps =
+						get<int64_t>(tr, "gradient_accumulation_steps", 1);
+					cfg.grad_clip_norm = get<float>(tr, "grad_clip_norm", 0.0f);
+					cfg.fp16           = get<bool>(tr,  "fp16",           false);
+					cfg.seed           = get<int64_t>(tr, "seed",         42);
+					cfg.log_level      = gets(tr, "log_level",            "info");
+				}
+			}
+
+			/* ------------------------------------------------------------------
+			 * Plugins: support both name: and path: forms.
+			 * ---------------------------------------------------------------- */
 			if (const auto ps = root["plugins"]; ps && ps.IsSequence()) {
 				for (const auto& p : ps) {
 					cfg.plugins.push_back({
+						.name   = gets(p, "name"),
 						.path   = gets(p, "path"),
 						.config = gets(p, "config", "{}"),
 					});
 				}
 			}
 
+			/* ------------------------------------------------------------------
+			 * Top-level preprocessors[] (old schema; new schema puts them under
+			 * data.train.preprocessor[] which is already handled above).
+			 * ---------------------------------------------------------------- */
 			if (const auto pps = root["preprocessors"]; pps && pps.IsSequence()) {
-			for (const auto& p : pps) {
-				cfg.preprocessors.push_back({
-					.type   = gets(p, "type"),
-					.config = gets(p, "config", "{}"),
-				});
+				for (const auto& p : pps) {
+					cfg.preprocessors.push_back({
+						.type   = gets(p, "type"),
+						.config = gets(p, "config", "{}"),
+					});
+				}
 			}
-		}
 
-		if (const auto cs = root["callbacks"]; cs && cs.IsSequence()) {
+			/* ------------------------------------------------------------------
+			 * Top-level callbacks[] (old schema).
+			 * ---------------------------------------------------------------- */
+			if (const auto cs = root["callbacks"]; cs && cs.IsSequence()) {
 				for (const auto& c : cs) {
 					cfg.callbacks.push_back({
-						.type      = gets(c, "type"),
+						.type      = strip_ns(gets(c, "type", gets(c, "name"))),
 						.monitor   = gets(c, "monitor",   "val_loss"),
 						.patience  = get<int32_t>(c, "patience",  5),
 						.mode      = gets(c, "mode",      "min"),
@@ -286,6 +410,11 @@ namespace ttm::conf {
 		if (files.empty()) {
 			return std::unexpected("load_config: no config files provided");
 		}
+
+		// The config directory is the directory of the first (primary) config file.
+		// model.file paths are resolved relative to it.
+		const std::filesystem::path config_dir =
+			std::filesystem::absolute(files[0]).parent_path();
 
 		// YAML::Node default-constructs as Null (not Undefined), so we cannot
 		// rely on !merged or operator= to bootstrap the first document.
@@ -316,7 +445,7 @@ namespace ttm::conf {
 		}
 
 		interpolate_env(merged);
-		return node_to_config(merged);
+		return node_to_config(merged, config_dir);
 	}
 
 	std::expected<TrainingConfig, std::string>

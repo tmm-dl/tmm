@@ -26,7 +26,11 @@ endif()
 # ttm_python shared library
 ##########################################################################################
 
-add_library(ttm_python MODULE src/python_model.cpp)
+add_library(ttm_python MODULE
+    src/python_model.cpp
+    src/python_optimizer.cpp
+    src/python_transform.cpp
+)
 
 target_compile_features(ttm_python PRIVATE cxx_std_23)
 
@@ -67,3 +71,12 @@ else()
 endif()
 
 install(TARGETS ttm_python DESTINATION .)
+
+# ---------------------------------------------------------------------------
+# Tests — add when building tests are enabled (mirrors root TMM_BUILD_TESTS).
+# Guarded so standalone `cmake -S extensions/python` still works.
+# ---------------------------------------------------------------------------
+if(TMM_BUILD_TESTS OR (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME))
+    include(CTest)
+    add_subdirectory(tests)
+endif()

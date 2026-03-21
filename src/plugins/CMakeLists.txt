@@ -52,3 +52,12 @@ CPMAddPackage(
     EXCLUDE_FROM_ALL YES
 )
 target_link_libraries(ttm_plugins PUBLIC dlpack)
+
+# Arrow headers needed by plugin_manager.hpp → interfaces.hpp.
+# Propagated PUBLIC so consumers of ttm_plugins also find them.
+if(arrow_SOURCE_DIR)
+    target_include_directories(ttm_plugins PUBLIC
+        "${arrow_SOURCE_DIR}/src"
+        "${CMAKE_BINARY_DIR}/_deps/arrow-build/src"
+    )
+endif()

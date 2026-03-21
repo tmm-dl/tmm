@@ -77,7 +77,8 @@ namespace ttm::conf {
 	};
 
 	struct PluginEntry {
-		std::string path;   ///< Path to `.wasm` or `.so`/`.dylib`/`.dll`
+		std::string name;   ///< Logical name (e.g. `"core"`, `"python"`); resolved to a path at load time
+		std::string path;   ///< Path to `.wasm` or `.so`/`.dylib`/`.dll`; takes priority over `name` if set
 		std::string config; ///< Arbitrary JSON passed to `ttm_plugin_init`
 	};
 

@@ -316,11 +316,56 @@ namespace ttm::datasets {
 	} // anonymous namespace
 
 	/* =========================================================================
+	 * Batch-slicing iterator — wraps any iterator and re-chunks to batch_size
+	 * ====================================================================== */
+
+	/**
+	 * @brief Wraps a DatasetIterator and slices every returned RecordBatch into
+	 *        fixed-size chunks of at most `batch_size` rows.
+	 *
+	 * Parquet row groups can contain tens of thousands of rows. Without slicing,
+	 * the model would receive an enormous batch, causing OOM during the forward
+	 * pass. RecordBatch::Slice is zero-copy — it shares the underlying column
+	 * buffers — so this adds no data-copy overhead.
+	 */
+	class BatchSlicingIterator final : public DatasetIterator {
+	public:
+		BatchSlicingIterator(std::unique_ptr<DatasetIterator> inner, int64_t batch_size)
+			: inner_(std::move(inner)), batch_size_(batch_size) {}
+
+		bool next(std::shared_ptr<arrow::RecordBatch>& out) override {
+			while (true) {
+				// If we have remaining rows in the current chunk, emit a slice
+				if (current_ && offset_ < current_->num_rows()) {
+					const int64_t take = std::min(current_->num_rows() - offset_, batch_size_);
+					out = current_->Slice(offset_, take);
+					offset_ += take;
+					return true;
+				}
+				// Fetch the next raw batch from upstream
+				if (!inner_->next(current_)) {
+					current_.reset();
+					return false;
+				}
+				offset_ = 0;
+			}
+		}
+
+		[[nodiscard]] const arrow::Schema& schema() const override { return inner_->schema(); }
+
+	private:
+		std::unique_ptr<DatasetIterator> inner_;
+		int64_t                          batch_size_;
+		std::shared_ptr<arrow::RecordBatch> current_;
+		int64_t                          offset_ = 0;
+	};
+
+	/* =========================================================================
 	 * Public API
 	 * ====================================================================== */
 
 	std::expected<std::unique_ptr<DatasetIterator>, std::string>
-	load_dataset(plugins::IDatasetSource& source, std::string_view uri, std::string_view split, std::string_view config) {
+	load_dataset(plugins::IDatasetSource& source, std::string_view uri, std::string_view split, std::string_view config, int64_t batch_size) {
 		/* Step 1: Parse the dataset card from README.md */
 		/* Open the README.md via the source */
 		const std::string readmeUri = std::string(uri) + "/README.md";
@@ -418,7 +463,14 @@ namespace ttm::datasets {
 			return std::unexpected("load_dataset: no shards could be opened for split '" + std::string(split) + "'");
 		}
 
-		return std::make_unique<MultiFileIterator>(std::move(shards), std::move(schema));
+		std::unique_ptr<DatasetIterator> result =
+			std::make_unique<MultiFileIterator>(std::move(shards), std::move(schema));
+
+		if (batch_size > 0) {
+			result = std::make_unique<BatchSlicingIterator>(std::move(result), batch_size);
+		}
+
+		return result;
 	}
 
 } // namespace ttm::datasets

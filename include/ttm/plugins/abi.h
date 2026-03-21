@@ -415,6 +415,91 @@ typedef struct ttm_scheduler_vtable {
 /** @} */
 
 /* =========================================================================
+ * @defgroup abi_optimizer Optimizer vtable
+ * @{
+ *
+ * Plugins implement ttm_optimizer_vtable and register it by name via
+ * ttm_host_api::register_optimizer.  The host calls create() once after the
+ * model is loaded, passing the model handle so that same-plugin optimizers
+ * can access model internals directly (e.g. the Python plugin calling
+ * model.parameters()).  For cross-plugin usage, host-allocated param/grad
+ * DLTensors are passed instead.
+ * ====================================================================== */
+
+/**
+ * @brief Vtable for gradient-based parameter optimizers.
+ *
+ * @details
+ * A plugin registers one or more optimizers by calling
+ * `host->register_optimizer(ctx, "adamw", &vt)`.  The training config
+ * selects an optimizer by this name.
+ *
+ * ### Cross-plugin compatibility
+ * When model and optimizer live in the same plugin (e.g. both PyTorch),
+ * @p model_h lets the optimizer access the model's internal state directly.
+ * When they live in different plugins, the host passes the model's param and
+ * grad DLTensors so the optimizer can work on them generically.
+ *
+ * ### LR scheduler integration
+ * The host calls set_lr() after each scheduler step so the optimizer uses
+ * the updated learning rate on the next step() call.
+ *
+ * @see ttm::trainer::IOptimizer  C++ interface backed by this vtable
+ */
+// NOLINTNEXTLINE(modernize-use-using) -- pure C header
+typedef struct ttm_optimizer_vtable {
+	/**
+     * @brief Create an optimizer instance.
+     *
+     * @param model_h     Handle from model_loader.load() for the model being
+     *                    optimized.  Same-plugin optimizers may use this to
+     *                    access the underlying model object (e.g. to call
+     *                    model.parameters()).  Pass #TTM_INVALID_HANDLE if the
+     *                    model is external to this plugin.
+     * @param params      Host-allocated param DLTensors (may be nullptr when
+     *                    the model manages its own parameter memory).
+     * @param param_count Number of elements in @p params (and @p grads).
+     * @param grads       Host-allocated gradient DLTensors (same count as
+     *                    @p params; may be nullptr).
+     * @param cfg         JSON object with optimizer hyperparameters.
+     *                    Standard fields: lr, weight_decay, beta1, beta2, eps,
+     *                    amsgrad (0/1), device (e.g. "cpu", "cuda", "cuda:1").
+     * @param cfg_len     Length of @p cfg in bytes.
+     * @param err         Buffer for a human-readable error message on failure.
+     * @param err_cap     Capacity of @p err in bytes.
+     * @return Opaque handle, or #TTM_INVALID_HANDLE on failure.
+     */
+	ttm_handle (*create)(ttm_handle      model_h,
+	                     const DLTensor* params, uint32_t param_count,
+	                     const DLTensor* grads,
+	                     const char* cfg, uint32_t cfg_len,
+	                     char* err, uint32_t err_cap);
+
+	/**
+     * @brief Apply one optimizer step using the gradients currently stored in
+     *        the model.
+     */
+	ttm_error (*step)(ttm_handle h);
+
+	/** @brief Zero all gradient accumulators. */
+	ttm_error (*zero_grad)(ttm_handle h);
+
+	/** @brief Return the current learning rate for the first param group. */
+	float (*get_lr)(ttm_handle h);
+
+	/**
+     * @brief Update the learning rate for all param groups.
+     * @details Called by the host after each LR scheduler step.
+     */
+	void (*set_lr)(ttm_handle h, float lr);
+
+	/** @brief Destroy the optimizer and release all plugin-side resources. */
+	void (*destroy)(ttm_handle h);
+} ttm_optimizer_vtable;
+
+/** @} */
+
+/* =========================================================================
  * @defgroup abi_host_api Host API
  * @{
  *
@@ -566,6 +651,19 @@ typedef struct ttm_host_api {
      * @see ttm_scheduler_vtable
      */
 	ttm_error (*register_scheduler)(void* ctx, const char* name, const ttm_scheduler_vtable* vt);
+
+	/**
+     * @brief Register an optimizer under a given name.
+     * @details Called by a plugin during #ttm_plugin_init.  The training config
+     *          selects an optimizer by this name (e.g. "adamw").
+     * @param ctx   Opaque host token.
+     * @param name  NUL-terminated optimizer name (e.g. "adamw").
+     * @param vt    Optimizer vtable.  The function pointers must remain valid
+     *              for the lifetime of the plugin.
+     * @return #TTM_OK on success.
+     * @see ttm_optimizer_vtable
+     */
+	ttm_error (*register_optimizer)(void* ctx, const char* name, const ttm_optimizer_vtable* vt);
 
 	/** @brief Opaque token passed back as the first argument to every callback. */
 	void* ctx;
