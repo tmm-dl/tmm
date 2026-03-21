@@ -62,9 +62,10 @@ namespace ttm::conf {
 		/// `constant` | `step` | `linear` | `cosine` | `cosine_warmup`
 		std::string type         = "cosine_warmup";
 		int64_t     warmup_steps = 0;
-		float       min_lr       = 0.0f; ///< Floor for cosine decay
-		int64_t     step_size    = 1;    ///< StepLR: decay every N epochs
+		float       min_lr       = 0.0f; ///< Floor for cosine / linear decay
+		int64_t     step_size    = 1;    ///< StepLR: decay every N steps
 		float       gamma        = 0.1f; ///< StepLR: multiplicative decay
+		int64_t     total_steps  = 0;    ///< Total optimizer steps (0 = no decay limit)
 	};
 
 	struct CheckpointConfig {

@@ -503,6 +503,7 @@ namespace ttm::plugins {
 			  taskRegistry(std::move(other.taskRegistry)),
 			  modelLoaderRegistry(std::move(other.modelLoaderRegistry)),
 			  transformRegistry(std::move(other.transformRegistry)),
+			  schedulerVtableRegistry(std::move(other.schedulerVtableRegistry)),
 			  wamrRefOwned(other.wamrRefOwned) {
 		other.wamrRefOwned = false;
 	}
@@ -512,14 +513,15 @@ namespace ttm::plugins {
 			/* Destroy current state */
 			this->~PluginManager();
 			/* Move from other */
-			plugins              = std::move(other.plugins);
-			nativePlugins        = std::move(other.nativePlugins);
-			sourceRegistry       = std::move(other.sourceRegistry);
-			taskRegistry         = std::move(other.taskRegistry);
-			modelLoaderRegistry  = std::move(other.modelLoaderRegistry);
-			transformRegistry    = std::move(other.transformRegistry);
-			wamrRefOwned         = other.wamrRefOwned;
-			other.wamrRefOwned   = false;
+			plugins                  = std::move(other.plugins);
+			nativePlugins            = std::move(other.nativePlugins);
+			sourceRegistry           = std::move(other.sourceRegistry);
+			taskRegistry             = std::move(other.taskRegistry);
+			modelLoaderRegistry      = std::move(other.modelLoaderRegistry);
+			transformRegistry        = std::move(other.transformRegistry);
+			schedulerVtableRegistry  = std::move(other.schedulerVtableRegistry);
+			wamrRefOwned             = other.wamrRefOwned;
+			other.wamrRefOwned       = false;
 		}
 		return *this;
 	}
@@ -629,6 +631,7 @@ namespace ttm::plugins {
 		api.register_metric      = &PluginManager::s_register_metric;
 		api.register_model_loader = &PluginManager::s_register_model_loader;
 		api.notify_model_info    = &PluginManager::s_notify_model_info;
+		api.register_scheduler   = &PluginManager::s_register_scheduler;
 		api.log                  = &PluginManager::s_log;
 		api.log_metric           = &PluginManager::s_log_metric;
 		api.terminal_size        = &PluginManager::s_terminal_size;
@@ -810,6 +813,18 @@ namespace ttm::plugins {
 			static_cast<int>(info->device_id)
 		);
 		static_cast<PluginManager*>(ctx)->emit_model_loaded(std::string_view{buf});
+	}
+
+	ttm_error PluginManager::s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt) {
+		if (ctx == nullptr || name == nullptr || vt == nullptr) return TTM_ERR_ARGS;
+		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
+		regCtx->manager->schedulerVtableRegistry.insert_or_assign(std::string(name), *vt);
+		return TTM_OK;
+	}
+
+	const ttm_scheduler_vtable* PluginManager::find_scheduler_vtable(std::string_view name) const {
+		const auto it = schedulerVtableRegistry.find(std::string(name));
+		return (it != schedulerVtableRegistry.end()) ? &it->second : nullptr;
 	}
 
 	ttm_error PluginManager::s_register_metric(

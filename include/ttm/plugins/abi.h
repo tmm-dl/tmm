@@ -367,6 +367,54 @@ typedef struct ttm_model_loader_vtable {
 /** @} */
 
 /* =========================================================================
+ * @defgroup abi_scheduler LR scheduler vtable
+ * @{
+ *
+ * Plugins implement ttm_scheduler_vtable and register it by name via
+ * ttm_host_api::register_scheduler.  The host calls create() once before
+ * the fit loop and step() after each optimizer step.
+ * ====================================================================== */
+
+/**
+ * @brief Vtable for learning-rate schedulers.
+ *
+ * @details
+ * A plugin registers one or more schedulers by calling
+ * `host->register_scheduler(ctx, "cosine_warmup", &vt)`.  The host looks
+ * up the scheduler named in the training config and uses this vtable to
+ * drive the LR over the course of training.
+ *
+ * @see ttm::trainer::ILRScheduler  C++ interface backed by this vtable
+ */
+// NOLINTNEXTLINE(modernize-use-using) -- pure C header
+typedef struct ttm_scheduler_vtable {
+	/**
+	 * @brief Create a scheduler instance.
+	 * @param base_lr   Initial (peak) learning rate from the optimizer config.
+	 * @param cfg       JSON object with scheduler-specific fields
+	 *                  (e.g. warmup_steps, min_lr, total_steps).
+	 * @param cfg_len   Length of `cfg` in bytes.
+	 * @return Opaque handle, or #TTM_INVALID_HANDLE on failure.
+	 */
+	ttm_handle (*create)(float base_lr, const char* cfg, uint32_t cfg_len);
+
+	/**
+	 * @brief Compute and return the LR for the given global optimizer step.
+	 * @param h           Handle returned by create().
+	 * @param global_step Monotonically increasing optimizer step index (0-based).
+	 * @return Learning rate to use for the next optimizer update.
+	 */
+	float (*step)(ttm_handle h, int64_t global_step);
+
+	/**
+	 * @brief Destroy the scheduler instance and release resources.
+	 */
+	void (*destroy)(ttm_handle h);
+} ttm_scheduler_vtable;
+
+/** @} */
+
+/* =========================================================================
  * @defgroup abi_host_api Host API
  * @{
  *
@@ -504,6 +552,20 @@ typedef struct ttm_host_api {
      * @see ttm_on_model_loaded
      */
 	void (*notify_model_info)(void* ctx, const ttm_model_info_t* info);
+
+	/**
+     * @brief Register an LR scheduler under a given name.
+     * @details Called by a plugin during #ttm_plugin_init.  The host stores a
+     *          copy of the vtable struct and associates it with `name`.  The
+     *          training config selects a scheduler by this name.
+     * @param ctx   Opaque host token.
+     * @param name  NUL-terminated scheduler name (e.g. "cosine_warmup").
+     * @param vt    Scheduler vtable.  The function pointers must remain valid
+     *              for the lifetime of the plugin.
+     * @return #TTM_OK on success.
+     * @see ttm_scheduler_vtable
+     */
+	ttm_error (*register_scheduler)(void* ctx, const char* name, const ttm_scheduler_vtable* vt);
 
 	/** @brief Opaque token passed back as the first argument to every callback. */
 	void* ctx;

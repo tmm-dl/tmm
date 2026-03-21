@@ -198,6 +198,22 @@ namespace ttm::plugins {
          */
 		void emit_model_loaded(std::string_view info_json);
 
+		/**
+         * @brief Look up a registered LR scheduler vtable by name.
+         *
+         * @details
+         * Schedulers are registered by plugins via `host->register_scheduler()`.
+         * The built-in schedulers (constant, step, linear, cosine, cosine_warmup)
+         * are provided by the core native plugin.
+         *
+         * @param[in] name  Scheduler name from the training config (e.g. "cosine_warmup").
+         * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
+         *         Valid for the lifetime of this PluginManager.
+         *
+         * @see ttm_scheduler_vtable
+         */
+		[[nodiscard]] const ttm_scheduler_vtable* find_scheduler_vtable(std::string_view name) const;
+
 		/** @} */
 
 		/* =====================================================================
@@ -353,6 +369,15 @@ namespace ttm::plugins {
 		std::unordered_map<std::string, ITransform*> transformRegistry;
 
 		/**
+         * @brief Scheduler vtable registry: name → owned vtable copy.
+         *
+         * @details
+         * The vtable struct is copied by value when the plugin registers it.
+         * The function pointers within remain valid as long as the plugin is loaded.
+         */
+		std::unordered_map<std::string, ttm_scheduler_vtable> schedulerVtableRegistry;
+
+		/**
          * @brief True if this instance owns a WAMR runtime reference.
          *
          * @details Used by the move constructor/assignment and destructor to ensure
@@ -372,6 +397,8 @@ namespace ttm::plugins {
 		static ttm_error s_register_model_loader(void* ctx, const ttm_model_loader_vtable* vt);
 		/// @private
 		static void s_notify_model_info(void* ctx, const ttm_model_info_t* info);
+		/// @private
+		static ttm_error s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt);
 		/// @private
 		void register_model_loader_impl(std::unique_ptr<IModelLoader> loader, PluginRegistrationCtx& ctx);
 		/// @private

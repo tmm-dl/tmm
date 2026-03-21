@@ -1,7 +1,19 @@
 cmake_minimum_required(VERSION 3.24)
 project(ttm-core-plugin CXX)
 
-add_library(ttm_core MODULE src/core.cpp)
+add_library(ttm_core MODULE
+    src/plugin.cpp
+    src/git_source.cpp
+    src/netutils.cpp
+    src/tvm_loader.cpp
+    src/scheduler_state.cpp
+    src/scheduler_constant.cpp
+    src/scheduler_step.cpp
+    src/scheduler_linear.cpp
+    src/scheduler_cosine.cpp
+    src/scheduler_cosine_warmup.cpp
+    src/schedulers.cpp
+)
 
 target_compile_features(ttm_core PRIVATE cxx_std_23)
 
@@ -52,3 +64,12 @@ find_package(CURL REQUIRED)
 target_link_libraries(ttm_core PRIVATE CURL::libcurl)
 
 install(TARGETS ttm_core DESTINATION .)
+
+# ---------------------------------------------------------------------------
+# Tests — add when building tests are enabled (mirrors root TMM_BUILD_TESTS).
+# Guarded so standalone `cmake -S extensions/core` still works.
+# ---------------------------------------------------------------------------
+if(TMM_BUILD_TESTS OR (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME))
+    include(CTest)
+    add_subdirectory(tests)
+endif()

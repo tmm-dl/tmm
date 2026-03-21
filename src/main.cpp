@@ -54,8 +54,11 @@
 
 #include <CLI/CLI.hpp>
 
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -69,6 +72,32 @@ static std::string scheme_of(const std::string& uri) {
 	const auto colon = uri.find(':');
 	return (colon != std::string::npos) ? uri.substr(0, colon + 1) : "file:";
 }
+
+/**
+ * @brief ILRScheduler backed by a plugin-registered ttm_scheduler_vtable.
+ *
+ * Wraps the C vtable so that PluginManager::find_scheduler_vtable() results
+ * can be attached to a Trainer without exposing the C ABI above this file.
+ */
+class VtableScheduler final : public ttm::trainer::ILRScheduler {
+public:
+	VtableScheduler(const ttm_scheduler_vtable& vt, ttm_handle h) : vt_(vt), h_(h) {}
+
+	~VtableScheduler() override {
+		if (h_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+			vt_.destroy(h_);
+		}
+	}
+
+	float step(int64_t global_step) override {
+		if (vt_.step == nullptr || h_ == TTM_INVALID_HANDLE) return 0.0f;
+		return vt_.step(h_, global_step);
+	}
+
+private:
+	ttm_scheduler_vtable vt_;
+	ttm_handle           h_;
+};
 
 /// Load all plugins listed in the config into a fresh PluginManager.
 static std::expected<ttm::plugins::PluginManager, std::string>
@@ -171,6 +200,24 @@ static int cmd_fit(
 		cfg, mgr, std::move(*pipelineResult), train_factory
 	);
 	if (val_factory) trainer.validation(std::move(val_factory));
+
+	// 8. Attach LR scheduler if one is registered for the configured type
+	if (const auto* vt = mgr.find_scheduler_vtable(cfg.scheduler.type)) {
+		char sched_cfg[256];
+		std::snprintf(sched_cfg, sizeof(sched_cfg),
+			"{\"warmup_steps\":%lld,\"min_lr\":%f,\"step_size\":%lld,\"gamma\":%f,\"total_steps\":%lld}",
+			static_cast<long long>(cfg.scheduler.warmup_steps),
+			static_cast<double>(cfg.scheduler.min_lr),
+			static_cast<long long>(cfg.scheduler.step_size),
+			static_cast<double>(cfg.scheduler.gamma),
+			static_cast<long long>(cfg.scheduler.total_steps)
+		);
+		const auto h = vt->create(cfg.optimizer.lr, sched_cfg,
+		                          static_cast<uint32_t>(std::strlen(sched_cfg)));
+		if (h != TTM_INVALID_HANDLE) {
+			trainer.scheduler(std::make_unique<VtableScheduler>(*vt, h));
+		}
+	}
 
 	auto result = trainer.fit();
 	if (!result) {

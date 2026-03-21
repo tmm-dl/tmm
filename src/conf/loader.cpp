@@ -205,6 +205,7 @@ namespace ttm::conf {
 				.min_lr       = get<float>(n,   "min_lr",       0.0f),
 				.step_size    = get<int64_t>(n, "step_size",    1),
 				.gamma        = get<float>(n,   "gamma",        0.1f),
+				.total_steps  = get<int64_t>(n, "total_steps",  0),
 			};
 		}
 
