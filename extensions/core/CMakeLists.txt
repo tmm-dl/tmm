@@ -61,7 +61,8 @@ target_link_libraries(ttm_core PRIVATE libgit2 libgit2package)
 CPMAddPackage(URI "gh:libcpr/cpr#1.14.1" OPTIONS "CPR_CURL_USE_LIBPSL OFF" EXCLUDE_FROM_ALL YES)
 target_link_libraries(ttm_core PRIVATE cpr::cpr)
 
-install(TARGETS ttm_core DESTINATION .)
+include(GNUInstallDirs)
+install(TARGETS ttm_core LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # ---------------------------------------------------------------------------
 # Tests — add when building tests are enabled (mirrors root TMM_BUILD_TESTS).

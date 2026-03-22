@@ -70,7 +70,8 @@ else()
     message(STATUS "ttm-python-plugin: PyTorch not found — stub loader only")
 endif()
 
-install(TARGETS ttm_python DESTINATION .)
+include(GNUInstallDirs)
+install(TARGETS ttm_python LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # ---------------------------------------------------------------------------
 # Tests — add when building tests are enabled (mirrors root TMM_BUILD_TESTS).

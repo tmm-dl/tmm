@@ -6,6 +6,7 @@ cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 include(FeatureSummary)
 option(TMM_BUILD_TESTS "Build tests" ON)
 option(TTM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)" OFF)
+option(TTM_BUILD_PACKAGE "Build installable package via CPack (DEB/DMG/NSIS+ZIP)" OFF)
 set(TTM_WASM_TOOLCHAIN "" CACHE FILEPATH
     "Path to the WASI SDK CMake toolchain file (required for WASM extensions)")
 # Auto-fetch WASI SDK via FetchContent when building WASM extensions and no
@@ -47,7 +48,9 @@ if(TTM_BUILD_EXTENSIONS AND NOT TTM_WASM_TOOLCHAIN)
     unset(_wasi_asset)
 endif()
 
-add_feature_info(tests TMM_BUILD_TESTS "Build tests")
+add_feature_info(tests      TMM_BUILD_TESTS      "Build tests")
+add_feature_info(extensions TTM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)")
+add_feature_info(package    TTM_BUILD_PACKAGE    "Build installable package via CPack (DEB/DMG/NSIS+ZIP)")
 feature_summary(WHAT ALL)
 
 ##########################################################################################
@@ -224,4 +227,55 @@ endif()
 if((CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME OR MODERN_CMAKE_BUILD_TESTING) AND TMM_BUILD_TESTS)
 	enable_testing()
 	add_subdirectory(tests)
+endif()
+
+########################################################################################################################
+# Packaging                                                                                                            #
+########################################################################################################################
+if(TTM_BUILD_PACKAGE)
+    include(GNUInstallDirs)
+    install(TARGETS ttm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # --- Plugin extensions ---
+    # Native plugins built from this root scope (only present when TTM_BUILD_EXTENSIONS=ON).
+    # ttm_core and ttm_python install themselves via their own sub-CMakeLists.txt rules;
+    # we only need to handle the MODULE built inline in the root (ttm_console_ui native).
+    if(TARGET ttm_console_ui)
+        install(TARGETS ttm_console_ui LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+
+    # WASM plugins built by ExternalProject are staged to ${CMAKE_BINARY_DIR}/extensions/
+    # with a plain filename (e.g. ttm_nlp_tasks.wasm). Install them alongside the binary
+    # so the runtime's exe-dir search finds them without TTM_PLUGIN_PATH.
+    # OPTIONAL: the files are absent when no WASI toolchain was available.
+    foreach(_wasm_plugin ttm_nlp_tasks ttm_console_ui)
+        install(FILES "${CMAKE_BINARY_DIR}/extensions/${_wasm_plugin}.wasm"
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            OPTIONAL
+        )
+    endforeach()
+
+    set(CPACK_PACKAGE_NAME                "ttm")
+    set(CPACK_PACKAGE_VENDOR              "ttm contributors")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "train-my-model -- flexible model training CLI")
+    set(CPACK_PACKAGE_VERSION             "${TMM_VERSION}")
+    set(CPACK_PACKAGE_VERSION_MAJOR       "${TMM_VER_MAJOR}")
+    set(CPACK_PACKAGE_VERSION_MINOR       "${TMM_VER_MINOR}")
+    set(CPACK_PACKAGE_VERSION_PATCH       "${TMM_VER_PATCH}")
+    set(CPACK_VERBATIM_VARIABLES          ON)
+
+    if(WIN32)
+        set(CPACK_GENERATOR "NSIS;ZIP" CACHE STRING "CPack generators to use")
+        set(CPACK_NSIS_PACKAGE_NAME    "Train My Model")
+        set(CPACK_NSIS_DISPLAY_NAME    "Train My Model")
+        set(CPACK_NSIS_INSTALL_ROOT    "$PROGRAMFILES64")
+    elseif(APPLE)
+        set(CPACK_GENERATOR "DragNDrop;TGZ" CACHE STRING "CPack generators to use")
+    else()
+        set(CPACK_GENERATOR "DEB;TGZ" CACHE STRING "CPack generators to use")
+        set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ttm contributors")
+        set(CPACK_DEBIAN_PACKAGE_SECTION    "utils")
+    endif()
+
+    include(CPack)
 endif()

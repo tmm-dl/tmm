@@ -1,0 +1,169 @@
+##########################################################################################
+# TTM Publish — Build installers and create a GitHub Release
+#
+# Triggers:
+#   • push to master / workflow_dispatch  → nightly pre-release (tag "nightly")
+#   • tag push  v*.*.*  or  v*.*.*-*      → versioned release
+#
+# Matrix: Linux/Debian (DEB + TGZ), macOS (DMG + TGZ), Windows (NSIS installer + ZIP)
+# fail-fast: false — all platforms are built even if one leg fails.
+##########################################################################################
+name: Publish
+
+on:
+  push:
+    branches: [master]
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+  workflow_dispatch:
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm_cache
+
+jobs:
+  ##########################################################################################
+  # Build + Package
+  ##########################################################################################
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false    # keep building other platforms when one fails
+      matrix:
+        include:
+          # Older runner images give the widest forward-compatibility range.
+
+          # ── Linux x86-64 (Debian / Ubuntu 20.04) ─────────────────────────────
+          - name: "Linux / GCC 12 / Debian (x64)"
+            os: ubuntu-20.04
+            compiler: gcc-12
+
+          # ── macOS x86-64 (13 = last Intel runner) ────────────────────────────
+          - name: "macOS 13 / Clang 18 (x64)"
+            os: macos-13
+            compiler: llvm-18
+
+          # ── Windows x86-64 ───────────────────────────────────────────────────
+          - name: "Windows 2019 / MSVC (x64)"
+            os: windows-2019
+            compiler: msvc
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # full history so git describe works
+
+      # git describe --tags --dirty is used by CMakeLists.txt for versioning.
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Set up C++ toolchain
+        uses: aminya/setup-cpp@v1
+        with:
+          compiler: ${{ matrix.compiler }}
+          cmake: true
+          ninja: true
+
+      # NSIS produces the Windows installer (.exe); chocolatey is pre-installed
+      # on GitHub-hosted Windows runners.
+      - name: Install NSIS (Windows only)
+        if: runner.os == 'Windows'
+        run: choco install nsis -y
+
+      # Python dev headers are needed to build the ttm_python plugin.
+      # setup-python installs a full distribution including headers on all platforms.
+      - name: Set up Python 3.11
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore CPM cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-publish-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: cpm-publish-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DTTM_BUILD_TESTS=OFF
+          -DTTM_BUILD_PACKAGE=ON
+          -DTTM_BUILD_EXTENSIONS=ON
+          -DPython3_EXECUTABLE=${{ steps.setup-python.outputs.python-path }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        working-directory: build
+        run: cpack -B packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ runner.os }}-${{ runner.arch }}
+          path: build/packages/
+          if-no-files-found: warn
+
+  ##########################################################################################
+  # Create / update GitHub Release
+  # Runs even when some build legs fail so partial packages are still published.
+  ##########################################################################################
+  release:
+    name: GitHub Release
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        continue-on-error: true   # proceed even if every build job failed
+        with:
+          path: packages
+          merge-multiple: true
+
+      # Ensure directory exists so the release step never fails on missing glob.
+      - name: Ensure packages directory exists
+        run: mkdir -p packages
+
+      - name: Determine release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${{ github.ref_name }}"                  >> "$GITHUB_OUTPUT"
+            echo "prerelease=false"                            >> "$GITHUB_OUTPUT"
+            echo "name=Release ${{ github.ref_name }}"        >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=nightly"             >> "$GITHUB_OUTPUT"
+            echo "prerelease=true"         >> "$GITHUB_OUTPUT"
+            echo "name=Nightly Build"      >> "$GITHUB_OUTPUT"
+          fi
+
+      # Remove the stale nightly release + tag so the new one always points to
+      # the current commit.  A versioned-tag release is never deleted here.
+      - name: Remove stale nightly release
+        if: steps.meta.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly \
+            --repo "${{ github.repository }}" \
+            --yes --cleanup-tag || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name:        ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name:            ${{ steps.meta.outputs.name }}
+          prerelease:      ${{ steps.meta.outputs.prerelease }}
+          make_latest:     ${{ steps.meta.outputs.prerelease == 'false' }}
+          files: packages/**

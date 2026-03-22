@@ -1,4 +1,5 @@
 {
+    "editor.rulers": [ 120 ],
     "C_Cpp.codeAnalysis.clangTidy.headerFilter": "^(?!.*build/).*",
     "C_Cpp.codeAnalysis.clangTidy.sourceFilter": "^(?!.*build/).*",
     "C_Cpp.codeAnalysis.clangTidy.args": [
