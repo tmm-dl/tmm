@@ -71,7 +71,7 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install nsis -y
 
-      # Python dev headers are needed to build the ttm_python plugin.
+      # Python dev headers are needed to build the tmm_python plugin.
       # setup-python installs a full distribution including headers on all platforms.
       - name: Set up Python 3.11
         id: setup-python
@@ -90,9 +90,9 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DTTM_BUILD_TESTS=OFF
-          -DTTM_BUILD_PACKAGE=ON
-          -DTTM_BUILD_EXTENSIONS=ON
+          -DTMM_BUILD_TESTS=OFF
+          -DTMM_BUILD_PACKAGE=ON
+          -DTMM_BUILD_EXTENSIONS=ON
           -DPython3_EXECUTABLE=${{ steps.setup-python.outputs.python-path }}
 
       - name: Build

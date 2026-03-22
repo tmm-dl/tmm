@@ -78,10 +78,10 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DTTM_BUILD_TESTS=ON
+            -DTMM_BUILD_TESTS=ON
 
       - name: Build (ensures generated headers exist before tidy runs)
-        run: cmake --build build --target ttm_tests
+        run: cmake --build build --target tmm_tests
 
       - name: Run clang-tidy
         # run-clang-tidy reads compile_commands.json and filters to our paths only.
@@ -164,10 +164,10 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S . -B build -G Ninja -D CMAKE_BUILD_TYPE=Release -D TTM_BUILD_TESTS=ON
+          cmake -S . -B build -G Ninja -D CMAKE_BUILD_TYPE=Release -D TMM_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --target ttm_tests
+        run: cmake --build build --target tmm_tests
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
@@ -175,8 +175,8 @@ jobs:
 ##########################################################################################
 # PyTorch integration tests (Linux / CPU-only torch, ubuntu-24.04)
 #
-# Installs Python 3.12 + CPU-only PyTorch, builds with TTM_BUILD_EXTENSIONS=ON
-# so that ttm_python.so is compiled and linked into ttm_tests, then runs only
+# Installs Python 3.12 + CPU-only PyTorch, builds with TMM_BUILD_EXTENSIONS=ON
+# so that tmm_python.so is compiled and linked into tmm_tests, then runs only
 # the [python][integration] test cases.
 #
 # Kept as a separate job so the main build matrix does not need Python/torch.
@@ -229,21 +229,21 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DTTM_BUILD_TESTS=ON \
-            -DTTM_BUILD_EXTENSIONS=ON \
+            -DTMM_BUILD_TESTS=ON \
+            -DTMM_BUILD_EXTENSIONS=ON \
             -DPython3_EXECUTABLE=${{ steps.setup-python.outputs.python-path }}
 
-      # ttm_tests depends on ttm_python (via add_dependencies in tests/CMakeLists.txt
-      # when the ttm_python target exists), so this single target builds everything needed.
+      # tmm_tests depends on tmm_python (via add_dependencies in tests/CMakeLists.txt
+      # when the tmm_python target exists), so this single target builds everything needed.
       - name: Build
-        run: cmake --build build --target ttm_tests
+        run: cmake --build build --target tmm_tests
 
       # ── Test ──────────────────────────────────────────────────────────────
       # Run only the [python][integration] tests.  The [.optional] tag normally
       # hides them from the default run; using a tag filter re-enables them.
       - name: Run PyTorch integration tests
         run: |
-          ./build/tests/ttm_tests "[python][integration]" \
+          ./build/tests/tmm_tests "[python][integration]" \
             --reporter console \
             --success
 
@@ -278,11 +278,11 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DTTM_BUILD_TESTS=ON \
-            -DTTM_ENABLE_COVERAGE=ON
+            -DTMM_BUILD_TESTS=ON \
+            -DTMM_ENABLE_COVERAGE=ON
 
       - name: Build
-        run: cmake --build build --target ttm_tests
+        run: cmake --build build --target tmm_tests
 
       - name: Test
         run: ctest --test-dir build --output-on-failure

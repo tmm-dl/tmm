@@ -59,7 +59,7 @@ Plugins extend tmm with new ML task types (in the [Dataset Cards](https://huggin
 - [ ] Implement `PluginManager`: discovery, load ordering, dependency resolution between plugins
 - [ ] Implement WASM plugin loader using WAMR: sandbox instantiation, per-plugin linear memory, capability grants
 - [ ] Support native shared-library plugins (`.so`/`.dylib`/`.dll`) as a fallback for trusted plugins
-- [ ] Implement plugin lifecycle hooks: `ttm_plugin_init`, `ttm_plugin_teardown`, ABI version negotiation
+- [ ] Implement plugin lifecycle hooks: `tmm_plugin_init`, `tmm_plugin_teardown`, ABI version negotiation
 - [ ] Plugin configuration: each plugin receives its own config subtree from the merged config
 - [ ] Plugin capability model: declare required capabilities (filesystem access, network, GPU) in plugin manifest
 

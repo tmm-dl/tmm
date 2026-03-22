@@ -79,12 +79,12 @@ static PyObject* pyHostLog(PyObject* /*self*/, PyObject* args) {
 	Py_RETURN_NONE;
 }
 
-static PyMethodDef kTtmHostMethods[] = {
+static PyMethodDef kTmmHostMethods[] = {
 		{"log", pyHostLog, METH_VARARGS, "log(level, msg) — route a message via TMM host logger"},
 		{nullptr, nullptr, 0, nullptr},
 };
-static PyModuleDef kTtmHostModuleDef = {
-		PyModuleDef_HEAD_INIT, "_tmm_host", nullptr, -1, kTtmHostMethods, nullptr, nullptr, nullptr, nullptr,
+static PyModuleDef kTmmHostModuleDef = {
+		PyModuleDef_HEAD_INIT, "_tmm_host", nullptr, -1, kTmmHostMethods, nullptr, nullptr, nullptr, nullptr,
 };
 
 /// Inject _tmm_host into sys.modules and redirect sys.stdout/sys.stderr.
@@ -95,7 +95,7 @@ static void installPythonLogBridge() {
 	if (!Py_IsInitialized())
 		return;
 
-	PyObject* mod = PyModule_Create(&kTtmHostModuleDef);
+	PyObject* mod = PyModule_Create(&kTmmHostModuleDef);
 	if (mod == nullptr) {
 		PyErr_Clear();
 		return;
@@ -108,7 +108,7 @@ static void installPythonLogBridge() {
 	PyRun_SimpleString(R"py(
 import sys, _tmm_host
 
-class _TtmWriter:
+class _TmmWriter:
     """Routes Python stdout/stderr into the TMM host logger (e.g. console-ui Logs panel)."""
     def __init__(self, level):
         self._level = level
@@ -126,10 +126,10 @@ class _TtmWriter:
     def isatty(self):
         return False
     def fileno(self):
-        raise OSError("_TtmWriter has no file descriptor")
+        raise OSError("_TmmWriter has no file descriptor")
 
-sys.stdout = _TtmWriter(2)  # TMM_LOG_INFO
-sys.stderr = _TtmWriter(3)  # TMM_LOG_WARN
+sys.stdout = _TmmWriter(2)  # TMM_LOG_INFO
+sys.stderr = _TmmWriter(3)  # TMM_LOG_WARN
 )py");
 	PyErr_Clear(); // ignore any errors from the redirect (best-effort)
 	g_stdoutRedirected = true;

@@ -65,6 +65,7 @@ target_link_libraries(tmm_python PRIVATE Python3::Python)
 if(Torch_FOUND)
     target_link_libraries(tmm_python PRIVATE ${TORCH_LIBRARIES})
     target_compile_definitions(tmm_python PRIVATE TMM_PYTHON_HAS_TORCH)
+
     message(STATUS "tmm-python-plugin: PyTorch found — full loader enabled")
 else()
     message(STATUS "tmm-python-plugin: PyTorch not found — stub loader only")

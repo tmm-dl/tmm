@@ -24,3 +24,6 @@ target_link_libraries(tmm PRIVATE tmm_model)
 # CLI11 — argument parsing; linked only to the executable, never to any library.
 CPMAddPackage(URI "gh:CLIUtils/CLI11@2.4.2" EXCLUDE_FROM_ALL YES)
 target_link_libraries(tmm PRIVATE CLI11::CLI11)
+
+# Add dependency to the plugins
+add_dependencies(tmm tmm_core tmm_console_ui tmm_python)

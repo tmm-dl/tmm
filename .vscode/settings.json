@@ -6,6 +6,6 @@
         "-p", "${command:cmake.buildDirectory}"
     ],
     "cmake.configureSettings": {
-        "TTM_BUILD_EXTENSIONS": "ON"
+        "TMM_BUILD_EXTENSIONS": "ON"
     }
 }

@@ -193,7 +193,7 @@ TEST_CASE(
 		CHECK(std::string_view{info.name}.size() > 0);
 
 		// zero_grad() must not crash.
-		CHECK(loader->zero_grad(h) == TMM_OK);
+		CHECK(loader->zeroGrad(h) == TMM_OK);
 
 		loader->destroy(h);
 	} else {

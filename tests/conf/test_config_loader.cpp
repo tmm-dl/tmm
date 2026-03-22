@@ -12,6 +12,7 @@
 
 #include <tmm/conf/loader.hpp>
 
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -60,7 +61,7 @@ TEST_CASE("load_config returns error for empty file list", "[conf][error]") {
 }
 
 TEST_CASE("load_config returns error for missing file", "[conf][error]") {
-	const std::filesystem::path missing = "/tmp/this_file_does_not_exist_ttm.yml";
+	const std::filesystem::path missing = "/tmp/this_file_does_not_exist_tmm.yml";
 	auto result = tmm::conf::load_config(missing);
 	REQUIRE_FALSE(result.has_value());
 }
@@ -449,15 +450,15 @@ TEST_CASE("load_config leaves ${UNSET_VAR} as empty string", "[conf][env]") {
 	AutoRemove guard;
 	auto path = writeTmp(R"(
 model:
-  path: /base/${TTMTEST_UNSET_VAR_12345}/model.so
+  path: /base/${TMMTEST_UNSET_VAR_12345}/model.so
 )");
 	guard.paths.push_back(path);
 
 	// Ensure the variable is not set
 #ifdef _WIN32
-	_putenv_s("TTMTEST_UNSET_VAR_12345", "");
+	_putenv_s("TMMTEST_UNSET_VAR_12345", "");
 #else
-	unsetenv("TTMTEST_UNSET_VAR_12345");
+	unsetenv("TMMTEST_UNSET_VAR_12345");
 #endif
 
 	auto result = tmm::conf::load_config(path);

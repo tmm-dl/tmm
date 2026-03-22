@@ -175,10 +175,12 @@ TEST_CASE("Trainer: optimizer.step() called once per batch with accumulation=1",
 	auto* rawModel = new MockModel();
 	const int batchesPerEpoch = 6;
 
-	auto result = tmm::trainer::Trainer(makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
-	                                    makeFactory(batchesPerEpoch))
-	                      .optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
-	                      .fit();
+	auto result =
+			tmm::trainer::Trainer(
+					makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel), makeFactory(batchesPerEpoch)
+			)
+					.optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
+					.fit();
 
 	REQUIRE(result.has_value());
 	CHECK(rawOpt->stepCalls == batchesPerEpoch);
@@ -195,10 +197,12 @@ TEST_CASE("Trainer: optimizer.step() called once per accumulation window", "[tra
 	const int batchesPerEpoch = 8;
 	const int accumSteps = 4;
 
-	auto result = tmm::trainer::Trainer(makeConfig(1, accumSteps), mgr,
-	                                    std::unique_ptr<tmm::trainer::IModel>(rawModel), makeFactory(batchesPerEpoch))
-	                      .optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
-	                      .fit();
+	auto result = tmm::trainer::Trainer(
+						  makeConfig(1, accumSteps), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
+						  makeFactory(batchesPerEpoch)
+	)
+						  .optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
+						  .fit();
 
 	REQUIRE(result.has_value());
 	// 8 batches / 4 accumulation steps = 2 optimizer steps
@@ -215,10 +219,12 @@ TEST_CASE("Trainer: partial accumulation window flushed at epoch end", "[trainer
 	const int batchesPerEpoch = 5;
 	const int accumSteps = 4;
 
-	auto result = tmm::trainer::Trainer(makeConfig(1, accumSteps), mgr,
-	                                    std::unique_ptr<tmm::trainer::IModel>(rawModel), makeFactory(batchesPerEpoch))
-	                      .optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
-	                      .fit();
+	auto result = tmm::trainer::Trainer(
+						  makeConfig(1, accumSteps), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
+						  makeFactory(batchesPerEpoch)
+	)
+						  .optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
+						  .fit();
 
 	REQUIRE(result.has_value());
 	// Expected: 2 optimizer steps (1 after batch 4, 1 partial flush at epoch end)
@@ -233,9 +239,11 @@ TEST_CASE("Trainer: zeroGrad() called before each accumulation window", "[traine
 	const int batchesPerEpoch = 6;
 	const int accumSteps = 2;
 
-	tmm::trainer::Trainer(makeConfig(1, accumSteps), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
-	                      makeFactory(batchesPerEpoch))
-	        .fit();
+	tmm::trainer::Trainer(
+			makeConfig(1, accumSteps), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
+			makeFactory(batchesPerEpoch)
+	)
+			.fit();
 
 	CHECK(rawModel->zeroGradCalls == batchesPerEpoch / accumSteps);
 }
@@ -252,9 +260,9 @@ TEST_CASE("Trainer: scheduler.step() called once per optimizer step", "[trainer]
 	const int epochs = 2;
 
 	tmm::trainer::Trainer(makeConfig(epochs, 1), mgr, std::make_unique<MockModel>(), makeFactory(batchesPerEpoch))
-	        .optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
-	        .scheduler(std::unique_ptr<tmm::trainer::ILRScheduler>(rawSched))
-	        .fit();
+			.optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
+			.scheduler(std::unique_ptr<tmm::trainer::ILRScheduler>(rawSched))
+			.fit();
 
 	CHECK(rawSched->stepCalls == epochs * batchesPerEpoch);
 }
@@ -268,9 +276,9 @@ TEST_CASE("Trainer: scheduler LR is applied to the optimizer", "[trainer][schedu
 	rawSched->lrReturn = 7e-5f;
 
 	tmm::trainer::Trainer(makeConfig(1, 1), mgr, std::make_unique<MockModel>(), makeFactory(3))
-	        .optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
-	        .scheduler(std::unique_ptr<tmm::trainer::ILRScheduler>(rawSched))
-	        .fit();
+			.optimizer(std::unique_ptr<tmm::trainer::IOptimizer>(rawOpt))
+			.scheduler(std::unique_ptr<tmm::trainer::ILRScheduler>(rawSched))
+			.fit();
 
 	// After scheduler updates, optimizer LR should be the scheduler's value
 	CHECK(rawOpt->lr == Catch::Approx(7e-5f));
@@ -286,10 +294,12 @@ TEST_CASE("Trainer: validation pass calls infer() not step()", "[trainer][valida
 	const int trainBatches = 3;
 	const int valBatches = 2;
 
-	auto result = tmm::trainer::Trainer(makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
-	                                    makeFactory(trainBatches))
-	                      .validation(makeFactory(valBatches))
-	                      .fit();
+	auto result =
+			tmm::trainer::Trainer(
+					makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel), makeFactory(trainBatches)
+			)
+					.validation(makeFactory(valBatches))
+					.fit();
 
 	REQUIRE(result.has_value());
 	CHECK(rawModel->stepCalls == trainBatches);
@@ -301,10 +311,11 @@ TEST_CASE("Trainer: fit() returns valLoss from validation pass", "[trainer][vali
 	auto* rawModel = new MockModel();
 	rawModel->inferLossReturn = 0.123f;
 
-	auto result = tmm::trainer::Trainer(makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
-	                                    makeFactory(2))
-	                      .validation(makeFactory(2))
-	                      .fit();
+	auto result = tmm::trainer::Trainer(
+						  makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel), makeFactory(2)
+	)
+						  .validation(makeFactory(2))
+						  .fit();
 
 	REQUIRE(result.has_value());
 	CHECK(result->valLoss == Catch::Approx(0.123f));
@@ -320,9 +331,10 @@ TEST_CASE("Trainer: fit() returns trainLoss as average of per-batch losses", "[t
 	rawModel->stepLossReturn = 0.8f;
 	const int batches = 4;
 
-	auto result = tmm::trainer::Trainer(makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
-	                                    makeFactory(batches))
-	                      .fit();
+	auto result = tmm::trainer::Trainer(
+						  makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel), makeFactory(batches)
+	)
+						  .fit();
 
 	REQUIRE(result.has_value());
 	CHECK(result->trainLoss == Catch::Approx(0.8f));
@@ -342,13 +354,14 @@ TEST_CASE("Trainer: stopPredicate stops training mid-epoch", "[trainer][stop]") 
 	auto* rawModel = new MockModel();
 
 	std::atomic<int> batchesSeen{0};
-	auto result = tmm::trainer::Trainer(makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel),
-	                                    makeFactory(100))
-	                      .stopPredicate([&] {
-		                      ++batchesSeen;
-		                      return batchesSeen >= 3;
-	                      })
-	                      .fit();
+	auto result = tmm::trainer::Trainer(
+						  makeConfig(1, 1), mgr, std::unique_ptr<tmm::trainer::IModel>(rawModel), makeFactory(100)
+	)
+						  .stopPredicate([&] {
+							  ++batchesSeen;
+							  return batchesSeen >= 3;
+						  })
+						  .fit();
 
 	// Training should stop early; model.step() should not be called for all 100 batches
 	REQUIRE(result.has_value());
