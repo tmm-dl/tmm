@@ -163,7 +163,7 @@ PenaltyReturnTypeOnItsOwnLine: 60
 PointerAlignment: Left
 QualifierAlignment: Leave
 ReferenceAlignment: Pointer
-ReflowComments: false
+ReflowComments: true
 RemoveBracesLLVM: false
 RemoveSemicolon: false
 RequiresClausePosition: OwnLine

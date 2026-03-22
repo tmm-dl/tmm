@@ -25,26 +25,20 @@ static_assert(sizeof(ttm_handle) == sizeof(int64_t), "ttm_handle must be 64 bits
 
 namespace {
 
-ttm_plugin_info g_info = {
-	TTM_ABI_VERSION,
-	"core",
-	"0.1.0",
-	"Dataset sources: gh: gl: bb: hf: sr:"
-};
+	ttm_plugin_info g_info = {TTM_ABI_VERSION, "core", "0.1.0", "Dataset sources: gh: gl: bb: hf: sr:"};
 
 } // anonymous namespace
 
 extern "C" {
 
-TTM_CORE_EXPORT ttm_plugin_info* ttm_plugin_get_info(void) {
-	return &g_info;
-}
+TTM_CORE_EXPORT ttm_plugin_info* ttm_plugin_get_info(void) { return &g_info; }
 
 TTM_CORE_EXPORT ttm_error ttm_plugin_init(
 		const ttm_host_api* host, const char* /*cfg*/, uint32_t /*len*/
 ) {
 	const ttm_error src_err = gitSourceRegister(host);
-	if (src_err != TTM_OK) return src_err;
+	if (src_err != TTM_OK)
+		return src_err;
 
 	tvmLoaderRegister(host);
 	schedulersRegister(host);

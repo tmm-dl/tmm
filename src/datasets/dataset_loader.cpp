@@ -15,12 +15,12 @@
 #include <ttm/plugins/extension.hpp>
 
 #include <filesystem>
-#include <ttm/compat/format.hpp>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <ttm/compat/expected.hpp>
+#include <ttm/compat/format.hpp>
 #include <utility>
 #include <vector>
 
@@ -67,9 +67,7 @@ namespace ttm::datasets {
 
 			[[nodiscard]] bool closed() const override { return closed_; }
 
-			arrow::Result<int64_t> Tell() const override {
-				return arrow::Result<int64_t>(pos_);
-			}
+			arrow::Result<int64_t> Tell() const override { return arrow::Result<int64_t>(pos_); }
 
 			arrow::Status Seek(int64_t pos) override {
 				if (!reader_->seekable()) {
@@ -83,13 +81,13 @@ namespace ttm::datasets {
 				return arrow::Status::OK();
 			}
 
-			arrow::Result<int64_t> GetSize() override {
-				return arrow::Result<int64_t>(size_);
-			}
+			arrow::Result<int64_t> GetSize() override { return arrow::Result<int64_t>(size_); }
 
 			arrow::Result<int64_t> Read(int64_t nbytes, void* out) override {
-				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- Arrow API uses void*; IByteReader uses std::byte*; cast is safe
-				const auto nRead = reader_->read(reinterpret_cast<std::byte*>(out), static_cast<std::streamsize>(nbytes));
+				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- Arrow API uses void*; IByteReader uses
+				// std::byte*; cast is safe
+				const auto nRead =
+						reader_->read(reinterpret_cast<std::byte*>(out), static_cast<std::streamsize>(nbytes));
 				if (nRead < 0) {
 					return arrow::Status::IOError("IByteReaderFile::Read failed");
 				}
@@ -117,8 +115,8 @@ namespace ttm::datasets {
 		private:
 			std::unique_ptr<plugins::IByteReader> reader_;
 			int64_t size_ = 0;
-			int64_t pos_  = 0;
-			bool    closed_ = false;
+			int64_t pos_ = 0;
+			bool closed_ = false;
 		};
 
 		/* =========================================================================
@@ -167,14 +165,12 @@ namespace ttm::datasets {
 				return true;
 			}
 
-			[[nodiscard]] const arrow::Schema& schema() const override {
-				return *reader_->schema();
-			}
+			[[nodiscard]] const arrow::Schema& schema() const override { return *reader_->schema(); }
 
 		private:
 			std::shared_ptr<arrow::ipc::RecordBatchFileReader> reader_;
 			int numBatches_ = 0;
-			int idx_        = 0;
+			int idx_ = 0;
 		};
 
 		/* =========================================================================
@@ -186,12 +182,9 @@ namespace ttm::datasets {
 		 */
 		class ParquetIterator final : public DatasetIterator {
 		public:
-			ParquetIterator(
-					std::unique_ptr<parquet::arrow::FileReader> reader,
-					std::shared_ptr<arrow::Schema> schema
-			)
-					: reader_(std::move(reader)), schema_(std::move(schema)),
-					  numRowGroups_(reader_->num_row_groups()) {}
+			ParquetIterator(std::unique_ptr<parquet::arrow::FileReader> reader, std::shared_ptr<arrow::Schema> schema)
+					: reader_(std::move(reader)), schema_(std::move(schema)), numRowGroups_(reader_->num_row_groups()) {
+			}
 
 			bool next(std::shared_ptr<arrow::RecordBatch>& out) override {
 				while (idx_ < numRowGroups_) {
@@ -219,7 +212,7 @@ namespace ttm::datasets {
 			std::unique_ptr<parquet::arrow::FileReader> reader_;
 			std::shared_ptr<arrow::Schema> schema_;
 			int numRowGroups_ = 0;
-			int idx_          = 0;
+			int idx_ = 0;
 		};
 
 		/* =========================================================================
@@ -232,8 +225,7 @@ namespace ttm::datasets {
 		class MultiFileIterator final : public DatasetIterator {
 		public:
 			MultiFileIterator(
-					std::vector<std::unique_ptr<DatasetIterator>> shards,
-					std::shared_ptr<arrow::Schema> schema
+					std::vector<std::unique_ptr<DatasetIterator>> shards, std::shared_ptr<arrow::Schema> schema
 			)
 					: shards_(std::move(shards)), schema_(std::move(schema)) {}
 
@@ -266,7 +258,7 @@ namespace ttm::datasets {
 				return std::unexpected("open_arrow_ipc: reader is not seekable — cannot determine file size");
 			}
 			auto arrowFile = std::make_shared<IByteReaderFile>(std::move(reader), size);
-			auto result    = arrow::ipc::RecordBatchFileReader::Open(arrowFile);
+			auto result = arrow::ipc::RecordBatchFileReader::Open(arrowFile);
 			if (!result.ok()) {
 				return std::unexpected("open_arrow_ipc: " + result.status().ToString());
 			}
@@ -282,9 +274,7 @@ namespace ttm::datasets {
 			auto arrowFile = std::make_shared<IByteReaderFile>(std::move(reader), size);
 
 			std::unique_ptr<parquet::arrow::FileReader> parqReader;
-			const auto status = parquet::arrow::OpenFile(
-					arrowFile, arrow::default_memory_pool(), &parqReader
-			);
+			const auto status = parquet::arrow::OpenFile(arrowFile, arrow::default_memory_pool(), &parqReader);
 			if (!status.ok()) {
 				return std::unexpected("open_parquet: " + status.ToString());
 			}
@@ -331,7 +321,7 @@ namespace ttm::datasets {
 	class BatchSlicingIterator final : public DatasetIterator {
 	public:
 		BatchSlicingIterator(std::unique_ptr<DatasetIterator> inner, int64_t batch_size)
-			: inner_(std::move(inner)), batch_size_(batch_size) {}
+				: inner_(std::move(inner)), batch_size_(batch_size) {}
 
 		bool next(std::shared_ptr<arrow::RecordBatch>& out) override {
 			while (true) {
@@ -355,17 +345,19 @@ namespace ttm::datasets {
 
 	private:
 		std::unique_ptr<DatasetIterator> inner_;
-		int64_t                          batch_size_;
+		int64_t batch_size_;
 		std::shared_ptr<arrow::RecordBatch> current_;
-		int64_t                          offset_ = 0;
+		int64_t offset_ = 0;
 	};
 
 	/* =========================================================================
 	 * Public API
 	 * ====================================================================== */
 
-	std::expected<std::unique_ptr<DatasetIterator>, std::string>
-	load_dataset(plugins::IDatasetSource& source, std::string_view uri, std::string_view split, std::string_view config, int64_t batch_size) {
+	std::expected<std::unique_ptr<DatasetIterator>, std::string> load_dataset(
+			plugins::IDatasetSource& source, std::string_view uri, std::string_view split, std::string_view config,
+			int64_t batch_size
+	) {
 		/* Step 1: Parse the dataset card from README.md */
 		/* Open the README.md via the source */
 		const std::string readmeUri = std::string(uri) + "/README.md";
@@ -436,8 +428,8 @@ namespace ttm::datasets {
 
 		if (shardUris.empty()) {
 			return std::unexpected(
-					"load_dataset: no data files found for split '" + std::string(split) + "' in '" +
-					std::string(uri) + "'"
+					"load_dataset: no data files found for split '" + std::string(split) + "' in '" + std::string(uri) +
+					"'"
 			);
 		}
 
@@ -449,8 +441,7 @@ namespace ttm::datasets {
 			const std::string ext = std::filesystem::path(shardUri).extension().string();
 			auto shardResult = open_shard(source, shardUri, ext);
 			if (!shardResult) {
-				std::cerr << "[ttm] load_dataset: skipping shard '" << shardUri
-						  << "': " << shardResult.error() << '\n';
+				std::cerr << "[ttm] load_dataset: skipping shard '" << shardUri << "': " << shardResult.error() << '\n';
 				continue;
 			}
 			if (!schema) {
@@ -464,7 +455,7 @@ namespace ttm::datasets {
 		}
 
 		std::unique_ptr<DatasetIterator> result =
-			std::make_unique<MultiFileIterator>(std::move(shards), std::move(schema));
+				std::make_unique<MultiFileIterator>(std::move(shards), std::move(schema));
 
 		if (batch_size > 0) {
 			result = std::make_unique<BatchSlicingIterator>(std::move(result), batch_size);

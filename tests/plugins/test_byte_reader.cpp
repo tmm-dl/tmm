@@ -23,8 +23,8 @@
 namespace {
 
 	/**
- * @brief Concrete IByteReader backed by a std::string for testing.
- */
+	 * @brief Concrete IByteReader backed by a std::string for testing.
+	 */
 	class StringReader final : public ttm::plugins::IByteReader {
 	public:
 		explicit StringReader(std::string data) : data_(std::move(data)) {}
@@ -70,8 +70,8 @@ namespace {
 	};
 
 	/**
- * @brief Concrete IByteReader that is never seekable, for negative-path tests.
- */
+	 * @brief Concrete IByteReader that is never seekable, for negative-path tests.
+	 */
 	class UnseekableReader final : public ttm::plugins::IByteReader {
 	public:
 		explicit UnseekableReader(std::string data) : data_(std::move(data)) {}
@@ -104,7 +104,8 @@ namespace {
 
 TEST_CASE("StringReader reads all bytes in one call", "[byte_reader]") {
 	StringReader reader("hello");
-	// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- arbitrary buffer that is big enough for the test case
+	// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- arbitrary buffer that is big
+	// enough for the test case
 	std::array<std::byte, 16> buf{};
 	const auto numread = reader.read(buf.data(), static_cast<std::streamsize>(buf.size()));
 	REQUIRE(numread == 5);

@@ -38,7 +38,7 @@ namespace ttm::trainer {
 	struct Batch {
 		std::shared_ptr<arrow::RecordBatch> data;
 		int64_t global_index = 0; ///< Monotonically increasing across all epochs.
-		int64_t epoch_index  = 0; ///< Batch index within the current epoch.
+		int64_t epoch_index = 0;  ///< Batch index within the current epoch.
 	};
 
 	/* =========================================================================
@@ -46,9 +46,9 @@ namespace ttm::trainer {
 	 * ====================================================================== */
 
 	struct StepOutput {
-		float loss        = 0.0f;
-		bool  interrupted = false; ///< Set when the step was aborted by a KeyboardInterrupt / SIGINT.
-		// Gradients are accumulated inside IModel; the optimizer reads them directly.
+		float loss = 0.0f;
+		bool interrupted = false; ///< Set when the step was aborted by a KeyboardInterrupt / SIGINT.
+								  // Gradients are accumulated inside IModel; the optimizer reads them directly.
 	};
 
 	/* =========================================================================
@@ -56,12 +56,12 @@ namespace ttm::trainer {
 	 * ====================================================================== */
 
 	struct EpochMetrics {
-		int64_t epoch        = 0;
-		int64_t global_step  = 0; ///< Total optimizer steps taken so far.
-		float   train_loss   = 0.0f;
-		float   val_loss     = std::numeric_limits<float>::quiet_NaN();
-		float   learning_rate = 0.0f;
-		double  throughput_samples_per_sec = 0.0;
+		int64_t epoch = 0;
+		int64_t global_step = 0; ///< Total optimizer steps taken so far.
+		float train_loss = 0.0f;
+		float val_loss = std::numeric_limits<float>::quiet_NaN();
+		float learning_rate = 0.0f;
+		double throughput_samples_per_sec = 0.0;
 		std::unordered_map<std::string, float> extras;
 	};
 
@@ -79,12 +79,12 @@ namespace ttm::trainer {
 	 */
 	class IModel {
 	public:
-		IModel()                             = default;
-		virtual ~IModel()                    = default;
-		IModel(const IModel&)                = delete;
-		IModel& operator=(const IModel&)     = delete;
-		IModel(IModel&&)                     = default;
-		IModel& operator=(IModel&&)          = default;
+		IModel() = default;
+		virtual ~IModel() = default;
+		IModel(const IModel&) = delete;
+		IModel& operator=(const IModel&) = delete;
+		IModel(IModel&&) = default;
+		IModel& operator=(IModel&&) = default;
 
 		[[nodiscard]] virtual std::string_view name() const = 0;
 
@@ -92,7 +92,7 @@ namespace ttm::trainer {
 		 * @brief Forward pass + backward pass (accumulates gradients).
 		 * Called once per micro-batch inside an accumulation window.
 		 */
-		virtual StepOutput step(const Batch& batch)  = 0;
+		virtual StepOutput step(const Batch& batch) = 0;
 
 		/**
 		 * @brief Forward pass only — no gradient side-effects.
@@ -110,19 +110,19 @@ namespace ttm::trainer {
 
 	class IOptimizer {
 	public:
-		IOptimizer()                                 = default;
-		virtual ~IOptimizer()                        = default;
-		IOptimizer(const IOptimizer&)                = delete;
-		IOptimizer& operator=(const IOptimizer&)     = delete;
-		IOptimizer(IOptimizer&&)                     = default;
-		IOptimizer& operator=(IOptimizer&&)          = default;
+		IOptimizer() = default;
+		virtual ~IOptimizer() = default;
+		IOptimizer(const IOptimizer&) = delete;
+		IOptimizer& operator=(const IOptimizer&) = delete;
+		IOptimizer(IOptimizer&&) = default;
+		IOptimizer& operator=(IOptimizer&&) = default;
 
 		/// Apply one optimizer step using the gradients currently stored in the model.
-		virtual void  step()                         = 0;
-		virtual void  zero_grad()                    = 0;
+		virtual void step() = 0;
+		virtual void zero_grad() = 0;
 
-		[[nodiscard]] virtual float learning_rate() const  = 0;
-		virtual void  set_learning_rate(float lr)          = 0;
+		[[nodiscard]] virtual float learning_rate() const = 0;
+		virtual void set_learning_rate(float lr) = 0;
 	};
 
 	/* =========================================================================
@@ -139,12 +139,12 @@ namespace ttm::trainer {
 	 */
 	class ILRScheduler {
 	public:
-		ILRScheduler()                                     = default;
-		virtual ~ILRScheduler()                            = default;
-		ILRScheduler(const ILRScheduler&)                  = delete;
-		ILRScheduler& operator=(const ILRScheduler&)       = delete;
-		ILRScheduler(ILRScheduler&&)                       = default;
-		ILRScheduler& operator=(ILRScheduler&&)            = default;
+		ILRScheduler() = default;
+		virtual ~ILRScheduler() = default;
+		ILRScheduler(const ILRScheduler&) = delete;
+		ILRScheduler& operator=(const ILRScheduler&) = delete;
+		ILRScheduler(ILRScheduler&&) = default;
+		ILRScheduler& operator=(ILRScheduler&&) = default;
 
 		[[nodiscard]] virtual float step(int64_t global_optimizer_step) = 0;
 	};

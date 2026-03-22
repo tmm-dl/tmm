@@ -12,10 +12,10 @@
  * - find_transform() returns nullptr when no transforms are registered
  */
 
-#include <ttm/plugins/plugin_manager.hpp>
+#include <ttm/compat/expected.hpp>
 #include <ttm/model/device.hpp>
 #include <ttm/model/model.hpp>
-#include <ttm/compat/expected.hpp>
+#include <ttm/plugins/plugin_manager.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -65,9 +65,7 @@ namespace {
 	public:
 		explicit MockModelLoader(std::string_view ext) : ext_(ext) {}
 
-		[[nodiscard]] bool probe(std::string_view path) const override {
-			return path.ends_with(ext_);
-		}
+		[[nodiscard]] bool probe(std::string_view path) const override { return path.ends_with(ext_); }
 
 		[[nodiscard]] std::expected<std::unique_ptr<ttm::model::IModel>, std::string>
 		load(std::string_view /*path*/, std::string_view /*cfg*/, ttm::model::Device /*dev*/) override {

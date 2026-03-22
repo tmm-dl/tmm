@@ -42,13 +42,27 @@ namespace ttm::model {
 	std::string Device::to_string() const {
 		const char* name = "cpu";
 		switch (type) {
-		case kDLCPU:    name = "cpu";    break;
-		case kDLCUDA:   name = "cuda";   break;
-		case kDLMetal:  name = "metal";  break;
-		case kDLOpenCL: name = "opencl"; break;
-		case kDLVulkan: name = "vulkan"; break;
-		case kDLROCM:   name = "rocm";   break;
-		default:        name = "cpu";    break;
+		case kDLCPU:
+			name = "cpu";
+			break;
+		case kDLCUDA:
+			name = "cuda";
+			break;
+		case kDLMetal:
+			name = "metal";
+			break;
+		case kDLOpenCL:
+			name = "opencl";
+			break;
+		case kDLVulkan:
+			name = "vulkan";
+			break;
+		case kDLROCM:
+			name = "rocm";
+			break;
+		default:
+			name = "cpu";
+			break;
 		}
 		if (id == 0) {
 			return name;

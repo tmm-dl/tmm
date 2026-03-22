@@ -292,8 +292,8 @@ TEST_CASE("find_split_files finds parquet shards for a split", "[dataset_info]")
 	std::filesystem::create_directories(tmp.root / "data");
 
 	/* Create shard files */
-	for (const auto* name : {"train-00000-of-00002.parquet", "train-00001-of-00002.parquet",
-							  "test-00000-of-00001.parquet"}) {
+	for (const auto* name :
+		 {"train-00000-of-00002.parquet", "train-00001-of-00002.parquet", "test-00000-of-00001.parquet"}) {
 		std::ofstream{tmp.root / "data" / name};
 	}
 

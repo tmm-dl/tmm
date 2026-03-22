@@ -68,12 +68,12 @@ typedef int64_t ttm_handle;
 // NOLINTNEXTLINE(modernize-use-using,performance-enum-size) -- pure C header; enum base type must
 // be int for C ABI compatibility (C does not support typed enums)
 typedef enum {
-	TTM_OK = 0,              /**< Success.                              */
-	TTM_EOF = 1,             /**< End of stream / end of data.          */
-	TTM_ERR_ARGS = 2,        /**< Invalid arguments.                    */
-	TTM_ERR_NOT_FOUND = 3,   /**< Requested resource not found.         */
-	TTM_ERR_IO = 4,          /**< I/O error.                            */
-	TTM_ERR_OOM = 5,         /**< Out of memory.                        */
+	TTM_OK = 0,				 /**< Success.                              */
+	TTM_EOF = 1,			 /**< End of stream / end of data.          */
+	TTM_ERR_ARGS = 2,		 /**< Invalid arguments.                    */
+	TTM_ERR_NOT_FOUND = 3,	 /**< Requested resource not found.         */
+	TTM_ERR_IO = 4,			 /**< I/O error.                            */
+	TTM_ERR_OOM = 5,		 /**< Out of memory.                        */
 	TTM_ERR_UNSUPPORTED = 6, /**< Operation not supported.              */
 	TTM_ERR_INTERRUPTED = 7, /**< Interrupted by user (SIGINT / KeyboardInterrupt). */
 } ttm_error;
@@ -116,31 +116,31 @@ typedef enum {
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_source_vtable {
 	/**
-     * @brief Open a URI and return a handle to the byte stream.
-     * @param uri      URI string (not NUL-terminated).
-     * @param uri_len  Length of `uri` in bytes.
-     * @param err_buf  Buffer to fill with a human-readable error message on failure.
-     * @param err_cap  Capacity of `err_buf` in bytes.
-     * @return A valid handle, or #TTM_INVALID_HANDLE on failure.
-     */
+	 * @brief Open a URI and return a handle to the byte stream.
+	 * @param uri      URI string (not NUL-terminated).
+	 * @param uri_len  Length of `uri` in bytes.
+	 * @param err_buf  Buffer to fill with a human-readable error message on failure.
+	 * @param err_cap  Capacity of `err_buf` in bytes.
+	 * @return A valid handle, or #TTM_INVALID_HANDLE on failure.
+	 */
 	ttm_handle (*open)(const char* uri, uint32_t uri_len, char* err_buf, uint32_t err_cap);
 
 	/**
-     * @brief Read up to `len` bytes into `buf`.
-     * @return Number of bytes read (>0), 0 at end-of-stream, or -1 on error.
-     */
+	 * @brief Read up to `len` bytes into `buf`.
+	 * @return Number of bytes read (>0), 0 at end-of-stream, or -1 on error.
+	 */
 	int32_t (*read)(ttm_handle h, void* buf, int32_t len);
 
 	/**
-     * @brief Seek within the stream.
-     * @param whence  Matches POSIX: 0=SEEK_SET, 1=SEEK_CUR, 2=SEEK_END.
-     * @return New byte offset from the start, or -1 if unseekable / error.
-     */
+	 * @brief Seek within the stream.
+	 * @param whence  Matches POSIX: 0=SEEK_SET, 1=SEEK_CUR, 2=SEEK_END.
+	 * @return New byte offset from the start, or -1 if unseekable / error.
+	 */
 	int64_t (*seek)(ttm_handle h, int64_t offset, int32_t whence);
 
 	/**
-     * @brief Close the stream and release all resources for this handle.
-     */
+	 * @brief Close the stream and release all resources for this handle.
+	 */
 	void (*close)(ttm_handle h);
 } ttm_source_vtable;
 
@@ -157,28 +157,28 @@ typedef struct ttm_source_vtable {
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_transform_vtable {
 	/**
-     * @brief Create a transform instance.
-     * @param config_json  Plugin-specific JSON configuration (not NUL-terminated).
-     * @param config_len   Length of `config_json` in bytes.
-     * @return Handle to the new instance, or #TTM_INVALID_HANDLE on failure.
-     */
+	 * @brief Create a transform instance.
+	 * @param config_json  Plugin-specific JSON configuration (not NUL-terminated).
+	 * @param config_len   Length of `config_json` in bytes.
+	 * @return Handle to the new instance, or #TTM_INVALID_HANDLE on failure.
+	 */
 	ttm_handle (*create)(const char* config_json, uint32_t config_len);
 
 	/**
-     * @brief Apply the transform to a record batch.
-     * @param h         Handle returned by create().
-     * @param in_ipc    Serialised input Arrow IPC RecordBatch (host-owned).
-     * @param in_len    Length of `in_ipc` in bytes.
-     * @param out_ipc   Set to a plugin-allocated buffer containing the output batch.
-     *                  The host will free this via #ttm_host_api::free.
-     * @param out_len   Set to the length of `*out_ipc` in bytes.
-     * @return #TTM_OK on success, otherwise an error code.
-     */
+	 * @brief Apply the transform to a record batch.
+	 * @param h         Handle returned by create().
+	 * @param in_ipc    Serialised input Arrow IPC RecordBatch (host-owned).
+	 * @param in_len    Length of `in_ipc` in bytes.
+	 * @param out_ipc   Set to a plugin-allocated buffer containing the output batch.
+	 *                  The host will free this via #ttm_host_api::free.
+	 * @param out_len   Set to the length of `*out_ipc` in bytes.
+	 * @return #TTM_OK on success, otherwise an error code.
+	 */
 	ttm_error (*apply)(ttm_handle h, const void* in_ipc, uint32_t in_len, void** out_ipc, uint32_t* out_len);
 
 	/**
-     * @brief Destroy a transform instance and release its resources.
-     */
+	 * @brief Destroy a transform instance and release its resources.
+	 */
 	void (*destroy)(ttm_handle h);
 } ttm_transform_vtable;
 
@@ -242,12 +242,12 @@ typedef struct ttm_metric_vtable {
  */
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_param_desc_t {
-	const char*    name;         /**< Parameter name (NUL-terminated).               */
-	int32_t        ndim;         /**< Number of tensor dimensions.                   */
-	int32_t        dtype_code;   /**< DLDataTypeCode: 0=int, 1=uint, 2=float, …     */
-	int32_t        dtype_bits;   /**< Bit-width of the element type (e.g. 32).       */
-	const int64_t* shape;        /**< Shape array of length ndim (plugin-owned).     */
-	int32_t        trainable;    /**< Non-zero if gradients should be tracked.       */
+	const char* name;	  /**< Parameter name (NUL-terminated).               */
+	int32_t ndim;		  /**< Number of tensor dimensions.                   */
+	int32_t dtype_code;	  /**< DLDataTypeCode: 0=int, 1=uint, 2=float, …     */
+	int32_t dtype_bits;	  /**< Bit-width of the element type (e.g. 32).       */
+	const int64_t* shape; /**< Shape array of length ndim (plugin-owned).     */
+	int32_t trainable;	  /**< Non-zero if gradients should be tracked.       */
 } ttm_param_desc_t;
 
 /**
@@ -255,14 +255,14 @@ typedef struct ttm_param_desc_t {
  */
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_model_info_t {
-	const char* name;               /**< Human-readable model name (NUL-terminated).   */
-	const char* arch;               /**< Architecture tag, e.g. "GPT2" (NUL-term.).   */
-	uint64_t    num_parameters;     /**< Total parameter count.                        */
-	uint64_t    num_trainable;      /**< Count of trainable parameters.                */
-	uint64_t    bytes_on_device;    /**< Memory footprint (params + grads), bytes.     */
-	const char* input_schema_json;  /**< Arrow JSON schema for expected inputs.        */
-	int32_t     device_type;        /**< DLDeviceType of the device the model lives on. */
-	int32_t     device_id;          /**< Device index (e.g. GPU ordinal).              */
+	const char* name;			   /**< Human-readable model name (NUL-terminated).   */
+	const char* arch;			   /**< Architecture tag, e.g. "GPT2" (NUL-term.).   */
+	uint64_t num_parameters;	   /**< Total parameter count.                        */
+	uint64_t num_trainable;		   /**< Count of trainable parameters.                */
+	uint64_t bytes_on_device;	   /**< Memory footprint (params + grads), bytes.     */
+	const char* input_schema_json; /**< Arrow JSON schema for expected inputs.        */
+	int32_t device_type;		   /**< DLDeviceType of the device the model lives on. */
+	int32_t device_id;			   /**< Device index (e.g. GPU ordinal).              */
 } ttm_model_info_t;
 
 /**
@@ -299,9 +299,9 @@ typedef struct ttm_model_loader_vtable {
 	 * @param err_cap   Capacity of `err` in bytes.
 	 * @return A valid handle, or #TTM_INVALID_HANDLE on failure.
 	 */
-	ttm_handle (*load)(const char* path, uint32_t path_len,
-	                   const char* cfg,  uint32_t cfg_len,
-	                   char* err, uint32_t err_cap);
+	ttm_handle (*load)(
+			const char* path, uint32_t path_len, const char* cfg, uint32_t cfg_len, char* err, uint32_t err_cap
+	);
 
 	/**
 	 * @brief Return static metadata for a loaded model.
@@ -317,18 +317,16 @@ typedef struct ttm_model_loader_vtable {
 	 * @param[out] out_descs  Set to a plugin-owned array of descriptors.
 	 * @param[out] out_count  Set to the number of entries in `*out_descs`.
 	 */
-	ttm_error (*describe_params)(ttm_handle h,
-	                             const ttm_param_desc_t** out_descs,
-	                             uint32_t* out_count);
+	ttm_error (*describe_params)(ttm_handle h, const ttm_param_desc_t** out_descs, uint32_t* out_count);
 
 	/**
 	 * @brief Bind host-allocated parameter and gradient buffers to the model.
 	 * @details Called once after load(), before any step()/infer() calls.
 	 *          The host retains ownership of all DLTensors.
 	 */
-	ttm_error (*bind_params)(ttm_handle h,
-	                         const DLTensor* params, uint32_t param_count,
-	                         const DLTensor* grads,  uint32_t grad_count);
+	ttm_error (*bind_params)(
+			ttm_handle h, const DLTensor* params, uint32_t param_count, const DLTensor* grads, uint32_t grad_count
+	);
 
 	/**
 	 * @brief Initialise parameter values.
@@ -343,9 +341,7 @@ typedef struct ttm_model_loader_vtable {
 	 * @param n        Number of input tensors.
 	 * @param out_loss Set to the scalar loss for this batch.
 	 */
-	ttm_error (*step)(ttm_handle h,
-	                  const DLTensor* inputs, uint32_t n,
-	                  float* out_loss);
+	ttm_error (*step)(ttm_handle h, const DLTensor* inputs, uint32_t n, float* out_loss);
 
 	/**
 	 * @brief Forward-only pass; fills caller-provided output tensors.
@@ -354,9 +350,7 @@ typedef struct ttm_model_loader_vtable {
 	 * @param outputs     Array of output DLTensors to fill (host-owned).
 	 * @param out_count   On entry, capacity of `outputs`; on exit, filled count.
 	 */
-	ttm_error (*infer)(ttm_handle h,
-	                   const DLTensor* inputs,  uint32_t in_count,
-	                   DLTensor*       outputs, uint32_t* out_count);
+	ttm_error (*infer)(ttm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outputs, uint32_t* out_count);
 
 	/** @brief Zero all gradient buffers. */
 	ttm_error (*zero_grad)(ttm_handle h);
@@ -450,36 +444,35 @@ typedef struct ttm_scheduler_vtable {
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_optimizer_vtable {
 	/**
-     * @brief Create an optimizer instance.
-     *
-     * @param model_h     Handle from model_loader.load() for the model being
-     *                    optimized.  Same-plugin optimizers may use this to
-     *                    access the underlying model object (e.g. to call
-     *                    model.parameters()).  Pass #TTM_INVALID_HANDLE if the
-     *                    model is external to this plugin.
-     * @param params      Host-allocated param DLTensors (may be nullptr when
-     *                    the model manages its own parameter memory).
-     * @param param_count Number of elements in @p params (and @p grads).
-     * @param grads       Host-allocated gradient DLTensors (same count as
-     *                    @p params; may be nullptr).
-     * @param cfg         JSON object with optimizer hyperparameters.
-     *                    Standard fields: lr, weight_decay, beta1, beta2, eps,
-     *                    amsgrad (0/1), device (e.g. "cpu", "cuda", "cuda:1").
-     * @param cfg_len     Length of @p cfg in bytes.
-     * @param err         Buffer for a human-readable error message on failure.
-     * @param err_cap     Capacity of @p err in bytes.
-     * @return Opaque handle, or #TTM_INVALID_HANDLE on failure.
-     */
-	ttm_handle (*create)(ttm_handle      model_h,
-	                     const DLTensor* params, uint32_t param_count,
-	                     const DLTensor* grads,
-	                     const char* cfg, uint32_t cfg_len,
-	                     char* err, uint32_t err_cap);
+	 * @brief Create an optimizer instance.
+	 *
+	 * @param model_h     Handle from model_loader.load() for the model being
+	 *                    optimized.  Same-plugin optimizers may use this to
+	 *                    access the underlying model object (e.g. to call
+	 *                    model.parameters()).  Pass #TTM_INVALID_HANDLE if the
+	 *                    model is external to this plugin.
+	 * @param params      Host-allocated param DLTensors (may be nullptr when
+	 *                    the model manages its own parameter memory).
+	 * @param param_count Number of elements in @p params (and @p grads).
+	 * @param grads       Host-allocated gradient DLTensors (same count as
+	 *                    @p params; may be nullptr).
+	 * @param cfg         JSON object with optimizer hyperparameters.
+	 *                    Standard fields: lr, weight_decay, beta1, beta2, eps,
+	 *                    amsgrad (0/1), device (e.g. "cpu", "cuda", "cuda:1").
+	 * @param cfg_len     Length of @p cfg in bytes.
+	 * @param err         Buffer for a human-readable error message on failure.
+	 * @param err_cap     Capacity of @p err in bytes.
+	 * @return Opaque handle, or #TTM_INVALID_HANDLE on failure.
+	 */
+	ttm_handle (*create)(
+			ttm_handle model_h, const DLTensor* params, uint32_t param_count, const DLTensor* grads, const char* cfg,
+			uint32_t cfg_len, char* err, uint32_t err_cap
+	);
 
 	/**
-     * @brief Apply one optimizer step using the gradients currently stored in
-     *        the model.
-     */
+	 * @brief Apply one optimizer step using the gradients currently stored in
+	 *        the model.
+	 */
 	ttm_error (*step)(ttm_handle h);
 
 	/** @brief Zero all gradient accumulators. */
@@ -489,9 +482,9 @@ typedef struct ttm_optimizer_vtable {
 	float (*get_lr)(ttm_handle h);
 
 	/**
-     * @brief Update the learning rate for all param groups.
-     * @details Called by the host after each LR scheduler step.
-     */
+	 * @brief Update the learning rate for all param groups.
+	 * @details Called by the host after each LR scheduler step.
+	 */
 	void (*set_lr)(ttm_handle h, float lr);
 
 	/** @brief Destroy the optimizer and release all plugin-side resources. */
@@ -551,8 +544,7 @@ typedef struct ttm_trainer_callback_vtable {
 	 * @param len          Length of metrics_json in bytes.
 	 * @return Non-zero to request early stopping.
 	 */
-	int32_t (*on_epoch_end)(ttm_handle h, int64_t epoch,
-	                        const char* metrics_json, uint32_t len);
+	int32_t (*on_epoch_end)(ttm_handle h, int64_t epoch, const char* metrics_json, uint32_t len);
 
 	/**
 	 * @brief Called once after the fit loop ends.
@@ -589,149 +581,149 @@ typedef struct ttm_trainer_callback_vtable {
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_host_api {
 	/**
-     * @brief Register a byte-stream source for a set of URI schemes.
-     * @param ctx      Opaque host token (pass back as-is).
-     * @param schemes  NULL-terminated array of NUL-terminated scheme strings,
-     *                 e.g. `{"gh:", "github:", NULL}`.
-     * @param vt       Vtable implementing the source.
-     * @return #TTM_OK on success.
-     * @see ttm::plugins::IDatasetSource
-     */
+	 * @brief Register a byte-stream source for a set of URI schemes.
+	 * @param ctx      Opaque host token (pass back as-is).
+	 * @param schemes  NULL-terminated array of NUL-terminated scheme strings,
+	 *                 e.g. `{"gh:", "github:", NULL}`.
+	 * @param vt       Vtable implementing the source.
+	 * @return #TTM_OK on success.
+	 * @see ttm::plugins::IDatasetSource
+	 */
 	ttm_error (*register_source)(void* ctx, const char** schemes, const ttm_source_vtable* vt);
 
 	/**
-     * @brief Register a record-batch transform.
-     * @param ctx      Opaque host token.
-     * @param name     Canonical NUL-terminated name.
-     * @param aliases  NULL-terminated array of additional NUL-terminated names
-     *                 (may be NULL).
-     * @param vt       Vtable implementing the transform.
-     * @return #TTM_OK on success.
-     * @see ttm::plugins::ITransform
-     */
+	 * @brief Register a record-batch transform.
+	 * @param ctx      Opaque host token.
+	 * @param name     Canonical NUL-terminated name.
+	 * @param aliases  NULL-terminated array of additional NUL-terminated names
+	 *                 (may be NULL).
+	 * @param vt       Vtable implementing the transform.
+	 * @return #TTM_OK on success.
+	 * @see ttm::plugins::ITransform
+	 */
 	ttm_error (*register_transform)(void* ctx, const char* name, const char** aliases, const ttm_transform_vtable* vt);
 
 	/**
-     * @brief Register an ML task type.
-     * @param ctx      Opaque host token.
-     * @param name     Canonical NUL-terminated name (e.g. "text-classification").
-     * @param aliases  NULL-terminated array of additional names (may be NULL).
-     * @param vt       Vtable implementing the task.
-     * @return #TTM_OK on success.
-     * @see ttm::plugins::ITask
-     */
+	 * @brief Register an ML task type.
+	 * @param ctx      Opaque host token.
+	 * @param name     Canonical NUL-terminated name (e.g. "text-classification").
+	 * @param aliases  NULL-terminated array of additional names (may be NULL).
+	 * @param vt       Vtable implementing the task.
+	 * @return #TTM_OK on success.
+	 * @see ttm::plugins::ITask
+	 */
 	ttm_error (*register_task)(void* ctx, const char* name, const char** aliases, const ttm_task_vtable* vt);
 
 	/**
-     * @brief Register an evaluation metric.
-     * @param ctx      Opaque host token.
-     * @param name     Canonical NUL-terminated name (e.g. "f1").
-     * @param aliases  NULL-terminated array of additional names (may be NULL).
-     * @param vt       Vtable implementing the metric.
-     * @return #TTM_OK on success.
-     * @see ttm::plugins::IMetric
-     */
+	 * @brief Register an evaluation metric.
+	 * @param ctx      Opaque host token.
+	 * @param name     Canonical NUL-terminated name (e.g. "f1").
+	 * @param aliases  NULL-terminated array of additional names (may be NULL).
+	 * @param vt       Vtable implementing the metric.
+	 * @return #TTM_OK on success.
+	 * @see ttm::plugins::IMetric
+	 */
 	ttm_error (*register_metric)(void* ctx, const char* name, const char** aliases, const ttm_metric_vtable* vt);
 
 	/**
-     * @brief Emit a log message to the host logger.
-     * @param ctx    Opaque host token.
-     * @param level  Severity level.
-     * @param msg    Message bytes (not required to be NUL-terminated).
-     * @param len    Length of `msg` in bytes.
-     */
+	 * @brief Emit a log message to the host logger.
+	 * @param ctx    Opaque host token.
+	 * @param level  Severity level.
+	 * @param msg    Message bytes (not required to be NUL-terminated).
+	 * @param len    Length of `msg` in bytes.
+	 */
 	void (*log)(void* ctx, ttm_log_level level, const char* msg, uint32_t len);
 
 	/**
-     * @brief Log a named scalar metric (PyTorch Lightning–style).
-     * @details
-     * Plugins and training code call this to record a scalar value at a given
-     * global optimiser step.  The host broadcasts the metric to every other
-     * loaded plugin via #ttm_on_metric so that UI or logging plugins can
-     * display it without knowing the source.
-     *
-     * @param ctx      Opaque host token.
-     * @param key      Metric name (not required to be NUL-terminated).
-     * @param key_len  Length of `key` in bytes.
-     * @param value    Scalar value (NaN / Inf are valid; consumers should handle them).
-     * @param step     Global training step at which the value was recorded.
-     */
+	 * @brief Log a named scalar metric (PyTorch Lightning–style).
+	 * @details
+	 * Plugins and training code call this to record a scalar value at a given
+	 * global optimiser step.  The host broadcasts the metric to every other
+	 * loaded plugin via #ttm_on_metric so that UI or logging plugins can
+	 * display it without knowing the source.
+	 *
+	 * @param ctx      Opaque host token.
+	 * @param key      Metric name (not required to be NUL-terminated).
+	 * @param key_len  Length of `key` in bytes.
+	 * @param value    Scalar value (NaN / Inf are valid; consumers should handle them).
+	 * @param step     Global training step at which the value was recorded.
+	 */
 	void (*log_metric)(void* ctx, const char* key, uint32_t key_len, float value, int32_t step);
 
 	/**
-     * @brief Query the host terminal dimensions.
-     * @details
-     * WASM plugins cannot call ioctl directly; this callback lets them query
-     * the real terminal size from the host so they can size their rendering
-     * buffers accordingly.
-     *
-     * @param ctx        Opaque host token.
-     * @param out_width  Set to the number of terminal columns (default 80).
-     * @param out_height Set to the number of terminal rows    (default 24).
-     */
+	 * @brief Query the host terminal dimensions.
+	 * @details
+	 * WASM plugins cannot call ioctl directly; this callback lets them query
+	 * the real terminal size from the host so they can size their rendering
+	 * buffers accordingly.
+	 *
+	 * @param ctx        Opaque host token.
+	 * @param out_width  Set to the number of terminal columns (default 80).
+	 * @param out_height Set to the number of terminal rows    (default 24).
+	 */
 	void (*terminal_size)(void* ctx, uint32_t* out_width, uint32_t* out_height);
 
 	/**
-     * @brief Allocate `size` bytes in the plugin's address space.
-     * @details For WASM plugins this allocates within the module's linear memory
-     *          so that returned pointers are valid from the plugin side.
-     * @return Pointer to the allocated block, or NULL on failure.
-     */
+	 * @brief Allocate `size` bytes in the plugin's address space.
+	 * @details For WASM plugins this allocates within the module's linear memory
+	 *          so that returned pointers are valid from the plugin side.
+	 * @return Pointer to the allocated block, or NULL on failure.
+	 */
 	void* (*alloc)(void* ctx, uint32_t size);
 
 	/**
-     * @brief Free memory previously obtained via #ttm_host_api::alloc.
-     */
+	 * @brief Free memory previously obtained via #ttm_host_api::alloc.
+	 */
 	void (*free)(void* ctx, void* ptr);
 
 	/**
-     * @brief Register a model loader.
-     * @details Called by a plugin during #ttm_plugin_init to register a
-     *          vtable that the host will use to load models matching the
-     *          files accepted by vt->probe().
-     * @param ctx  Opaque host token.
-     * @param vt   Model loader vtable.  The pointer must remain valid for the
-     *             lifetime of the plugin (i.e. until #ttm_plugin_teardown).
-     * @return #TTM_OK on success.
-     * @see ttm_model_loader_vtable
-     */
+	 * @brief Register a model loader.
+	 * @details Called by a plugin during #ttm_plugin_init to register a
+	 *          vtable that the host will use to load models matching the
+	 *          files accepted by vt->probe().
+	 * @param ctx  Opaque host token.
+	 * @param vt   Model loader vtable.  The pointer must remain valid for the
+	 *             lifetime of the plugin (i.e. until #ttm_plugin_teardown).
+	 * @return #TTM_OK on success.
+	 * @see ttm_model_loader_vtable
+	 */
 	ttm_error (*register_model_loader)(void* ctx, const ttm_model_loader_vtable* vt);
 
 	/**
-     * @brief Broadcast model metadata to all loaded plugins.
-     * @details Called by the host after a model is successfully loaded.
-     *          Plugins that export #ttm_on_model_loaded will receive the JSON.
-     * @param ctx   Opaque host token.
-     * @param info  Model metadata to broadcast.
-     * @see ttm_on_model_loaded
-     */
+	 * @brief Broadcast model metadata to all loaded plugins.
+	 * @details Called by the host after a model is successfully loaded.
+	 *          Plugins that export #ttm_on_model_loaded will receive the JSON.
+	 * @param ctx   Opaque host token.
+	 * @param info  Model metadata to broadcast.
+	 * @see ttm_on_model_loaded
+	 */
 	void (*notify_model_info)(void* ctx, const ttm_model_info_t* info);
 
 	/**
-     * @brief Register an LR scheduler under a given name.
-     * @details Called by a plugin during #ttm_plugin_init.  The host stores a
-     *          copy of the vtable struct and associates it with `name`.  The
-     *          training config selects a scheduler by this name.
-     * @param ctx   Opaque host token.
-     * @param name  NUL-terminated scheduler name (e.g. "cosine_warmup").
-     * @param vt    Scheduler vtable.  The function pointers must remain valid
-     *              for the lifetime of the plugin.
-     * @return #TTM_OK on success.
-     * @see ttm_scheduler_vtable
-     */
+	 * @brief Register an LR scheduler under a given name.
+	 * @details Called by a plugin during #ttm_plugin_init.  The host stores a
+	 *          copy of the vtable struct and associates it with `name`.  The
+	 *          training config selects a scheduler by this name.
+	 * @param ctx   Opaque host token.
+	 * @param name  NUL-terminated scheduler name (e.g. "cosine_warmup").
+	 * @param vt    Scheduler vtable.  The function pointers must remain valid
+	 *              for the lifetime of the plugin.
+	 * @return #TTM_OK on success.
+	 * @see ttm_scheduler_vtable
+	 */
 	ttm_error (*register_scheduler)(void* ctx, const char* name, const ttm_scheduler_vtable* vt);
 
 	/**
-     * @brief Register an optimizer under a given name.
-     * @details Called by a plugin during #ttm_plugin_init.  The training config
-     *          selects an optimizer by this name (e.g. "adamw").
-     * @param ctx   Opaque host token.
-     * @param name  NUL-terminated optimizer name (e.g. "adamw").
-     * @param vt    Optimizer vtable.  The function pointers must remain valid
-     *              for the lifetime of the plugin.
-     * @return #TTM_OK on success.
-     * @see ttm_optimizer_vtable
-     */
+	 * @brief Register an optimizer under a given name.
+	 * @details Called by a plugin during #ttm_plugin_init.  The training config
+	 *          selects an optimizer by this name (e.g. "adamw").
+	 * @param ctx   Opaque host token.
+	 * @param name  NUL-terminated optimizer name (e.g. "adamw").
+	 * @param vt    Optimizer vtable.  The function pointers must remain valid
+	 *              for the lifetime of the plugin.
+	 * @return #TTM_OK on success.
+	 * @see ttm_optimizer_vtable
+	 */
 	ttm_error (*register_optimizer)(void* ctx, const char* name, const ttm_optimizer_vtable* vt);
 
 	/**
@@ -764,9 +756,9 @@ typedef struct ttm_host_api {
  */
 // NOLINTNEXTLINE(modernize-use-using) -- pure C header
 typedef struct ttm_plugin_info {
-	uint32_t    abiVersion;  /**< Must equal #TTM_ABI_VERSION.               */
-	const char* name;        /**< Human-readable plugin name (NUL-terminated). */
-	const char* version;     /**< SemVer string, e.g. "1.0.0" (NUL-terminated). */
+	uint32_t abiVersion;	 /**< Must equal #TTM_ABI_VERSION.               */
+	const char* name;		 /**< Human-readable plugin name (NUL-terminated). */
+	const char* version;	 /**< SemVer string, e.g. "1.0.0" (NUL-terminated). */
 	const char* description; /**< One-line description (NUL-terminated; may be NULL). */
 } ttm_plugin_info;
 

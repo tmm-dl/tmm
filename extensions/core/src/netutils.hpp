@@ -30,8 +30,7 @@ bool isLfsPointer(std::FILE* fp);
  *
  * @return true on success, false with @p err filled on failure.
  */
-bool httpDownload(const std::string& url, const std::filesystem::path& dest,
-                  char* err, uint32_t err_cap);
+bool httpDownload(const std::string& url, const std::filesystem::path& dest, char* err, uint32_t err_cap);
 
 /**
  * @brief Resolve a git-lfs pointer to real file content.
@@ -42,7 +41,6 @@ bool httpDownload(const std::string& url, const std::filesystem::path& dest,
  *
  * @return Opened `FILE*` on success, `nullptr` with @p err filled on failure.
  */
-std::FILE* lfsOpen(const std::string& git_url, const std::string& ref,
-                   const std::string& subpath,
-                   const std::filesystem::path& localRepo,
-                   char* err, uint32_t err_cap);
+std::FILE*
+lfsOpen(const std::string& git_url, const std::string& ref, const std::string& subpath,
+		const std::filesystem::path& localRepo, char* err, uint32_t err_cap);

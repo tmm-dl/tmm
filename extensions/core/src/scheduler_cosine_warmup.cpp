@@ -18,27 +18,26 @@
 
 namespace {
 
-ttm_handle cosineWarmupCreate(float base_lr, const char* cfg, uint32_t cfg_len) {
-	return allocSched(parseSchedCfg(base_lr, cfg, cfg_len));
-}
-
-float cosineWarmupStep(ttm_handle h, int64_t global_step) {
-	const auto* s = getSched(h);
-	if (!s) return 0.0f;
-	if (global_step < s->warmup_steps) {
-		return s->base_lr * warmupFactor(*s, global_step);
+	ttm_handle cosineWarmupCreate(float base_lr, const char* cfg, uint32_t cfg_len) {
+		return allocSched(parseSchedCfg(base_lr, cfg, cfg_len));
 	}
-	const int64_t decay_steps = s->total_steps - s->warmup_steps;
-	const int64_t decay_step  = global_step - s->warmup_steps;
-	if (decay_steps <= 0) return s->base_lr;
-	const float progress = std::min(
-		static_cast<float>(decay_step) / static_cast<float>(decay_steps), 1.0f);
-	return s->min_lr + 0.5f * (s->base_lr - s->min_lr) * (1.0f + std::cos(kPi * progress));
-}
+
+	float cosineWarmupStep(ttm_handle h, int64_t global_step) {
+		const auto* s = getSched(h);
+		if (!s)
+			return 0.0f;
+		if (global_step < s->warmup_steps) {
+			return s->base_lr * warmupFactor(*s, global_step);
+		}
+		const int64_t decay_steps = s->total_steps - s->warmup_steps;
+		const int64_t decay_step = global_step - s->warmup_steps;
+		if (decay_steps <= 0)
+			return s->base_lr;
+		const float progress = std::min(static_cast<float>(decay_step) / static_cast<float>(decay_steps), 1.0f);
+		return s->min_lr + 0.5f * (s->base_lr - s->min_lr) * (1.0f + std::cos(kPi * progress));
+	}
 
 } // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-ttm_scheduler_vtable g_sched_cosine_warmup = {
-	cosineWarmupCreate, cosineWarmupStep, schedDestroy
-};
+ttm_scheduler_vtable g_sched_cosine_warmup = {cosineWarmupCreate, cosineWarmupStep, schedDestroy};

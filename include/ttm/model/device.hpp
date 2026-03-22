@@ -26,7 +26,7 @@ namespace ttm::model {
 	 */
 	struct Device {
 		DLDeviceType type = kDLCPU; ///< DLPack device type constant.
-		int32_t      id   = 0;      ///< Device ordinal (GPU index, etc.).
+		int32_t id = 0;				///< Device ordinal (GPU index, etc.).
 
 		/**
 		 * @brief Parse a device string into a Device.

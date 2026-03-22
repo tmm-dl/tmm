@@ -24,17 +24,28 @@ namespace ttm::model {
 		/// Map Arrow type id to DLDataType.
 		DLDataType arrow_to_dltype(arrow::Type::type tid) {
 			switch (tid) {
-			case arrow::Type::INT8:    return {kDLInt,   8,  1};
-			case arrow::Type::INT16:   return {kDLInt,   16, 1};
-			case arrow::Type::INT32:   return {kDLInt,   32, 1};
-			case arrow::Type::INT64:   return {kDLInt,   64, 1};
-			case arrow::Type::UINT8:   return {kDLUInt,  8,  1};
-			case arrow::Type::UINT16:  return {kDLUInt,  16, 1};
-			case arrow::Type::UINT32:  return {kDLUInt,  32, 1};
-			case arrow::Type::UINT64:  return {kDLUInt,  64, 1};
-			case arrow::Type::FLOAT:   return {kDLFloat, 32, 1};
-			case arrow::Type::DOUBLE:  return {kDLFloat, 64, 1};
-			default:                   return {kDLFloat, 32, 1}; // fallback
+			case arrow::Type::INT8:
+				return {kDLInt, 8, 1};
+			case arrow::Type::INT16:
+				return {kDLInt, 16, 1};
+			case arrow::Type::INT32:
+				return {kDLInt, 32, 1};
+			case arrow::Type::INT64:
+				return {kDLInt, 64, 1};
+			case arrow::Type::UINT8:
+				return {kDLUInt, 8, 1};
+			case arrow::Type::UINT16:
+				return {kDLUInt, 16, 1};
+			case arrow::Type::UINT32:
+				return {kDLUInt, 32, 1};
+			case arrow::Type::UINT64:
+				return {kDLUInt, 64, 1};
+			case arrow::Type::FLOAT:
+				return {kDLFloat, 32, 1};
+			case arrow::Type::DOUBLE:
+				return {kDLFloat, 64, 1};
+			default:
+				return {kDLFloat, 32, 1}; // fallback
 			}
 		}
 
@@ -60,43 +71,38 @@ namespace ttm::model {
 		/// Build a 2-D DLTensor [num_rows, 1] pointing into Arrow buffer (zero-copy).
 		/// shape must remain alive as long as the DLTensor is used (owned by ModelBatch::shapes).
 		DLTensor make_tensor_from_arrow(
-			const void*   data_ptr,
-			int64_t       num_rows,
-			DLDataType    dtype,
-			std::vector<int64_t>& shape_storage
+				const void* data_ptr, int64_t num_rows, DLDataType dtype, std::vector<int64_t>& shape_storage
 		) {
 			shape_storage = {num_rows, 1};
 			DLTensor t{};
-			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast) -- DLTensor.data is void*; Arrow buffer is const; safe read-only use
-			t.data         = const_cast<void*>(data_ptr);
-			t.device       = {kDLCPU, 0};
-			t.ndim         = 2;
-			t.dtype        = dtype;
-			t.shape        = shape_storage.data();
-			t.strides      = nullptr; // contiguous
-			t.byte_offset  = 0;
+			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast) -- DLTensor.data is void*; Arrow buffer is const;
+			// safe read-only use
+			t.data = const_cast<void*>(data_ptr);
+			t.device = {kDLCPU, 0};
+			t.ndim = 2;
+			t.dtype = dtype;
+			t.shape = shape_storage.data();
+			t.strides = nullptr; // contiguous
+			t.byte_offset = 0;
 			return t;
 		}
 
 		/// Build a 2-D DLTensor [num_rows, list_size] from a FixedSizeList column (zero-copy).
 		/// list_size is the fixed number of elements per row.
 		DLTensor make_2d_tensor_from_arrow(
-			const void*   data_ptr,
-			int64_t       num_rows,
-			int32_t       list_size,
-			DLDataType    dtype,
-			std::vector<int64_t>& shape_storage
+				const void* data_ptr, int64_t num_rows, int32_t list_size, DLDataType dtype,
+				std::vector<int64_t>& shape_storage
 		) {
 			shape_storage = {num_rows, static_cast<int64_t>(list_size)};
 			DLTensor t{};
 			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-			t.data         = const_cast<void*>(data_ptr);
-			t.device       = {kDLCPU, 0};
-			t.ndim         = 2;
-			t.dtype        = dtype;
-			t.shape        = shape_storage.data();
-			t.strides      = nullptr;
-			t.byte_offset  = 0;
+			t.data = const_cast<void*>(data_ptr);
+			t.device = {kDLCPU, 0};
+			t.ndim = 2;
+			t.dtype = dtype;
+			t.shape = shape_storage.data();
+			t.strides = nullptr;
+			t.byte_offset = 0;
 			return t;
 		}
 
@@ -105,16 +111,13 @@ namespace ttm::model {
 		 */
 		class DefaultCollator final : public ICollator {
 		public:
-			explicit DefaultCollator(std::shared_ptr<arrow::Schema> schema)
-				: schema_(std::move(schema)) {}
+			explicit DefaultCollator(std::shared_ptr<arrow::Schema> schema) : schema_(std::move(schema)) {}
 
 			[[nodiscard]] std::expected<ModelBatch, std::string>
 			collate(const arrow::RecordBatch& batch) const override {
 				ModelBatch out;
 				// Shallow copy: new RecordBatch sharing the same column arrays.
-				out.raw = arrow::RecordBatch::Make(
-					batch.schema(), batch.num_rows(), batch.columns()
-				);
+				out.raw = arrow::RecordBatch::Make(batch.schema(), batch.num_rows(), batch.columns());
 
 				const int num_cols = batch.num_columns();
 				out.inputs.reserve(static_cast<std::size_t>(num_cols));
@@ -127,7 +130,7 @@ namespace ttm::model {
 
 				for (int c = 0; c < num_cols; ++c) {
 					const auto& field = schema.field(c);
-					const auto  tid   = field->type()->id();
+					const auto tid = field->type()->id();
 
 					if (is_numeric_col(tid)) {
 						const auto& col = batch.column(c);
@@ -138,9 +141,9 @@ namespace ttm::model {
 						if (prim != nullptr && prim->null_count() == 0) {
 							const void* buf = prim->values()->data();
 							out.shapes.emplace_back();
-							out.inputs.push_back(make_tensor_from_arrow(
-								buf, batch.num_rows(), dtype, out.shapes.back()
-							));
+							out.inputs.push_back(
+									make_tensor_from_arrow(buf, batch.num_rows(), dtype, out.shapes.back())
+							);
 						} else {
 							// Fallback: zero-fill
 							const int64_t n = batch.num_rows();
@@ -148,7 +151,7 @@ namespace ttm::model {
 							out.storage.emplace_back(nbytes, std::byte{0});
 							out.shapes.emplace_back();
 							out.inputs.push_back(make_tensor_from_arrow(
-								out.storage.back().data(), n, {kDLFloat, 32, 1}, out.shapes.back()
+									out.storage.back().data(), n, {kDLFloat, 32, 1}, out.shapes.back()
 							));
 						}
 					} else if (tid == arrow::Type::FIXED_SIZE_LIST) {
@@ -156,11 +159,11 @@ namespace ttm::model {
 						const auto& col = batch.column(c);
 						const auto* fsl_type = static_cast<const arrow::FixedSizeListType*>(field->type().get());
 						const int32_t list_size = fsl_type->list_size();
-						const auto  value_type_id = fsl_type->value_type()->id();
+						const auto value_type_id = fsl_type->value_type()->id();
 
 						if (!is_numeric_col(value_type_id)) {
-							std::cerr << "[ttm/collator] skipping FixedSizeList column '"
-							          << field->name() << "': non-numeric value type\n";
+							std::cerr << "[ttm/collator] skipping FixedSizeList column '" << field->name()
+									  << "': non-numeric value type\n";
 							continue;
 						}
 						const DLDataType dtype = arrow_to_dltype(value_type_id);
@@ -173,32 +176,28 @@ namespace ttm::model {
 							const void* buf = prim->values()->data();
 							out.shapes.emplace_back();
 							out.inputs.push_back(make_2d_tensor_from_arrow(
-								buf, batch.num_rows(), list_size, dtype, out.shapes.back()
+									buf, batch.num_rows(), list_size, dtype, out.shapes.back()
 							));
 						} else {
 							// Fallback: copy to contiguous storage
 							const int64_t n = batch.num_rows();
 							const std::size_t nbytes = static_cast<std::size_t>(n) *
-							                           static_cast<std::size_t>(list_size) *
-							                           (dtype.bits / 8u);
+													   static_cast<std::size_t>(list_size) * (dtype.bits / 8u);
 							out.storage.emplace_back(nbytes, std::byte{0});
 							out.shapes.emplace_back();
 							out.inputs.push_back(make_2d_tensor_from_arrow(
-								out.storage.back().data(), n, list_size, dtype, out.shapes.back()
+									out.storage.back().data(), n, list_size, dtype, out.shapes.back()
 							));
 						}
 					} else {
-						std::cerr << "[ttm/collator] skipping column '"
-						          << field->name() << "' (unsupported type)\n";
+						std::cerr << "[ttm/collator] skipping column '" << field->name() << "' (unsupported type)\n";
 					}
 				}
 
 				return out;
 			}
 
-			[[nodiscard]] const arrow::Schema& output_schema() const override {
-				return *schema_;
-			}
+			[[nodiscard]] const arrow::Schema& output_schema() const override { return *schema_; }
 
 		private:
 			std::shared_ptr<arrow::Schema> schema_;
@@ -207,8 +206,7 @@ namespace ttm::model {
 	} // anonymous namespace
 
 	std::unique_ptr<ICollator> make_default_collator(const arrow::Schema& schema) {
-		return std::make_unique<DefaultCollator>(
-			arrow::schema(schema.fields(), schema.metadata()));
+		return std::make_unique<DefaultCollator>(arrow::schema(schema.fields(), schema.metadata()));
 	}
 
 } // namespace ttm::model

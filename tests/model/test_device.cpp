@@ -83,14 +83,14 @@ TEST_CASE("Device::from_string falls back to CPU for unknown string", "[model][d
 TEST_CASE("Device::to_string serialises CPU device", "[model][device]") {
 	Device d;
 	d.type = kDLCPU;
-	d.id   = 0;
+	d.id = 0;
 	CHECK(d.to_string() == "cpu");
 }
 
 TEST_CASE("Device::to_string serialises CUDA device with id", "[model][device]") {
 	Device d;
 	d.type = kDLCUDA;
-	d.id   = 2;
+	d.id = 2;
 	CHECK(d.to_string() == "cuda:2");
 }
 
@@ -98,7 +98,7 @@ TEST_CASE("Device::to_string serialises Metal device with id 0", "[model][device
 	// id == 0 is omitted from the serialised form (same as 'cpu' not 'cpu:0').
 	Device d;
 	d.type = kDLMetal;
-	d.id   = 0;
+	d.id = 0;
 	CHECK(d.to_string() == "metal");
 }
 
@@ -121,7 +121,7 @@ TEST_CASE("Device round-trips 'cuda:1' through from_string/to_string", "[model][
 TEST_CASE("Device::to_dl returns matching DLDevice", "[model][device]") {
 	Device d;
 	d.type = kDLCUDA;
-	d.id   = 1;
+	d.id = 1;
 	const DLDevice dl = d.to_dl();
 	CHECK(dl.device_type == kDLCUDA);
 	CHECK(dl.device_id == 1);

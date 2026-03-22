@@ -25,12 +25,12 @@
 
 #if defined(__cpp_lib_format) && __cpp_lib_format >= 202110L
 
-#	include <format>
+#include <format>
 
 #else // Fallback: fmtlib
 
-#	include <fmt/format.h>
-#	include <fmt/ostream.h>
+#include <fmt/format.h>
+#include <fmt/ostream.h>
 
 // Inject fmt::format / fmt::print into namespace std so that all existing
 // std::format / std::print code compiles without modification.
@@ -40,8 +40,8 @@ namespace std {
 	using ::fmt::format_to;
 	using ::fmt::format_to_n;
 	using ::fmt::formatted_size;
-	using ::fmt::vformat;
 	using ::fmt::make_format_args;
+	using ::fmt::vformat;
 } // namespace std
 
 #endif // __cpp_lib_format

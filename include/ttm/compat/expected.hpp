@@ -27,23 +27,23 @@
 
 #if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
 
-#	include <expected>
+#include <expected>
 
 #else // Fallback: TartanLlama/expected
 
-#	include <tl/expected.hpp>
+#include <tl/expected.hpp>
 
 // Inject tl::expected into namespace std so that all existing
 // std::expected / std::unexpected code compiles without modification.
 // NOLINTNEXTLINE(cert-dcl58-cpp) -- intentional polyfill injection; guarded by !__cpp_lib_expected
 namespace std {
-	template<class T, class E>
+	template <class T, class E>
 	using expected = ::tl::expected<T, E>;
 
-	template<class E>
+	template <class E>
 	using unexpected = ::tl::unexpected<E>;
 
-	template<class E>
+	template <class E>
 	using bad_expected_access = ::tl::bad_expected_access<E>;
 } // namespace std
 

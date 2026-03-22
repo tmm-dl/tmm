@@ -66,23 +66,23 @@ namespace ttm::plugins {
 		/* -----------------------------------------------------------------
 		 * Required entry points (non-null after successful load)
 		 * -------------------------------------------------------------- */
-		ttm_plugin_info* (*fnGetInfo)()                                        = nullptr;
-		ttm_error        (*fnInit)(const ttm_host_api*, const char*, uint32_t) = nullptr;
+		ttm_plugin_info* (*fnGetInfo)() = nullptr;
+		ttm_error (*fnInit)(const ttm_host_api*, const char*, uint32_t) = nullptr;
 
 		/* -----------------------------------------------------------------
 		 * Optional entry points (nullptr = not exported by this plugin)
 		 * -------------------------------------------------------------- */
-		void    (*fnTeardown)()                                                       = nullptr;
-		void    (*fnFitBegin)(const char*, uint32_t)                                  = nullptr;
-		void    (*fnEpochBegin)(uint32_t, uint32_t)                                   = nullptr;
-		void    (*fnBatchBegin)(uint32_t, uint32_t)                                   = nullptr;
-		float   (*fnLossComputed)(float)                                              = nullptr;
-		void    (*fnBatchEnd)(uint32_t, float, const char*, uint32_t)                 = nullptr;
-		int32_t (*fnEpochEnd)(uint32_t, const char*, uint32_t)                        = nullptr;
-		void    (*fnValidationEnd)(const char*, uint32_t)                             = nullptr;
-		void    (*fnFitEnd)(const char*, uint32_t)                                    = nullptr;
-		void    (*fnOnLog)(uint32_t level, const char* msg, uint32_t len)              = nullptr;
-		void    (*fnOnMetric)(const char* key, uint32_t key_len, float v, int32_t step) = nullptr;
+		void (*fnTeardown)() = nullptr;
+		void (*fnFitBegin)(const char*, uint32_t) = nullptr;
+		void (*fnEpochBegin)(uint32_t, uint32_t) = nullptr;
+		void (*fnBatchBegin)(uint32_t, uint32_t) = nullptr;
+		float (*fnLossComputed)(float) = nullptr;
+		void (*fnBatchEnd)(uint32_t, float, const char*, uint32_t) = nullptr;
+		int32_t (*fnEpochEnd)(uint32_t, const char*, uint32_t) = nullptr;
+		void (*fnValidationEnd)(const char*, uint32_t) = nullptr;
+		void (*fnFitEnd)(const char*, uint32_t) = nullptr;
+		void (*fnOnLog)(uint32_t level, const char* msg, uint32_t len) = nullptr;
+		void (*fnOnMetric)(const char* key, uint32_t key_len, float v, int32_t step) = nullptr;
 
 		/* -----------------------------------------------------------------
 		 * C++ extension objects registered by this plugin
@@ -135,8 +135,8 @@ namespace ttm::plugins {
 	 * @return `{}` on success, or an error string describing which step failed.
 	 */
 	[[nodiscard]] std::expected<void, std::string> native_loader_load(
-			const std::filesystem::path& path, std::string_view config_json,
-			const ttm_host_api& host_api, NativePlugin& plugin
+			const std::filesystem::path& path, std::string_view config_json, const ttm_host_api& host_api,
+			NativePlugin& plugin
 	);
 
 	/**

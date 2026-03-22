@@ -51,20 +51,20 @@ namespace ttm::datasets {
 	 * @brief Semantic kind of a dataset feature column.
 	 */
 	enum class FeatureKind : uint8_t {
-		Scalar,     ///< Simple scalar value (string, int, float, …).
-		Sequence,   ///< Repeated nested feature (list/array).
+		Scalar,		///< Simple scalar value (string, int, float, …).
+		Sequence,	///< Repeated nested feature (list/array).
 		ClassLabel, ///< Categorical label with a fixed set of class names.
-		Image,      ///< Raw image bytes.
-		Audio,      ///< Raw audio data.
-		Unknown,    ///< Unrecognised or complex dtype.
+		Image,		///< Raw image bytes.
+		Audio,		///< Raw audio data.
+		Unknown,	///< Unrecognised or complex dtype.
 	};
 
 	/**
 	 * @brief Metadata for a single feature column in the dataset schema.
 	 */
 	struct DatasetFeature {
-		std::string name;    ///< Column name as declared in the card.
-		std::string dtype;   ///< Raw dtype string (e.g. "string", "int64", "float32").
+		std::string name;  ///< Column name as declared in the card.
+		std::string dtype; ///< Raw dtype string (e.g. "string", "int64", "float32").
 		FeatureKind kind = FeatureKind::Unknown;
 
 		/** Class names for ClassLabel features; empty for other kinds. */
@@ -82,10 +82,11 @@ namespace ttm::datasets {
 	 * @brief Metadata for one data split (train / validation / test / …).
 	 */
 	struct DatasetSplit {
-		std::string name;                 ///< Split name, e.g. "train".
-		std::string path;                 ///< Explicit file path relative to repo root (from configs.data_files); empty if not specified.
-		int64_t     num_examples = -1;    ///< Row count, or -1 if unknown.
-		int64_t     num_bytes    = -1;    ///< Uncompressed size in bytes, or -1 if unknown.
+		std::string name; ///< Split name, e.g. "train".
+		std::string
+				path; ///< Explicit file path relative to repo root (from configs.data_files); empty if not specified.
+		int64_t num_examples = -1; ///< Row count, or -1 if unknown.
+		int64_t num_bytes = -1;	   ///< Uncompressed size in bytes, or -1 if unknown.
 	};
 
 	/* =========================================================================
@@ -96,11 +97,11 @@ namespace ttm::datasets {
 	 * @brief Aggregated metadata extracted from a HuggingFace Dataset Card.
 	 */
 	struct DatasetInfo {
-		std::string pretty_name;   ///< Human-readable dataset name (optional).
-		std::string config_name;   ///< Configuration name (e.g. "default", "en").
+		std::string pretty_name; ///< Human-readable dataset name (optional).
+		std::string config_name; ///< Configuration name (e.g. "default", "en").
 
 		std::vector<DatasetFeature> features; ///< Schema columns.
-		std::vector<DatasetSplit>   splits;   ///< Available data splits.
+		std::vector<DatasetSplit> splits;	  ///< Available data splits.
 
 		/** Task categories declared in the card (e.g. "text-classification"). */
 		std::vector<std::string> task_categories;

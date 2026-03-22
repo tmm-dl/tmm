@@ -6,11 +6,11 @@
 
 #pragma once
 
-#include <ttm/plugins/abi.h>
-#include <ttm/trainer/interfaces.hpp>
+#include <ttm/compat/expected.hpp>
 #include <ttm/model/device.hpp>
 #include <ttm/model/params.hpp>
-#include <ttm/compat/expected.hpp>
+#include <ttm/plugins/abi.h>
+#include <ttm/trainer/interfaces.hpp>
 
 #include <memory>
 #include <string>
@@ -35,13 +35,13 @@ namespace ttm::model {
 	 * @ingroup ttm_model
 	 */
 	struct ModelInfo {
-		std::string name;                ///< Human-readable model name.
-		std::string arch;                ///< Architecture tag, e.g. "GPT2", "ResNet50".
-		uint64_t    num_parameters  = 0; ///< Total parameter count.
-		uint64_t    num_trainable   = 0; ///< Number of trainable parameters.
-		uint64_t    bytes_on_device = 0; ///< Memory footprint (params + grads) in bytes.
-		std::string input_schema_json;   ///< JSON Arrow schema for expected model inputs.
-		Device      device;              ///< Device the model lives on.
+		std::string name;			   ///< Human-readable model name.
+		std::string arch;			   ///< Architecture tag, e.g. "GPT2", "ResNet50".
+		uint64_t num_parameters = 0;   ///< Total parameter count.
+		uint64_t num_trainable = 0;	   ///< Number of trainable parameters.
+		uint64_t bytes_on_device = 0;  ///< Memory footprint (params + grads) in bytes.
+		std::string input_schema_json; ///< JSON Arrow schema for expected model inputs.
+		Device device;				   ///< Device the model lives on.
 	};
 
 	/* =========================================================================

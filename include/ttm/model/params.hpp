@@ -29,10 +29,10 @@ namespace ttm::model {
 	 * @ingroup ttm_model
 	 */
 	struct ParamBuffer {
-		std::string name;          ///< Parameter name, e.g. `"transformer.h.0.attn.weight"`.
-		DLTensor    tensor{};      ///< Parameter values tensor (host-allocated, device-resident).
-		DLTensor    grad{};        ///< Gradient tensor (same shape/dtype as tensor, zeroed initially).
-		bool        trainable = true; ///< If false, zero_grad() skips this buffer and the optimizer ignores it.
+		std::string name;	   ///< Parameter name, e.g. `"transformer.h.0.attn.weight"`.
+		DLTensor tensor{};	   ///< Parameter values tensor (host-allocated, device-resident).
+		DLTensor grad{};	   ///< Gradient tensor (same shape/dtype as tensor, zeroed initially).
+		bool trainable = true; ///< If false, zero_grad() skips this buffer and the optimizer ignores it.
 	};
 
 } // namespace ttm::model

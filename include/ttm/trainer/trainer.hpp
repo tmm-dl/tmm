@@ -29,12 +29,12 @@
 
 #pragma once
 
+#include <ttm/compat/expected.hpp>
 #include <ttm/conf/config.hpp>
 #include <ttm/datasets/dataset_loader.hpp>
 #include <ttm/plugins/plugin_manager.hpp>
 #include <ttm/trainer/callback.hpp>
 #include <ttm/trainer/interfaces.hpp>
-#include <ttm/compat/expected.hpp>
 
 #include <functional>
 #include <memory>
@@ -50,9 +50,7 @@ namespace ttm::trainer {
 	 * Called once per training epoch (and once per validation pass).  The
 	 * returned iterator is consumed fully and then discarded.
 	 */
-	using DatasetFactory = std::function<
-		std::expected<std::unique_ptr<ttm::datasets::DatasetIterator>, std::string>()
-	>;
+	using DatasetFactory = std::function<std::expected<std::unique_ptr<ttm::datasets::DatasetIterator>, std::string>()>;
 
 	/**
 	 * @brief Orchestrates the training loop over multiple epochs.
@@ -74,21 +72,17 @@ namespace ttm::trainer {
 		 * @param model        Owning pointer to the model implementation.
 		 * @param train        Factory that produces a fresh training-split iterator.
 		 */
-		Trainer(
-			conf::TrainingConfig        config,
-			plugins::PluginManager&     plugins,
-			std::unique_ptr<IModel>     model,
-			DatasetFactory              train
-		);
+		Trainer(conf::TrainingConfig config, plugins::PluginManager& plugins, std::unique_ptr<IModel> model,
+				DatasetFactory train);
 
-		Trainer(Trainer&&)            = default;
+		Trainer(Trainer&&) = default;
 		Trainer& operator=(Trainer&&) = default;
-		Trainer(const Trainer&)       = delete;
+		Trainer(const Trainer&) = delete;
 		Trainer& operator=(const Trainer&) = delete;
-		~Trainer()                    = default;
+		~Trainer() = default;
 
 		/// Attach an optimizer.  Without one the model is expected to update itself.
-		Trainer& optimizer(std::unique_ptr<IOptimizer>   opt);
+		Trainer& optimizer(std::unique_ptr<IOptimizer> opt);
 
 		/// Attach an LR scheduler.  Without one the optimizer's initial LR is kept constant.
 		Trainer& scheduler(std::unique_ptr<ILRScheduler> sched);
@@ -124,26 +118,25 @@ namespace ttm::trainer {
 	private:
 		[[nodiscard]] std::expected<float, std::string> run_validation();
 
-		[[nodiscard]] std::string build_fit_begin_json()                              const;
-		[[nodiscard]] std::string build_batch_json(int64_t epoch, int64_t step,
-		                                            float loss, float lr)             const;
-		[[nodiscard]] std::string build_epoch_json(const EpochMetrics& m)             const;
+		[[nodiscard]] std::string build_fit_begin_json() const;
+		[[nodiscard]] std::string build_batch_json(int64_t epoch, int64_t step, float loss, float lr) const;
+		[[nodiscard]] std::string build_epoch_json(const EpochMetrics& m) const;
 
-		conf::TrainingConfig          config_;
-		plugins::PluginManager&       plugins_;
-		std::unique_ptr<IModel>       model_;
-		DatasetFactory                train_factory_;
-		DatasetFactory                val_factory_;
-		std::unique_ptr<IOptimizer>   optimizer_;
+		conf::TrainingConfig config_;
+		plugins::PluginManager& plugins_;
+		std::unique_ptr<IModel> model_;
+		DatasetFactory train_factory_;
+		DatasetFactory val_factory_;
+		std::unique_ptr<IOptimizer> optimizer_;
 		std::unique_ptr<ILRScheduler> scheduler_;
 
 		/** @brief Monotonically increasing batch-level step counter.
 		 *  Updated by fit(); read by log() for metric step tagging. */
 		int64_t globalStep_ = 0;
 
-		std::vector<std::unique_ptr<Callback>>  callbacks_;
+		std::vector<std::unique_ptr<Callback>> callbacks_;
 		/** @brief Snapshot of the latest metric values; read by CallbackMetrics. */
-		std::unordered_map<std::string, float>  currentMetrics_;
+		std::unordered_map<std::string, float> currentMetrics_;
 		/** @brief Set to true after config plugins and callbacks have been applied. */
 		bool configApplied_ = false;
 		/** @brief If set, called between batches; non-null return of true triggers stop. */

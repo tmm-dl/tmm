@@ -96,8 +96,8 @@ namespace ttm::plugins {
 		wasm_function_inst_t fnTeardown = nullptr;		///< @see ttm_plugin_teardown
 
 		/* -----------------------------------------------------------------
-     	 * C++ extension objects registered by this plugin
-     	 * -------------------------------------------------------------- */
+		 * C++ extension objects registered by this plugin
+		 * -------------------------------------------------------------- */
 
 		/**
 		 * @brief Dataset sources registered by this plugin.

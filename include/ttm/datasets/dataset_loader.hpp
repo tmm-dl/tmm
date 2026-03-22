@@ -55,13 +55,13 @@ namespace ttm::datasets {
 	 */
 	class DatasetIterator {
 	public:
-		DatasetIterator()          = default;
+		DatasetIterator() = default;
 		virtual ~DatasetIterator() = default;
 
-		DatasetIterator(const DatasetIterator&)            = delete;
+		DatasetIterator(const DatasetIterator&) = delete;
 		DatasetIterator& operator=(const DatasetIterator&) = delete;
-		DatasetIterator(DatasetIterator&&)                 = delete;
-		DatasetIterator& operator=(DatasetIterator&&)      = delete;
+		DatasetIterator(DatasetIterator&&) = delete;
+		DatasetIterator& operator=(DatasetIterator&&) = delete;
 
 		/**
 		 * @brief Advance to the next batch.
@@ -97,11 +97,9 @@ namespace ttm::datasets {
 	 * @return A DatasetIterator on success, or an error string on failure.
 	 */
 	[[nodiscard]] std::expected<std::unique_ptr<DatasetIterator>, std::string> load_dataset(
-			ttm::plugins::IDatasetSource& source,
-			std::string_view uri,
-			std::string_view split      = "train",
-			std::string_view config     = "",
-			int64_t          batch_size = 0   ///< 0 = return full row groups as-is
+			ttm::plugins::IDatasetSource& source, std::string_view uri, std::string_view split = "train",
+			std::string_view config = "",
+			int64_t batch_size = 0 ///< 0 = return full row groups as-is
 	);
 
 } // namespace ttm::datasets

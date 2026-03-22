@@ -27,8 +27,9 @@ bool httpDownload(const std::string& url, const std::filesystem::path& dest, cha
 
 	std::ofstream ofs(dest, std::ios::binary);
 	if (!ofs) {
-		std::snprintf(err, err_cap, "httpDownload: cannot create '%s': %s",
-		              dest.string().c_str(), std::strerror(errno));
+		std::snprintf(
+				err, err_cap, "httpDownload: cannot create '%s': %s", dest.string().c_str(), std::strerror(errno)
+		);
 		return false;
 	}
 

@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <ttm/compat/format.hpp>
 #include <fstream>
 #include <ios>
 #include <iostream>
@@ -27,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <ttm/compat/expected.hpp>
+#include <ttm/compat/format.hpp>
 #include <vector>
 
 #include <lib_export.h>
@@ -40,7 +40,8 @@ namespace ttm::plugins {
 	 * ====================================================================== */
 
 	namespace {
-		// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- module-level refcount is intentionally mutable; no alternative without dynamic allocation or thread_local
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- module-level refcount is intentionally
+		// mutable; no alternative without dynamic allocation or thread_local
 		std::atomic<int> g_wamr_refcount{0};
 	} // namespace
 
@@ -70,7 +71,8 @@ namespace ttm::plugins {
 	 * ====================================================================== */
 
 	std::expected<void, std::string>
-	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- out_wasm_ptr and out_len are output parameters with distinct semantics (WASM address vs byte count); names make this clear
+	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- out_wasm_ptr and out_len are output parameters with
+	// distinct semantics (WASM address vs byte count); names make this clear
 	wasm_push_string(wasm_module_inst_t inst, std::string_view str, uint32_t& out_wasm_ptr, uint32_t& out_len) {
 		const auto len = static_cast<uint32_t>(str.size());
 		void* native_ptr = nullptr;
@@ -120,7 +122,8 @@ namespace ttm::plugins {
 		static void call_indirect_void(wasm_exec_env_t env, uint32_t elem_idx, std::array<uint32_t, N>& argv) {
 			wasm_runtime_call_indirect(
 					env, elem_idx, static_cast<uint32_t>(N), argv.data()
-			); // NOLINT(readability-implicit-bool-conversion) -- WAMR bool-like return ignored; errors surfaced via exceptions / return values
+			); // NOLINT(readability-implicit-bool-conversion) -- WAMR bool-like return ignored; errors surfaced via
+			   // exceptions / return values
 		}
 
 		/**
@@ -169,7 +172,8 @@ namespace ttm::plugins {
 			if (arr == nullptr) {
 				return result;
 			}
-			// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- null-terminated WASM array; bounds are checked by the null sentinel
+			// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- null-terminated WASM array; bounds are
+			// checked by the null sentinel
 			for (const uint32_t* p = arr; *p != 0; ++p) {
 				result.push_back(read_wasm_cstr(inst, *p));
 			}
@@ -469,11 +473,13 @@ namespace ttm::plugins {
 		}
 
 		/* ---------- log --------------------------------------------------------- */
-		// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- signature is fixed by WAMR NativeSymbol ABI; parameter names clearly distinguish them
+		// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- signature is fixed by WAMR NativeSymbol ABI;
+		// parameter names clearly distinguish them
 		void host_log(wasm_exec_env_t env, uint32_t level, uint32_t msg_ptr, uint32_t msg_len) {
 			auto* inst = wasm_runtime_get_module_inst(env);
 			const auto* msg = static_cast<const char*>(wasm_runtime_addr_app_to_native(inst, msg_ptr));
-			if (msg == nullptr) return;
+			if (msg == nullptr)
+				return;
 			const auto* p = get_plugin_ud(env);
 			if (p != nullptr && p->persistentApi.log != nullptr) {
 				p->persistentApi.log(p->persistentApi.ctx, static_cast<ttm_log_level>(level), msg, msg_len);
@@ -484,11 +490,13 @@ namespace ttm::plugins {
 		/* Route the metric back through persistentApi.log_metric (→ s_log_metric →
 		 * PluginManager::emit_metric).  This avoids a direct dependency on the full
 		 * PluginManager type, which is only forward-declared in wasm_loader.hpp. */
-		// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- fixed WAMR signature; all parameters have distinct types and clear names
+		// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- fixed WAMR signature; all parameters have distinct
+		// types and clear names
 		void host_log_metric(wasm_exec_env_t env, uint32_t key_ptr, uint32_t key_len, float value, int32_t step) {
 			auto* inst = wasm_runtime_get_module_inst(env);
 			const auto* key = static_cast<const char*>(wasm_runtime_addr_app_to_native(inst, key_ptr));
-			if (key == nullptr || key_len == 0) return;
+			if (key == nullptr || key_len == 0)
+				return;
 			const auto* p = get_plugin_ud(env);
 			if (p != nullptr && p->persistentApi.log_metric != nullptr) {
 				p->persistentApi.log_metric(p->persistentApi.ctx, key, key_len, value, step);
@@ -503,14 +511,19 @@ namespace ttm::plugins {
 			uint32_t width = 80, height = 24;
 #if defined(TIOCGWINSZ)
 			struct winsize ws{};
-			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg) -- TIOCGWINSZ ioctl is the standard POSIX way to get terminal size; no safer alternative
+			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg) -- TIOCGWINSZ ioctl is the standard POSIX
+			// way to get terminal size; no safer alternative
 			if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
-				if (ws.ws_col > 0) width  = static_cast<uint32_t>(ws.ws_col);
-				if (ws.ws_row > 0) height = static_cast<uint32_t>(ws.ws_row);
+				if (ws.ws_col > 0)
+					width = static_cast<uint32_t>(ws.ws_col);
+				if (ws.ws_row > 0)
+					height = static_cast<uint32_t>(ws.ws_row);
 			}
 #endif
-			if (w != nullptr) *w = width;
-			if (h != nullptr) *h = height;
+			if (w != nullptr)
+				*w = width;
+			if (h != nullptr)
+				*h = height;
 		}
 
 		/* ---------- alloc ------------------------------------------------------- */
@@ -529,26 +542,31 @@ namespace ttm::plugins {
 		/* ---------- register_source -------------------------------------------- */
 		int32_t host_register_source(wasm_exec_env_t env, uint32_t schemes_ptr, uint32_t vtable_ptr) {
 			auto* inst = wasm_runtime_get_module_inst(env);
-			if (schemes_ptr == 0 || vtable_ptr == 0) return TTM_ERR_ARGS;
+			if (schemes_ptr == 0 || vtable_ptr == 0)
+				return TTM_ERR_ARGS;
 
 			/* Read scheme list from WASM memory */
 			auto schemeList = read_wasm_string_array(inst, schemes_ptr);
-			if (schemeList.empty()) return TTM_ERR_ARGS;
+			if (schemeList.empty())
+				return TTM_ERR_ARGS;
 
 			/* Read vtable function-table indices — [open_idx, read_idx, seek_idx, close_idx] */
 			const auto* vtNative = static_cast<const uint32_t*>(wasm_runtime_addr_app_to_native(inst, vtable_ptr));
-			if (vtNative == nullptr) return TTM_ERR_ARGS;
+			if (vtNative == nullptr)
+				return TTM_ERR_ARGS;
 			uint32_t openIdx = 0, readIdx = 0, seekIdx = 0, closeIdx = 0;
-			std::memcpy(&openIdx,  vtNative + 0, sizeof(uint32_t));
-			std::memcpy(&readIdx,  vtNative + 1, sizeof(uint32_t));
-			std::memcpy(&seekIdx,  vtNative + 2, sizeof(uint32_t));
+			std::memcpy(&openIdx, vtNative + 0, sizeof(uint32_t));
+			std::memcpy(&readIdx, vtNative + 1, sizeof(uint32_t));
+			std::memcpy(&seekIdx, vtNative + 2, sizeof(uint32_t));
 			std::memcpy(&closeIdx, vtNative + 3, sizeof(uint32_t));
 
 			/* Registration context is valid only during ttm_plugin_init */
 			const auto* p = get_plugin_ud(env);
-			if (p == nullptr) return TTM_ERR_ARGS;
+			if (p == nullptr)
+				return TTM_ERR_ARGS;
 			auto* regCtx = static_cast<PluginRegistrationCtx*>(p->persistentApi.ctx);
-			if (regCtx == nullptr || !regCtx->attach_source) return TTM_ERR_ARGS;
+			if (regCtx == nullptr || !regCtx->attach_source)
+				return TTM_ERR_ARGS;
 
 			auto adapter = std::make_unique<WasmSourceAdapter>(
 					std::move(schemeList), env, inst, openIdx, readIdx, seekIdx, closeIdx
@@ -560,51 +578,57 @@ namespace ttm::plugins {
 		/* ---------- register_task ---------------------------------------------- */
 		int32_t host_register_task(wasm_exec_env_t env, uint32_t name_ptr, uint32_t vtable_ptr) {
 			auto* inst = wasm_runtime_get_module_inst(env);
-			if (name_ptr == 0 || vtable_ptr == 0) return TTM_ERR_ARGS;
+			if (name_ptr == 0 || vtable_ptr == 0)
+				return TTM_ERR_ARGS;
 
 			/* Read vtable function-table indices (6 × uint32_t) */
 			const auto* vtNative = static_cast<const uint32_t*>(wasm_runtime_addr_app_to_native(inst, vtable_ptr));
-			if (vtNative == nullptr) return TTM_ERR_ARGS;
+			if (vtNative == nullptr)
+				return TTM_ERR_ARGS;
 			uint32_t nameFn = 0, aliasesFn = 0, inputsFn = 0, labelFn = 0, metricsFn = 0, lossFn = 0;
-			std::memcpy(&nameFn,    vtNative + 0, sizeof(uint32_t));
+			std::memcpy(&nameFn, vtNative + 0, sizeof(uint32_t));
 			std::memcpy(&aliasesFn, vtNative + 1, sizeof(uint32_t));
-			std::memcpy(&inputsFn,  vtNative + 2, sizeof(uint32_t));
-			std::memcpy(&labelFn,   vtNative + 3, sizeof(uint32_t));
+			std::memcpy(&inputsFn, vtNative + 2, sizeof(uint32_t));
+			std::memcpy(&labelFn, vtNative + 3, sizeof(uint32_t));
 			std::memcpy(&metricsFn, vtNative + 4, sizeof(uint32_t));
-			std::memcpy(&lossFn,    vtNative + 5, sizeof(uint32_t));
+			std::memcpy(&lossFn, vtNative + 5, sizeof(uint32_t));
 
 			const auto* p = get_plugin_ud(env);
-			if (p == nullptr) return TTM_ERR_ARGS;
+			if (p == nullptr)
+				return TTM_ERR_ARGS;
 			auto* regCtx = static_cast<PluginRegistrationCtx*>(p->persistentApi.ctx);
-			if (regCtx == nullptr || !regCtx->attach_task) return TTM_ERR_ARGS;
+			if (regCtx == nullptr || !regCtx->attach_task)
+				return TTM_ERR_ARGS;
 
-			auto adapter = std::make_unique<WasmTaskAdapter>(
-					env, inst, nameFn, aliasesFn, inputsFn, labelFn, metricsFn
-			);
-			if (adapter->name().empty()) return TTM_ERR_ARGS;
+			auto adapter =
+					std::make_unique<WasmTaskAdapter>(env, inst, nameFn, aliasesFn, inputsFn, labelFn, metricsFn);
+			if (adapter->name().empty())
+				return TTM_ERR_ARGS;
 
 			regCtx->attach_task(std::move(adapter));
 			return TTM_OK;
 		}
 
 		/* ---------- NativeSymbol table ----------------------------------------- */
-		// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables) -- WAMR requires a mutable NativeSymbol[] passed to wasm_runtime_register_natives
+		// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
+		// -- WAMR requires a mutable NativeSymbol[] passed to wasm_runtime_register_natives
 		NativeSymbol ttm_native_symbols[] = {
 				/* { "export_name", func_ptr, "signature", attachment } */
-				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- WAMR NativeSymbol API requires void* function pointers; no safer alternative
-				{"ttm_log",             reinterpret_cast<void*>(host_log),            "(iii)",  nullptr},
+				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- WAMR NativeSymbol API requires void*
+				// function pointers; no safer alternative
+				{"ttm_log", reinterpret_cast<void*>(host_log), "(iii)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_log_metric",      reinterpret_cast<void*>(host_log_metric),     "(iifi)", nullptr},
+				{"ttm_log_metric", reinterpret_cast<void*>(host_log_metric), "(iifi)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_terminal_size",   reinterpret_cast<void*>(host_terminal_size),  "(ii)",   nullptr},
+				{"ttm_terminal_size", reinterpret_cast<void*>(host_terminal_size), "(ii)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_alloc",           reinterpret_cast<void*>(host_alloc),          "(i)i",   nullptr},
+				{"ttm_alloc", reinterpret_cast<void*>(host_alloc), "(i)i", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_free",            reinterpret_cast<void*>(host_free),           "(i)",    nullptr},
+				{"ttm_free", reinterpret_cast<void*>(host_free), "(i)", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_register_source", reinterpret_cast<void*>(host_register_source),"(ii)i",  nullptr},
+				{"ttm_register_source", reinterpret_cast<void*>(host_register_source), "(ii)i", nullptr},
 				// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- see above
-				{"ttm_register_task",   reinterpret_cast<void*>(host_register_task),  "(ii)i",  nullptr},
+				{"ttm_register_task", reinterpret_cast<void*>(host_register_task), "(ii)i", nullptr},
 		};
 
 	} // anonymous namespace
@@ -625,7 +649,8 @@ namespace ttm::plugins {
 		std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
 		/* 2. Register host symbols ------------------------------------------- */
-		// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay,cppcoreguidelines-pro-bounds-constant-array-index) -- WAMR API requires array-to-pointer decay for NativeSymbol table
+		// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay,cppcoreguidelines-pro-bounds-constant-array-index)
+		// -- WAMR API requires array-to-pointer decay for NativeSymbol table
 		if (!wasm_runtime_register_natives( // NOLINT(readability-implicit-bool-conversion) -- WAMR API returns bool-like int
 					"ttm", ttm_native_symbols, sizeof(ttm_native_symbols) / sizeof(ttm_native_symbols[0]) // NOLINT(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
 				)) {
@@ -642,8 +667,8 @@ namespace ttm::plugins {
 		}
 
 		/* 4. Instantiate ----------------------------------------------------- */
-		constexpr uint32_t STACK_SIZE = 512 * 1024;          /*  512 KB */
-		constexpr uint32_t HEAP_SIZE  = 32 * 1024 * 1024;   /* 32 MB — FTXUI 6.x needs room for std::deque/unordered_map */
+		constexpr uint32_t STACK_SIZE = 512 * 1024;		 /*  512 KB */
+		constexpr uint32_t HEAP_SIZE = 32 * 1024 * 1024; /* 32 MB — FTXUI 6.x needs room for std::deque/unordered_map */
 		plugin.inst = wasm_runtime_instantiate(plugin.module, STACK_SIZE, HEAP_SIZE, errorbuf.data(), errorbuf.size());
 		if (plugin.inst == nullptr) {
 			wasm_runtime_unload(plugin.module);
@@ -759,17 +784,17 @@ namespace ttm::plugins {
 		auto lookup = [&](const char* name) -> wasm_function_inst_t {
 			return wasm_runtime_lookup_function(plugin.inst, name);
 		};
-		plugin.fnFitBegin      = lookup("ttm_on_fit_begin");
-		plugin.fnEpochBegin    = lookup("ttm_on_epoch_begin");
-		plugin.fnBatchBegin    = lookup("ttm_on_batch_begin");
-		plugin.fnLossComputed  = lookup("ttm_on_loss_computed");
-		plugin.fnBatchEnd      = lookup("ttm_on_batch_end");
-		plugin.fnEpochEnd      = lookup("ttm_on_epoch_end");
+		plugin.fnFitBegin = lookup("ttm_on_fit_begin");
+		plugin.fnEpochBegin = lookup("ttm_on_epoch_begin");
+		plugin.fnBatchBegin = lookup("ttm_on_batch_begin");
+		plugin.fnLossComputed = lookup("ttm_on_loss_computed");
+		plugin.fnBatchEnd = lookup("ttm_on_batch_end");
+		plugin.fnEpochEnd = lookup("ttm_on_epoch_end");
 		plugin.fnValidationEnd = lookup("ttm_on_validation_end");
-		plugin.fnFitEnd        = lookup("ttm_on_fit_end");
-		plugin.fnOnLog         = lookup("ttm_on_log");
-		plugin.fnOnMetric      = lookup("ttm_on_metric");
-		plugin.fnTeardown      = lookup("ttm_plugin_teardown");
+		plugin.fnFitEnd = lookup("ttm_on_fit_end");
+		plugin.fnOnLog = lookup("ttm_on_log");
+		plugin.fnOnMetric = lookup("ttm_on_metric");
+		plugin.fnTeardown = lookup("ttm_plugin_teardown");
 
 		return {};
 	}

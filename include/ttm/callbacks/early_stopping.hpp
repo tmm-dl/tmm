@@ -40,82 +40,69 @@
 
 namespace ttm::callbacks {
 
-/**
- * @brief Stop training when a monitored metric stops improving.
- */
-class EarlyStopping final : public ttm::trainer::Callback {
-public:
-	/** @brief Whether lower or higher metric values represent improvement. */
-	enum class Mode { min, max };
-
 	/**
-	 * @param monitor    Name of the metric to watch (e.g. @c "val_loss").
-	 * @param patience   Number of epochs with no improvement before stopping.
-	 * @param mode       @c Mode::min (default) to minimize, @c Mode::max to maximize.
-	 * @param min_delta  Minimum absolute change that counts as an improvement.
+	 * @brief Stop training when a monitored metric stops improving.
 	 */
-	explicit EarlyStopping(
-		std::string monitor,
-		int         patience,
-		Mode        mode      = Mode::min,
-		float       min_delta = 0.0f
-	)
-		: monitor_(std::move(monitor))
-		, patience_(patience)
-		, mode_(mode)
-		, min_delta_(min_delta)
-	{}
+	class EarlyStopping final : public ttm::trainer::Callback {
+	public:
+		/** @brief Whether lower or higher metric values represent improvement. */
+		enum class Mode { min, max };
 
-	void on_fit_begin(
-		ttm::trainer::Trainer& /*trainer*/,
-		const ttm::trainer::CallbackMetrics& /*metrics*/
-	) override {
-		best_    = (mode_ == Mode::min)
-		             ? std::numeric_limits<float>::infinity()
-		             : -std::numeric_limits<float>::infinity();
-		wait_    = 0;
-		stopped_ = false;
-	}
+		/**
+		 * @param monitor    Name of the metric to watch (e.g. @c "val_loss").
+		 * @param patience   Number of epochs with no improvement before stopping.
+		 * @param mode       @c Mode::min (default) to minimize, @c Mode::max to maximize.
+		 * @param min_delta  Minimum absolute change that counts as an improvement.
+		 */
+		explicit EarlyStopping(std::string monitor, int patience, Mode mode = Mode::min, float min_delta = 0.0f)
+				: monitor_(std::move(monitor)), patience_(patience), mode_(mode), min_delta_(min_delta) {}
 
-	bool on_epoch_end(
-		ttm::trainer::Trainer&                trainer,
-		int64_t                               /*epoch*/,
-		const ttm::trainer::CallbackMetrics&  metrics
-	) override {
-		if (stopped_) return true;
+		void on_fit_begin(
+				ttm::trainer::Trainer& /*trainer*/, const ttm::trainer::CallbackMetrics& /*metrics*/
+		) override {
+			best_ = (mode_ == Mode::min) ? std::numeric_limits<float>::infinity()
+										 : -std::numeric_limits<float>::infinity();
+			wait_ = 0;
+			stopped_ = false;
+		}
 
-		if (!metrics.has(monitor_)) {
-			trainer.log("early_stopping_warn", 0.0f); // no-op sentinel; real warning via emit_log
+		bool on_epoch_end(
+				ttm::trainer::Trainer& trainer, int64_t /*epoch*/, const ttm::trainer::CallbackMetrics& metrics
+		) override {
+			if (stopped_)
+				return true;
+
+			if (!metrics.has(monitor_)) {
+				trainer.log("early_stopping_warn", 0.0f); // no-op sentinel; real warning via emit_log
+				return false;
+			}
+
+			const float current = metrics.get(monitor_);
+			const bool improved =
+					(mode_ == Mode::min) ? (current < best_ - min_delta_) : (current > best_ + min_delta_);
+
+			if (improved) {
+				best_ = current;
+				wait_ = 0;
+			} else {
+				++wait_;
+				if (wait_ >= patience_) {
+					stopped_ = true;
+					return true;
+				}
+			}
 			return false;
 		}
 
-		const float current = metrics.get(monitor_);
-		const bool  improved = (mode_ == Mode::min)
-			? (current < best_ - min_delta_)
-			: (current > best_ + min_delta_);
+	private:
+		std::string monitor_;
+		int patience_;
+		Mode mode_;
+		float min_delta_;
 
-		if (improved) {
-			best_ = current;
-			wait_ = 0;
-		} else {
-			++wait_;
-			if (wait_ >= patience_) {
-				stopped_ = true;
-				return true;
-			}
-		}
-		return false;
-	}
-
-private:
-	std::string monitor_;
-	int         patience_;
-	Mode        mode_;
-	float       min_delta_;
-
-	float best_    = std::numeric_limits<float>::infinity();
-	int   wait_    = 0;
-	bool  stopped_ = false;
-};
+		float best_ = std::numeric_limits<float>::infinity();
+		int wait_ = 0;
+		bool stopped_ = false;
+	};
 
 } // namespace ttm::callbacks

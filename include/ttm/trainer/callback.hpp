@@ -78,18 +78,13 @@ namespace ttm::trainer {
 		 * @param fallback  Returned when the key is absent. Defaults to NaN.
 		 * @return Current value, or @p fallback if the metric has not been logged.
 		 */
-		[[nodiscard]] float get(
-				std::string_view key,
-				float            fallback = std::numeric_limits<float>::quiet_NaN()
-		) const {
+		[[nodiscard]] float get(std::string_view key, float fallback = std::numeric_limits<float>::quiet_NaN()) const {
 			const auto it = m_.find(std::string(key));
 			return (it != m_.end()) ? it->second : fallback;
 		}
 
 		/** @brief Return @c true if the named metric has been logged at least once. */
-		[[nodiscard]] bool has(std::string_view key) const {
-			return m_.contains(std::string(key));
-		}
+		[[nodiscard]] bool has(std::string_view key) const { return m_.contains(std::string(key)); }
 
 		/** @brief Direct access to the underlying map for iteration. */
 		[[nodiscard]] const std::unordered_map<std::string, float>& all() const { return m_; }
@@ -122,30 +117,26 @@ namespace ttm::trainer {
 	 */
 	class Callback {
 	public:
-		Callback()                             = default;
-		virtual ~Callback()                    = default;
-		Callback(const Callback&)              = delete;
-		Callback& operator=(const Callback&)   = delete;
-		Callback(Callback&&)                   = default;
-		Callback& operator=(Callback&&)        = default;
+		Callback() = default;
+		virtual ~Callback() = default;
+		Callback(const Callback&) = delete;
+		Callback& operator=(const Callback&) = delete;
+		Callback(Callback&&) = default;
+		Callback& operator=(Callback&&) = default;
 
 		/**
 		 * @brief Called once before the training loop begins.
 		 * @param trainer  The owning Trainer (may call @c trainer.log()).
 		 * @param metrics  Current metric snapshot (usually empty at this point).
 		 */
-		virtual void on_fit_begin([[maybe_unused]] Trainer& trainer,
-		                          [[maybe_unused]] const CallbackMetrics& metrics) {
-		}
+		virtual void on_fit_begin([[maybe_unused]] Trainer& trainer, [[maybe_unused]] const CallbackMetrics& metrics) {}
 
 		/**
 		 * @brief Called once after the training loop finishes (or is stopped early).
 		 * @param trainer  The owning Trainer.
 		 * @param metrics  Final metric snapshot.
 		 */
-		virtual void on_fit_end([[maybe_unused]] Trainer& trainer,
-		                        [[maybe_unused]] const CallbackMetrics& metrics) {
-		}
+		virtual void on_fit_end([[maybe_unused]] Trainer& trainer, [[maybe_unused]] const CallbackMetrics& metrics) {}
 
 		/**
 		 * @brief Called at the start of each epoch.
@@ -153,10 +144,9 @@ namespace ttm::trainer {
 		 * @param epoch         1-based epoch number.
 		 * @param total_epochs  Total planned epochs.
 		 */
-		virtual void on_epoch_begin([[maybe_unused]] Trainer& trainer,
-		                            [[maybe_unused]] int64_t epoch,
-		                            [[maybe_unused]] int64_t total_epochs) {
-		}
+		virtual void on_epoch_begin(
+				[[maybe_unused]] Trainer& trainer, [[maybe_unused]] int64_t epoch, [[maybe_unused]] int64_t total_epochs
+		) {}
 
 		/**
 		 * @brief Called at the end of each epoch.
@@ -169,9 +159,10 @@ namespace ttm::trainer {
 		 * @note All callbacks are invoked even if an earlier one returns @c true,
 		 *       mirroring the existing plugin behaviour.
 		 */
-		virtual bool on_epoch_end([[maybe_unused]] Trainer& trainer,
-		                          [[maybe_unused]] int64_t epoch,
-		                          [[maybe_unused]] const CallbackMetrics& metrics) {
+		virtual bool on_epoch_end(
+				[[maybe_unused]] Trainer& trainer, [[maybe_unused]] int64_t epoch,
+				[[maybe_unused]] const CallbackMetrics& metrics
+		) {
 			return false;
 		}
 
@@ -180,9 +171,8 @@ namespace ttm::trainer {
 		 * @param trainer  The owning Trainer.
 		 * @param metrics  Metric snapshot including the freshly computed @c "val_loss".
 		 */
-		virtual void on_validation_end([[maybe_unused]] Trainer& trainer,
-		                               [[maybe_unused]] const CallbackMetrics& metrics) {
-		}
+		virtual void
+		on_validation_end([[maybe_unused]] Trainer& trainer, [[maybe_unused]] const CallbackMetrics& metrics) {}
 
 		/**
 		 * @brief Called by @c Trainer::log(key, value) for every scalar metric.
@@ -197,11 +187,9 @@ namespace ttm::trainer {
 		 * @param value    Scalar value.
 		 * @param step     Global training step at which the metric was logged.
 		 */
-		virtual void on_log([[maybe_unused]] Trainer& trainer,
-		                    [[maybe_unused]] std::string_view key,
-		                    [[maybe_unused]] float value,
-		                    [[maybe_unused]] int32_t step) {
-		}
+		virtual void
+		on_log([[maybe_unused]] Trainer& trainer, [[maybe_unused]] std::string_view key, [[maybe_unused]] float value,
+			   [[maybe_unused]] int32_t step) {}
 	};
 
 } // namespace ttm::trainer

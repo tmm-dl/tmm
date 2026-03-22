@@ -30,8 +30,8 @@
 
 #pragma once
 
-#include <ttm/conf/config.hpp>
 #include <ttm/compat/expected.hpp>
+#include <ttm/conf/config.hpp>
 
 #include <filesystem>
 #include <span>
@@ -47,16 +47,10 @@ namespace ttm::conf {
 	 * @return Resolved @ref TrainingConfig on success, or an error string.
 	 */
 	[[nodiscard]] std::expected<TrainingConfig, std::string>
-	load_config(
-		std::span<const std::filesystem::path> files,
-		std::span<const std::string>           set_overrides = {}
-	);
+	load_config(std::span<const std::filesystem::path> files, std::span<const std::string> set_overrides = {});
 
 	/// Convenience overload for a single config file.
 	[[nodiscard]] std::expected<TrainingConfig, std::string>
-	load_config(
-		const std::filesystem::path& file,
-		std::span<const std::string> set_overrides = {}
-	);
+	load_config(const std::filesystem::path& file, std::span<const std::string> set_overrides = {});
 
 } // namespace ttm::conf

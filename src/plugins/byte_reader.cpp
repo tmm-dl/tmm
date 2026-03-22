@@ -28,20 +28,20 @@
 namespace ttm::plugins {
 
 	/* =========================================================================
-     * detail::ByteReaderBuf — internal std::streambuf adapter
-     * ====================================================================== */
+	 * detail::ByteReaderBuf — internal std::streambuf adapter
+	 * ====================================================================== */
 
 	namespace detail {
 
 		/**
-         * @brief std::streambuf that reads from an IByteReader.
-         *
-         * @details
-         * Instances are created and owned by IByteReader::as_stream().  The reader
-         * must outlive this buffer.
-         *
-         * @see IByteReader::as_stream
-         */
+		 * @brief std::streambuf that reads from an IByteReader.
+		 *
+		 * @details
+		 * Instances are created and owned by IByteReader::as_stream().  The reader
+		 * must outlive this buffer.
+		 *
+		 * @see IByteReader::as_stream
+		 */
 		class ByteReaderBuf final : public std::streambuf {
 		public:
 			/**
@@ -55,18 +55,19 @@ namespace ttm::plugins {
 
 		protected:
 			/* ------------------------------------------------------------------
-             * Read interface
-             * --------------------------------------------------------------- */
+			 * Read interface
+			 * --------------------------------------------------------------- */
 
 			/**
-             * @brief Refill the internal buffer from the underlying reader.
-             * @details Called by the base class whenever the get area is exhausted.
-             * @return The next character as an unsigned char cast to int_type,
-             *         or traits_type::eof() at end of stream.
-             */
+			 * @brief Refill the internal buffer from the underlying reader.
+			 * @details Called by the base class whenever the get area is exhausted.
+			 * @return The next character as an unsigned char cast to int_type,
+			 *         or traits_type::eof() at end of stream.
+			 */
 			int_type underflow() override {
 				const auto nRead = reader_.read(
-						// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- necessary: buf_ is char[] but IByteReader::read() takes std::byte*; both are single-byte types so the cast is well-defined
+						// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) -- necessary: buf_ is char[] but
+						// IByteReader::read() takes std::byte*; both are single-byte types so the cast is well-defined
 						reinterpret_cast<std::byte*>(buf_.data()), static_cast<std::streamsize>(buf_.size())
 				);
 
@@ -79,18 +80,18 @@ namespace ttm::plugins {
 			}
 
 			/* ------------------------------------------------------------------
-             * Seek interface
-             * --------------------------------------------------------------- */
+			 * Seek interface
+			 * --------------------------------------------------------------- */
 
 			/**
-             * @brief Forward seek requests to the underlying IByteReader.
-             * @details Seeking is only supported when IByteReader::seekable() is true.
-             *
-             * @param[in] off   Byte offset relative to `dir`.
-             * @param[in] dir   Origin direction.
-             * @param[in] which Must include std::ios_base::in; out is rejected.
-             * @return New stream position, or pos_type(off_type(-1)) on failure.
-             */
+			 * @brief Forward seek requests to the underlying IByteReader.
+			 * @details Seeking is only supported when IByteReader::seekable() is true.
+			 *
+			 * @param[in] off   Byte offset relative to `dir`.
+			 * @param[in] dir   Origin direction.
+			 * @param[in] which Must include std::ios_base::in; out is rejected.
+			 * @return New stream position, or pos_type(off_type(-1)) on failure.
+			 */
 			pos_type seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode which) override {
 				/* This buffer is read-only */
 				if ((which & std::ios_base::in) == 0) {
@@ -107,7 +108,7 @@ namespace ttm::plugins {
 				}
 
 				/* After seeking, the get area is stale — reset it to empty so that
-         * the next read triggers underflow() to refill from the new position. */
+				 * the next read triggers underflow() to refill from the new position. */
 				setg(buf_.data(), buf_.data(), buf_.data());
 				return {pos};
 			}
@@ -120,13 +121,13 @@ namespace ttm::plugins {
 			}
 
 		private:
-			// NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) -- intentional reference: ByteReaderBuf is non-copyable and always outlived by its owning IByteReader
+			// NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) -- intentional reference: ByteReaderBuf
+			// is non-copyable and always outlived by its owning IByteReader
 			IByteReader& reader_;
 
 			/** Size of the internal read buffer — 64 KiB amortises plugin boundary crossings. */
-			static constexpr std::size_t kBufSize =
-					64UL *
-					1024UL; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers) -- 64 KiB is the intended buffer size
+			static constexpr std::size_t kBufSize = 64UL * 1024UL; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+																   // -- 64 KiB is the intended buffer size
 			/** Internal read buffer. */
 			std::array<char, kBufSize> buf_{};
 		};
@@ -134,8 +135,8 @@ namespace ttm::plugins {
 	} // namespace detail
 
 	/* =========================================================================
-     * IByteReader implementation
-     * ====================================================================== */
+	 * IByteReader implementation
+	 * ====================================================================== */
 
 	IByteReader::~IByteReader() = default;
 

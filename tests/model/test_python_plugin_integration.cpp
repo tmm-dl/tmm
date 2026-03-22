@@ -24,8 +24,8 @@
  * PyTorch **is** installed the test additionally exercises the happy path.
  */
 
-#include <ttm/plugins/plugin_manager.hpp>
 #include <ttm/model/device.hpp>
+#include <ttm/plugins/plugin_manager.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -60,8 +60,7 @@ namespace {
 		std::filesystem::path path;
 
 		explicit TempPyFile(std::string_view content) {
-			path = std::filesystem::temp_directory_path()
-			     / "ttm_test_model_XXXXXX.py";
+			path = std::filesystem::temp_directory_path() / "ttm_test_model_XXXXXX.py";
 			path.replace_filename("ttm_test_model_integration.py");
 			std::ofstream ofs(path);
 			ofs << content;
@@ -164,8 +163,10 @@ TEST_CASE("ttm_python loader does not claim .so files", "[python][integration][.
 // Load: minimal torch.nn.Module subclass
 // =============================================================================
 
-TEST_CASE("ttm_python open() on a minimal model returns a valid handle or a helpful error",
-          "[python][integration][.optional]") {
+TEST_CASE(
+		"ttm_python open() on a minimal model returns a valid handle or a helpful error",
+		"[python][integration][.optional]"
+) {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
 		SKIP("ttm_python plugin not available");
@@ -200,9 +201,8 @@ TEST_CASE("ttm_python open() on a minimal model returns a valid handle or a help
 		const std::string& err = result.error();
 		CHECK(!err.empty());
 		// The error should mention either "torch", "PyTorch", or "Python".
-		const bool mentions_torch = err.find("torch") != std::string::npos
-		                         || err.find("PyTorch") != std::string::npos
-		                         || err.find("Python") != std::string::npos;
+		const bool mentions_torch = err.find("torch") != std::string::npos ||
+									err.find("PyTorch") != std::string::npos || err.find("Python") != std::string::npos;
 		CHECK(mentions_torch);
 	}
 }
@@ -211,8 +211,7 @@ TEST_CASE("ttm_python open() on a minimal model returns a valid handle or a help
 // Load: file with no torch.nn.Module subclass
 // =============================================================================
 
-TEST_CASE("ttm_python open() fails gracefully on a .py file with no nn.Module",
-          "[python][integration][.optional]") {
+TEST_CASE("ttm_python open() fails gracefully on a .py file with no nn.Module", "[python][integration][.optional]") {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
 		SKIP("ttm_python plugin not available");
@@ -245,8 +244,7 @@ TEST_CASE("ttm_python open() fails gracefully on a .py file with no nn.Module",
 // Load: non-existent file
 // =============================================================================
 
-TEST_CASE("ttm_python open() fails cleanly for a missing file",
-          "[python][integration][.optional]") {
+TEST_CASE("ttm_python open() fails cleanly for a missing file", "[python][integration][.optional]") {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
 		SKIP("ttm_python plugin not available");
@@ -269,8 +267,9 @@ TEST_CASE("ttm_python open() fails cleanly for a missing file",
 // Lifecycle: describe_params returns 0 (PyTorch manages its own params)
 // =============================================================================
 
-TEST_CASE("ttm_python describe_params returns zero params (PyTorch manages memory)",
-          "[python][integration][.optional]") {
+TEST_CASE(
+		"ttm_python describe_params returns zero params (PyTorch manages memory)", "[python][integration][.optional]"
+) {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
 		SKIP("ttm_python plugin not available");
@@ -293,7 +292,7 @@ TEST_CASE("ttm_python describe_params returns zero params (PyTorch manages memor
 	const ttm_param_desc_t* descs = nullptr;
 	uint32_t count = 99; // sentinel — must be overwritten to 0
 	CHECK(loader->describe_params(h, &descs, &count) == TTM_OK);
-	CHECK(count == 0);   // Python plugin defers param management to PyTorch
+	CHECK(count == 0); // Python plugin defers param management to PyTorch
 	CHECK(descs == nullptr);
 
 	loader->destroy(h);

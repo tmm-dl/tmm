@@ -8,9 +8,9 @@
 
 #include <ttm/compat/expected.hpp>
 
-#include <dlpack/dlpack.h>
 #include <arrow/record_batch.h>
 #include <arrow/type.h>
+#include <dlpack/dlpack.h>
 
 #include <cstddef>
 #include <memory>
@@ -34,12 +34,12 @@ namespace ttm::model {
 	 * @ingroup ttm_model
 	 */
 	struct ModelBatch {
-		std::vector<DLTensor>                       inputs;  ///< Collated input tensors.
-		std::shared_ptr<arrow::RecordBatch>         raw;     ///< Original Arrow batch (kept alive).
+		std::vector<DLTensor> inputs;			 ///< Collated input tensors.
+		std::shared_ptr<arrow::RecordBatch> raw; ///< Original Arrow batch (kept alive).
 		/** @brief Backing memory for DLTensors that required a copy (e.g. type conversion). */
-		std::vector<std::vector<std::byte>>         storage;
+		std::vector<std::vector<std::byte>> storage;
 		/** @brief Shape arrays owned by this batch; each DLTensor.shape points here. */
-		std::vector<std::vector<int64_t>>           shapes;
+		std::vector<std::vector<int64_t>> shapes;
 	};
 
 	/**
@@ -80,8 +80,7 @@ namespace ttm::model {
 		 * @param batch  Input Arrow RecordBatch (after all preprocessors).
 		 * @return Collated batch on success, or an error string on failure.
 		 */
-		[[nodiscard]] virtual std::expected<ModelBatch, std::string>
-		collate(const arrow::RecordBatch& batch) const = 0;
+		[[nodiscard]] virtual std::expected<ModelBatch, std::string> collate(const arrow::RecordBatch& batch) const = 0;
 
 		/**
 		 * @brief Arrow schema of the tensors this collator produces.
@@ -103,7 +102,6 @@ namespace ttm::model {
 	 * @param schema  Arrow schema of the batches this collator will receive.
 	 * @return Fully configured ICollator instance.
 	 */
-	[[nodiscard]] std::unique_ptr<ICollator>
-	make_default_collator(const arrow::Schema& schema);
+	[[nodiscard]] std::unique_ptr<ICollator> make_default_collator(const arrow::Schema& schema);
 
 } // namespace ttm::model

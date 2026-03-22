@@ -21,8 +21,7 @@ extern ttm_scheduler_vtable g_sched_cosine_warmup;
 /**
  * @brief Register all five built-in schedulers with the host.
  *
- * Registers: constant, step, linear, cosine, cosine_warmup.
- * No-op if host->register_scheduler is nullptr.
+ * Registers: constant, step, linear, cosine, cosine_warmup. No-op if host->register_scheduler is nullptr.
  */
 void schedulersRegister(const ttm_host_api* host);
 
