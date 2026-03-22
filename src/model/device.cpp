@@ -3,12 +3,12 @@
  * @brief Device::from_string / to_string implementation.
  */
 
-#include <ttm/model/device.hpp>
+#include <tmm/model/device.hpp>
 
 #include <charconv>
 #include <string>
 
-namespace ttm::model {
+namespace tmm::model {
 
 	Device Device::from_string(std::string_view s) {
 		// Find optional ":<id>" suffix
@@ -70,4 +70,4 @@ namespace ttm::model {
 		return std::string(name) + ':' + std::to_string(id);
 	}
 
-} // namespace ttm::model
+} // namespace tmm::model

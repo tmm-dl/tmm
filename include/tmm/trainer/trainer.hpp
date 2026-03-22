@@ -4,16 +4,16 @@
  *
  * @details
  * The Trainer owns the model, optimizer, and optional LR scheduler.  It
- * coordinates with the @ref ttm::plugins::PluginManager for lifecycle events
+ * coordinates with the @ref tmm::plugins::PluginManager for lifecycle events
  * and iterates the dataset epoch by epoch via a @ref DatasetFactory.
  *
  * ### Usage
  * @code{.cpp}
  * // Build the trainer, chain optional components, then run.
- * auto result = ttm::trainer::Trainer(cfg, plugins, std::move(model), train_factory)
+ * auto result = tmm::trainer::Trainer(cfg, plugins, std::move(model), trainFactory)
  *     .optimizer(std::make_unique<MyAdam>(cfg.optimizer.lr))
- *     .scheduler(std::make_unique<MyCosineWarmup>(warmup_steps, total_steps))
- *     .validation(val_factory)
+ *     .scheduler(std::make_unique<MyCosineWarmup>(warmupSteps, totalSteps))
+ *     .validation(valFactory)
  *     .fit();
  *
  * if (!result) {
@@ -29,12 +29,12 @@
 
 #pragma once
 
-#include <ttm/compat/expected.hpp>
-#include <ttm/conf/config.hpp>
-#include <ttm/datasets/dataset_loader.hpp>
-#include <ttm/plugins/plugin_manager.hpp>
-#include <ttm/trainer/callback.hpp>
-#include <ttm/trainer/interfaces.hpp>
+#include <tmm/compat/expected.hpp>
+#include <tmm/conf/config.hpp>
+#include <tmm/datasets/dataset_loader.hpp>
+#include <tmm/plugins/plugin_manager.hpp>
+#include <tmm/trainer/callback.hpp>
+#include <tmm/trainer/interfaces.hpp>
 
 #include <functional>
 #include <memory>
@@ -42,7 +42,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace ttm::trainer {
+namespace tmm::trainer {
 
 	/**
 	 * @brief Factory function that creates a fresh @ref DatasetIterator.
@@ -50,7 +50,7 @@ namespace ttm::trainer {
 	 * Called once per training epoch (and once per validation pass).  The
 	 * returned iterator is consumed fully and then discarded.
 	 */
-	using DatasetFactory = std::function<std::expected<std::unique_ptr<ttm::datasets::DatasetIterator>, std::string>()>;
+	using DatasetFactory = std::function<std::expected<std::unique_ptr<tmm::datasets::DatasetIterator>, std::string>()>;
 
 	/**
 	 * @brief Orchestrates the training loop over multiple epochs.
@@ -91,7 +91,7 @@ namespace ttm::trainer {
 		Trainer& validation(DatasetFactory val);
 
 		/// Attach a callback.  Callbacks are invoked in insertion order.
-		Trainer& add_callback(std::unique_ptr<Callback> cb);
+		Trainer& addCallback(std::unique_ptr<Callback> cb);
 
 		/// Set a predicate polled between batches; returning true triggers graceful stop.
 		Trainer& stopPredicate(std::function<bool()> pred);
@@ -107,8 +107,8 @@ namespace ttm::trainer {
 		 *
 		 * @details
 		 * Broadcasts the metric to all loaded plugins via
-		 * @ref ttm::plugins::PluginManager::emit_metric.  Plugins that export
-		 * @c ttm_on_metric (e.g. console-ui) will receive it immediately.
+		 * @ref tmm::plugins::PluginManager::emitMetric.  Plugins that export
+		 * @c tmm_on_metric (e.g. console-ui) will receive it immediately.
 		 *
 		 * @param key    Metric name (e.g. "train_loss", "accuracy").
 		 * @param value  Scalar value.
@@ -116,17 +116,17 @@ namespace ttm::trainer {
 		void log(std::string_view key, float value);
 
 	private:
-		[[nodiscard]] std::expected<float, std::string> run_validation();
+		[[nodiscard]] std::expected<float, std::string> runValidation();
 
-		[[nodiscard]] std::string build_fit_begin_json() const;
-		[[nodiscard]] std::string build_batch_json(int64_t epoch, int64_t step, float loss, float lr) const;
-		[[nodiscard]] std::string build_epoch_json(const EpochMetrics& m) const;
+		[[nodiscard]] std::string buildFitBeginJson() const;
+		[[nodiscard]] std::string buildBatchJson(int64_t epoch, int64_t step, float loss, float lr) const;
+		[[nodiscard]] std::string buildEpochJson(const EpochMetrics& m) const;
 
 		conf::TrainingConfig config_;
 		plugins::PluginManager& plugins_;
 		std::unique_ptr<IModel> model_;
-		DatasetFactory train_factory_;
-		DatasetFactory val_factory_;
+		DatasetFactory trainFactory_;
+		DatasetFactory valFactory_;
 		std::unique_ptr<IOptimizer> optimizer_;
 		std::unique_ptr<ILRScheduler> scheduler_;
 
@@ -143,4 +143,4 @@ namespace ttm::trainer {
 		std::function<bool()> stopPredicate_;
 	};
 
-} // namespace ttm::trainer
+} // namespace tmm::trainer

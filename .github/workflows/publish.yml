@@ -1,5 +1,5 @@
 ##########################################################################################
-# TTM Publish — Build installers and create a GitHub Release
+# TMM Publish — Build installers and create a GitHub Release
 #
 # Triggers:
 #   • push to master / workflow_dispatch  → nightly pre-release (tag "nightly")

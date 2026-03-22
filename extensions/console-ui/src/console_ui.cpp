@@ -1,6 +1,6 @@
 /**
  * @file console_ui.cpp
- * @brief TTM console-UI plugin — two rendering modes.
+ * @brief TMM console-UI plugin — two rendering modes.
  *
  * ### DOM-only mode  (default / WASM build)
  * Renders a full-screen ANSI frame on every significant event by writing
@@ -29,7 +29,7 @@
  * ```
  */
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 /* FTXUI DOM/Screen — available in both native and WASM builds. */
 #include <ftxui/dom/elements.hpp>
@@ -225,19 +225,19 @@ namespace {
 			const LogEntry& e = g_logs[static_cast<size_t>(i)];
 			Element prefix;
 			switch (e.level) {
-			case TTM_LOG_TRACE:
+			case TMM_LOG_TRACE:
 				prefix = text("[TRACE] ") | color(Color::GrayDark);
 				break;
-			case TTM_LOG_DEBUG:
+			case TMM_LOG_DEBUG:
 				prefix = text("[DEBUG] ") | color(Color::Blue);
 				break;
-			case TTM_LOG_INFO:
+			case TMM_LOG_INFO:
 				prefix = text("[INFO]  ") | color(Color::Green);
 				break;
-			case TTM_LOG_WARN:
+			case TMM_LOG_WARN:
 				prefix = text("[WARN]  ") | color(Color::Yellow);
 				break;
-			case TTM_LOG_ERROR:
+			case TMM_LOG_ERROR:
 				prefix = text("[ERROR] ") | color(Color::Red) | bold;
 				break;
 			default:
@@ -260,14 +260,14 @@ namespace {
 namespace {
 
 #ifdef __EMSCRIPTEN__
-	__attribute__((import_module("ttm"), import_name("ttm_terminal_size"))) extern void
-	ttm_terminal_size(uint32_t* out_width, uint32_t* out_height);
+	__attribute__((import_module("tmm"), import_name("tmm_terminal_size"))) extern void
+	tmm_terminal_size(uint32_t* out_width, uint32_t* out_height);
 #endif
 
 	void redrawDom() {
 		uint32_t w = 80, h = 24;
 #ifdef __EMSCRIPTEN__
-		ttm_terminal_size(&w, &h);
+		tmm_terminal_size(&w, &h);
 #endif
 		if (w < 20)
 			w = 20;
@@ -280,7 +280,7 @@ namespace {
 				g_fitStarted ? (std::to_string(g_currentEpoch) + "/" + std::to_string(g_totalEpochs)) : "—";
 
 		auto header = window(
-				text(" TTM Training ") | bold,
+				text(" TMM Training ") | bold,
 				vbox({
 						hbox({text("Model:   ") | bold,
 							  text(g_modelPath.empty() ? "—" : g_modelPath) | color(Color::Cyan) | flex, separator(),
@@ -500,13 +500,13 @@ namespace {
 
 extern "C" {
 
-static ttm_plugin_info g_info = {
-		TTM_ABI_VERSION, "console-ui", "0.2.0", "Live TUI training dashboard — FTXUI, WASI/native"
+static tmm_plugin_info g_info = {
+		TMM_ABI_VERSION, "console-ui", "0.2.0", "Live TUI training dashboard — FTXUI, WASI/native"
 };
 
-ttm_plugin_info* ttm_plugin_get_info(void) { return &g_info; }
+tmm_plugin_info* tmm_plugin_get_info(void) { return &g_info; }
 
-ttm_error ttm_plugin_init(const ttm_host_api* /*host*/, const char* cfg, uint32_t len) {
+tmm_error tmm_plugin_init(const tmm_host_api* /*host*/, const char* cfg, uint32_t len) {
 	/* Parse "interactive" option from config JSON (native only). */
 #ifndef __EMSCRIPTEN__
 	if (cfg != nullptr && len > 0) {
@@ -518,16 +518,16 @@ ttm_error ttm_plugin_init(const ttm_host_api* /*host*/, const char* cfg, uint32_
 	}
 	if (g_interactive) {
 		interactive::g_thread = std::thread(interactive::runLoop);
-		return TTM_OK;
+		return TMM_OK;
 	}
 #endif
 	fputs("\033[2J\033[H", stdout);
 	fflush(stdout);
 	redrawDom();
-	return TTM_OK;
+	return TMM_OK;
 }
 
-void ttm_plugin_teardown(void) {
+void tmm_plugin_teardown(void) {
 #ifndef __EMSCRIPTEN__
 	if (g_interactive) {
 		if (interactive::g_screen != nullptr)
@@ -541,7 +541,7 @@ void ttm_plugin_teardown(void) {
 #endif
 	uint32_t w = 80, h = 24;
 #ifdef __EMSCRIPTEN__
-	ttm_terminal_size(&w, &h);
+	tmm_terminal_size(&w, &h);
 #endif
 	char buf[32]{};
 	snprintf(buf, sizeof(buf), "\033[%u;0H\n", h);
@@ -553,7 +553,7 @@ void ttm_plugin_teardown(void) {
  * Lifecycle callbacks
  * -------------------------------------------------------------------- */
 
-void ttm_on_fit_begin(const char* ctx_json, uint32_t len) {
+void tmm_on_fit_begin(const char* ctx_json, uint32_t len) {
 	const std::string json(ctx_json, len);
 #ifndef __EMSCRIPTEN__
 	if (g_interactive) {
@@ -579,7 +579,7 @@ void ttm_on_fit_begin(const char* ctx_json, uint32_t len) {
 	redrawDom();
 }
 
-void ttm_on_epoch_begin(uint32_t epoch, uint32_t /*total*/) {
+void tmm_on_epoch_begin(uint32_t epoch, uint32_t /*total*/) {
 #ifndef __EMSCRIPTEN__
 	if (g_interactive) {
 		std::lock_guard<std::mutex> lk(interactive::g_mtx);
@@ -594,7 +594,7 @@ void ttm_on_epoch_begin(uint32_t epoch, uint32_t /*total*/) {
 	redrawDom();
 }
 
-void ttm_on_batch_end(
+void tmm_on_batch_end(
 		uint32_t batch, float /*loss*/, const char* /*json*/, uint32_t /*len*/
 ) {
 #ifndef __EMSCRIPTEN__
@@ -610,7 +610,7 @@ void ttm_on_batch_end(
 		redrawDom();
 }
 
-int32_t ttm_on_epoch_end(uint32_t epoch, const char* /*json*/, uint32_t /*len*/) {
+int32_t tmm_on_epoch_end(uint32_t epoch, const char* /*json*/, uint32_t /*len*/) {
 #ifndef __EMSCRIPTEN__
 	if (g_interactive) {
 		std::lock_guard<std::mutex> lk(interactive::g_mtx);
@@ -626,7 +626,7 @@ int32_t ttm_on_epoch_end(uint32_t epoch, const char* /*json*/, uint32_t /*len*/)
 	return 0;
 }
 
-void ttm_on_fit_end(const char* /*json*/, uint32_t /*len*/) {
+void tmm_on_fit_end(const char* /*json*/, uint32_t /*len*/) {
 #ifndef __EMSCRIPTEN__
 	if (g_interactive) {
 		interactive::postRedraw();
@@ -636,7 +636,7 @@ void ttm_on_fit_end(const char* /*json*/, uint32_t /*len*/) {
 	redrawDom();
 }
 
-void ttm_on_log(uint32_t level, const char* msg, uint32_t len) {
+void tmm_on_log(uint32_t level, const char* msg, uint32_t len) {
 #ifndef __EMSCRIPTEN__
 	if (g_interactive) {
 		std::lock_guard<std::mutex> lk(interactive::g_mtx);
@@ -653,7 +653,7 @@ void ttm_on_log(uint32_t level, const char* msg, uint32_t len) {
 	redrawDom();
 }
 
-void ttm_on_metric(const char* key, uint32_t key_len, float value, int32_t step) {
+void tmm_on_metric(const char* key, uint32_t key_len, float value, int32_t step) {
 #ifndef __EMSCRIPTEN__
 	if (g_interactive) {
 		std::lock_guard<std::mutex> lk(interactive::g_mtx);

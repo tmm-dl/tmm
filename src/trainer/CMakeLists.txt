@@ -1,34 +1,34 @@
-add_library(ttm_trainer)
+add_library(tmm_trainer)
 
-target_sources(ttm_trainer
+target_sources(tmm_trainer
     PUBLIC
-        FILE_SET ttm_trainer_headers
+        FILE_SET tmm_trainer_headers
         TYPE HEADERS
         BASE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../../include
         FILES
-            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/callbacks/early_stopping.hpp
-            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/trainer/callback.hpp
-            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/trainer/interfaces.hpp
-            ${CMAKE_CURRENT_LIST_DIR}/../../include/ttm/trainer/trainer.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/tmm/callbacks/early_stopping.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/tmm/trainer/callback.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/tmm/trainer/interfaces.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/../../include/tmm/trainer/trainer.hpp
     PRIVATE
         trainer.cpp
 )
 
-target_compile_features(ttm_trainer PUBLIC cxx_std_23)
-target_include_directories(ttm_trainer PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
+target_compile_features(tmm_trainer PUBLIC cxx_std_23)
+target_include_directories(tmm_trainer PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../include)
 
-target_link_libraries(ttm_trainer
+target_link_libraries(tmm_trainer
     PUBLIC
-        ttm_conf        # TrainingConfig, TTM_VERSION define
-        ttm_datasets    # DatasetIterator, load_dataset
-        ttm_plugins     # PluginManager
+        tmm_conf        # TrainingConfig, TMM_VERSION define
+        tmm_datasets    # DatasetIterator, load_dataset
+        tmm_plugins     # PluginManager
 )
 
 # Arrow headers needed by interfaces.hpp (Batch holds shared_ptr<arrow::RecordBatch>).
-# Propagated PUBLIC so that consumers of ttm_trainer can use Arrow types without
+# Propagated PUBLIC so that consumers of tmm_trainer can use Arrow types without
 # having to add their own include_directories.
 if(arrow_SOURCE_DIR)
-    target_include_directories(ttm_trainer PUBLIC
+    target_include_directories(tmm_trainer PUBLIC
         "${arrow_SOURCE_DIR}/src"
         "${CMAKE_BINARY_DIR}/_deps/arrow-build/src"
     )
@@ -38,4 +38,4 @@ endif()
 # Consumers that want direct spdlog access should link it themselves.
 CPMAddPackage(URI "gh:gabime/spdlog@1.15.3" EXCLUDE_FROM_ALL YES)
 set_property(TARGET spdlog PROPERTY POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(ttm_trainer PRIVATE spdlog::spdlog $<$<BOOL:${MINGW}>:ws2_32>)
+target_link_libraries(tmm_trainer PRIVATE spdlog::spdlog $<$<BOOL:${MINGW}>:ws2_32>)

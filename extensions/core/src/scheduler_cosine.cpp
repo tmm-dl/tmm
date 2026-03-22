@@ -9,7 +9,7 @@
 
 #include "scheduler_state.hpp"
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <algorithm>
 #include <cmath>
@@ -17,11 +17,11 @@
 
 namespace {
 
-	ttm_handle cosineCreate(float base_lr, const char* cfg, uint32_t cfg_len) {
+	tmm_handle cosineCreate(float base_lr, const char* cfg, uint32_t cfg_len) {
 		return allocSched(parseSchedCfg(base_lr, cfg, cfg_len));
 	}
 
-	float cosineStep(ttm_handle h, int64_t global_step) {
+	float cosineStep(tmm_handle h, int64_t global_step) {
 		const auto* s = getSched(h);
 		if (!s)
 			return 0.0f;
@@ -34,4 +34,4 @@ namespace {
 } // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-ttm_scheduler_vtable g_sched_cosine = {cosineCreate, cosineStep, schedDestroy};
+tmm_scheduler_vtable g_sched_cosine = {cosineCreate, cosineStep, schedDestroy};

@@ -1,6 +1,6 @@
-# Train My Model (tmm)
+# train-my-model (`tmm`)
 
-A hardware-agnostic, plugin-extensible command-line tool for training deep learning models compiled with [Apache TVM](https://tvm.apache.org/). Inspired by the PyTorch Lightning CLI philosophy — configuration-driven, composable, and reproducible.
+A hardware-agnostic, plugin-extensible CLI for training deep learning models through the [DLPack](https://dmlc.github.io/dlpack/latest/) tensor ABI. Models compiled with [Apache TVM](https://tvm.apache.org/), IREE, or any framework that emits a C-ABI shared library work out of the box.
 
 ---
 
@@ -11,109 +11,79 @@ A hardware-agnostic, plugin-extensible command-line tool for training deep learn
 - [Quick Start](#quick-start)
 - [Usage](#usage)
 - [Configuration Reference](#configuration-reference)
-  - [Model Config](#model-config)
-  - [Trainer Config](#trainer-config)
-  - [Dataset Config](#dataset-config)
-  - [Sweep Config](#sweep-config)
 - [Plugin System](#plugin-system)
-  - [Installing Plugins](#installing-plugins)
-  - [Writing a Plugin](#writing-a-plugin)
-  - [Built-in Plugins](#built-in-plugins)
-- [Hyperparameter Sweeps](#hyperparameter-sweeps)
-- [TVM FFI Integration](#tvm-ffi-integration)
-- [Examples](#examples)
+- [Built-in Plugins](#built-in-plugins)
 - [Environment Variables](#environment-variables)
+- [Building from Source](#building-from-source)
 
 ---
 
 ## Overview
 
-`tmm` trains models that follow the **forward-backward convention**: a compiled TVM function that accepts model parameters and a batch of inputs, and returns both the forward outputs and the gradients for each parameter. `tmm` handles everything else:
+`tmm` handles the training machinery so your model only needs to implement a forward+backward function:
 
-- Dataset loading via the [HuggingFace Dataset Card](https://huggingface.co/docs/datasets/dataset_card) specification
-- Loss computation and gradient accumulation
-- Optimizer state and learning rate scheduling
-- Checkpointing and metric logging
-- Extensibility via **WebAssembly plugins**
-- Hyperparameter sweeps
+- **Dataset loading** — Arrow IPC and Parquet files via URI-addressed sources (`hf:`, `gh:`, `file:`, …)
+- **Gradient accumulation** and optimizer step scheduling
+- **LR scheduling** — constant, step, linear, cosine, cosine-with-warmup
+- **Plugin-driven extensibility** — WASM and native shared-library plugins for custom data sources, model loaders, LR schedulers, optimizers, callbacks, and loggers
+- **Interactive console UI** — live loss curves and metrics via FTXUI
 
-`tmm` is **tensor-library agnostic**: it communicates with your model exclusively through the [TVM FFI](https://tvm.apache.org/docs/reference/api/doxygen/runtime_8h.html) (`DLTensor` / `DLPack`), so any framework that can produce a TVM-compatible shared library (TVM, IREE, custom MLIR pipelines) works out of the box.
+`tmm` is **tensor-library agnostic**: it communicates with models exclusively through `DLTensor` / `DLPack`, so any framework that can produce a compatible shared library works without modification.
 
 ---
 
 ## Installation
 
-### Pre-built Binaries
+### Pre-built packages
 
-Download the latest release for your platform from the [Releases](../../releases) page:
-
-```sh
-# Linux x86_64
-curl -L https://github.com/your-org/train-my-model/releases/latest/download/tmm-linux-x86_64.tar.gz | tar xz
-sudo mv tmm /usr/local/bin/
-```
-
-### Building from Source
-
-**Requirements:** CMake >= 3.25, C++20 compiler, TVM runtime installed.
+Download the latest release for your platform from the [Releases](../../releases) page.
+Each release ships a Debian package (`.deb`), a macOS disk image (`.dmg`), a Windows NSIS installer (`.exe`), and plain archives (`.tar.gz` / `.zip`).
 
 ```sh
-git clone --recurse-submodules https://github.com/your-org/train-my-model.git
-cd train-my-model
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-sudo cmake --install build
+# Debian / Ubuntu
+sudo dpkg -i tmm-<version>-Linux.deb
+
+# macOS — open the .dmg and drag tmm to /usr/local/bin
+
+# Windows — run the NSIS installer, or extract the ZIP next to a directory on PATH
 ```
 
-Optional CMake flags:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-DTMM_WITH_WASM=ON` | `ON` | Enable WebAssembly plugin runtime (wasmtime) |
-| `-DTMM_WITH_ARROW=ON` | `ON` | Enable Apache Arrow / Parquet dataset loading |
-| `-DTMM_BUILD_TESTS=OFF` | `OFF` | Build test suite |
+Plugins are searched in the same directory as the `tmm` binary by default, so
+installing via the package puts everything in the right place automatically.
 
 ---
 
 ## Quick Start
 
 ```sh
-# 1. Compile your model to a TVM shared library (see TVM FFI Integration section)
-#    Result: model.so exports `forward_backward(params..., input) -> (output, grads...)`
+# 1. Load plugins (core provides hf: data source and TVM model loader)
+# 2. Write a config file
 
-# 2. Create a config file
 cat > train.yml <<'EOF'
+data:
+  train:
+    url: hf:owner/my-dataset
+    split: train
+    batch_size: 32
+  validation:
+    url: hf:owner/my-dataset
+    split: validation
+
 model:
-  module: ./model.so
-  function: forward_backward
-  parameters:
-    - name: fc1_weight
-      shape: [784, 256]
-      dtype: float32
-    - name: fc1_bias
-      shape: [256]
-      dtype: float32
-
-dataset:
-  path: ./my-dataset          # directory with dataset_info.json
-  task: image-classification
-  split: train
-  batch_size: 64
-
-loss:
-  type: cross_entropy
+  file: ./model.so      # path relative to this config file
+  device: cpu
 
 trainer:
-  epochs: 20
+  epochs: 10
   optimizer:
-    type: adam
-    learning_rate: 3.0e-4
+    type: adamw
+    lr: 3.0e-4
   lr_scheduler:
-    type: cosine_annealing
-  gradient_accumulation_steps: 4
-  checkpoint:
-    every_n_epochs: 5
-    output_dir: ./checkpoints
+    type: cosine_warmup
+    warmup_steps: 100
+
+plugins:
+  - name: core          # provides hf: source + TVM loader + schedulers
 EOF
 
 # 3. Train
@@ -125,458 +95,287 @@ tmm fit train.yml
 ## Usage
 
 ```
-tmm <command> [options] <config(s)...>
-
-Commands:
-  fit       Train a model
-  validate  Run validation loop only
-  predict   Run inference on a dataset split
-  sweep     Run a hyperparameter sweep
-  plugin    Manage plugins (list, install, info)
-
-Global options:
-  -v, --verbose         Increase log verbosity (repeatable: -vv, -vvv)
-  -q, --quiet           Suppress all output except errors
-  --log-file PATH       Write logs to file
-  --device DEVICE       Override device (e.g. cuda:0, cpu, metal)
-  -h, --help            Show help
-  --version             Print version
+tmm fit      <config.yml> [config2.yml …] [--set key=value …]
+tmm validate <config.yml> [config2.yml …] [--set key=value …]
 ```
 
-### Multiple Config Files
+### Multiple config files
 
-When multiple config files are provided they are merged in order (later files override earlier ones). This allows separating model and trainer concerns:
+When more than one file is provided they are deep-merged left-to-right (later files win on scalar collisions, maps are merged recursively):
 
 ```sh
 tmm fit model.yml trainer.yml
 
-# Override a single value at the command line
-tmm fit model.yml trainer.yml --set trainer.optimizer.learning_rate=1e-3
-```
-
-### Resuming Training
-
-```sh
-tmm fit train.yml --resume ./checkpoints/epoch_10.ckpt
+# Override a single value at the CLI
+tmm fit model.yml trainer.yml --set trainer.optimizer.lr=5e-4
 ```
 
 ---
 
 ## Configuration Reference
 
-All configuration files are YAML. Keys marked **required** have no default.
+All configuration files are YAML. Two schemas are accepted: a **new schema** (recommended) and a **legacy schema** (backward-compatible).
 
-### Model Config
+### New schema (recommended)
 
 ```yaml
+# Schema version — optional, defaults to "1"
+version: "1"
+
+# ── Data ────────────────────────────────────────────────────────────────────
+data:
+  train:
+    url: hf:owner/dataset       # URI — scheme provided by a plugin (hf:, gh:, file:, …)
+    split: train
+    batch_size: 32
+    shuffle: true
+    shuffle_buffer_size: 10000
+    num_workers: 4
+    prefetch: 2
+    preprocessor:               # optional — applied in order before collation
+      - type: bpe-tokenize
+        config: '{"vocab":"vocab.json","max_length":512}'
+
+  validation:                   # optional
+    url: hf:owner/dataset
+    split: validation
+    batch_size: 32
+
+# ── Model ────────────────────────────────────────────────────────────────────
 model:
-  # Path to compiled TVM shared library or TVMScript module.  Required.
-  module: ./model.so
+  file: ./model.so              # path resolved relative to this config file
+  # path: /absolute/path        # alternative: absolute / build-relative path
+  function: main                # exported function name; default: "main"
+  device: cpu                   # cpu | cuda | cuda:1 | metal | vulkan | opencl | rocm
+  device_id: 0
 
-  # Name of the exported forward-backward function.  Required.
-  # Signature: (param_0, param_1, ..., input) -> (output, grad_0, grad_1, ...)
-  function: forward_backward
-
-  # Initial parameter values. Required.
-  parameters:
-    - name: layer1_weight         # logical name used for checkpointing / logging
-      shape: [256, 784]
-      dtype: float32
-      init:
-        type: kaiming_uniform     # kaiming_uniform | xavier_uniform | zeros | ones | constant | file
-        # type: file
-        # path: ./pretrained/layer1_weight.npy
-    - name: layer1_bias
-      shape: [256]
-      dtype: float32
-      init:
-        type: zeros
-
-  # Target device for model execution.  Default: cpu
-  device: cpu                     # cpu | cuda:<n> | metal | vulkan | opencl
-```
-
-### Trainer Config
-
-```yaml
+# ── Trainer ──────────────────────────────────────────────────────────────────
 trainer:
-  # Number of full passes over the training set.  Default: 10
-  epochs: 20
+  epochs: 10
+  gradient_accumulation_steps: 1
 
   optimizer:
-    # Optimizer algorithm.  Default: sgd
-    type: adam                    # sgd | adam | adamw | rmsprop
-    learning_rate: 3.0e-4
-    weight_decay: 1.0e-5
-    # Additional optimizer-specific keys (betas, eps, momentum, …) passed through.
-    betas: [0.9, 0.999]
+    type: adamw                 # provided by core plugin; any plugin can add more
+    lr: 3.0e-4
+    weight_decay: 1.0e-2
+    beta1: 0.9
+    beta2: 0.999
+    eps: 1.0e-8
+    amsgrad: false
 
   lr_scheduler:
-    type: cosine_annealing        # constant | step | linear | cosine_annealing | warmup_cosine
-    warmup_steps: 500             # (warmup_cosine only)
-    min_lr: 1.0e-6
-    step_size: 10                 # (step only)
-    gamma: 0.1                    # (step only)
+    type: cosine_warmup         # constant | step | linear | cosine | cosine_warmup
+    warmup_steps: 100
+    min_lr: 0.0
+    step_size: 1                # step scheduler only
+    gamma: 0.1                  # step scheduler only
+    total_steps: 0              # 0 = infer from epochs × batches
 
-  # Accumulate gradients over N batches before applying an optimizer step.  Default: 1
-  gradient_accumulation_steps: 4
-
-  # Gradient clipping.  Disabled if omitted.
-  gradient_clipping:
-    max_norm: 1.0
-    norm_type: 2.0                # l2 | linf
-
-  checkpoint:
-    output_dir: ./checkpoints
-    every_n_epochs: 5
-    save_top_k: 3                 # Keep only the best k checkpoints by validation loss
+  early_stopping:               # optional; injects an early-stopping callback
     monitor: val_loss
+    patience: 5
+    mode: min
+    min_delta: 0.0
 
-  # Validation frequency.  Default: 1 (every epoch)
-  val_every_n_epochs: 1
+  checkpoint:                   # optional; injects a checkpoint callback
+    directory: ./checkpoints
+    every_n_epochs: 1
+    keep_top_k: 3
+    monitor: val_loss
+    mode: min
 
-  # Random seed for reproducibility.  Default: unset (non-deterministic)
-  seed: 42
+  callbacks:                    # explicit callback list (takes priority)
+    - type: early_stopping
+      config: '{"monitor":"val_loss","patience":5,"mode":"min"}'
+    - type: core::checkpoint
+      config: '{"directory":"./checkpoints","every_n_epochs":1}'
 
-  # Plugins to load.  Paths or names of installed plugins.
-  plugins:
-    - name: console-ui
-    - name: tensorboard
-      config:
-        log_dir: ./tb_logs
-    - path: /opt/tmm/plugins/custom_early_stopping.wasm
-      config:
-        patience: 5
-        monitor: val_loss
+# ── Plugins ──────────────────────────────────────────────────────────────────
+plugins:
+  - name: core                  # load by name — searched next to binary or TMM_PLUGIN_PATH
+  - name: python                # Python model loader (requires Python 3 at runtime)
+  - name: console-ui            # FTXUI terminal dashboard
+    config: '{"interactive":true}'
+  - path: ./my_plugin.wasm      # load by explicit path
+    config: '{"key":"value"}'
+    optional: true              # warn instead of fail if the file is missing
 ```
 
-### Dataset Config
+### Legacy schema
 
-`tmm` expects datasets that follow the [HuggingFace Dataset Card](https://huggingface.co/docs/datasets/dataset_card) specification. The dataset directory must contain a `dataset_info.json` (or a `README.md` with YAML front matter).
+The old schema is still accepted as a fallback when no `data:` or `trainer:` key is present:
 
 ```yaml
 dataset:
-  # Local path or HuggingFace Hub identifier (e.g. "ylecun/mnist")
-  path: ./my-dataset
+  uri: hf:owner/dataset
+  config: causality detection   # HuggingFace named config
+  split: train
+  batch_size: 32
 
-  # Dataset task — determines which features are inputs vs. labels.  Required.
-  task: image-classification    # image-classification | text-classification |
-                                #   token-classification | image-segmentation |
-                                #   regression | question-answering | custom
+validation:
+  uri: hf:owner/dataset
+  split: validation
 
-  split: train                  # train | validation | test | train[:80%]
+model:
+  path: ./model.so
+  function: main
+  device: cpu
 
-  # For task: custom — explicitly map feature names to roles.
-  features:
-    input: image
-    label: label
+optimizer:
+  type: adamw
+  lr: 3.0e-4
 
-  batch_size: 64
+scheduler:
+  type: cosine_warmup
+  warmup_steps: 100
 
-  # Number of data-loading worker threads.  Default: 4
-  num_workers: 4
+training:
+  epochs: 10
+  gradient_accumulation_steps: 4
+  grad_clip_norm: 1.0
+  seed: 42
 
-  # Shuffle training data each epoch.  Default: true
-  shuffle: true
-
-  # Preprocessing pipeline (applied in order, CPU-side before batching).
-  transforms:
-    - type: normalize
-      mean: [0.485, 0.456, 0.406]
-      std:  [0.229, 0.224, 0.225]
-    - type: resize
-      size: [224, 224]
-    - type: random_horizontal_flip   # Training augmentation — ignored during val/test
-      p: 0.5
-
-  # Load the dataset lazily (streaming).  Required for datasets too large for RAM.
-  streaming: false
-```
-
-### Sweep Config
-
-Hyperparameter sweeps are configured in the same YAML file or a separate file passed to `tmm sweep`:
-
-```yaml
-sweep:
-  # Search strategy.  Default: random
-  method: bayesian              # grid | random | bayesian
-
-  # Maximum number of trials.  Default: unlimited (grid finishes naturally)
-  max_trials: 50
-
-  # Objective metric to minimize/maximize.
-  metric:
-    name: val_loss
-    goal: minimize              # minimize | maximize
-
-  # Base trainer / model / dataset config files to apply the sweep on top of.
-  base_configs:
-    - model.yml
-    - trainer.yml
-
-  # Parameter search space.
-  parameters:
-    trainer.optimizer.learning_rate:
-      distribution: log_uniform
-      min: 1.0e-5
-      max: 1.0e-2
-
-    trainer.optimizer.type:
-      values: [adam, adamw, sgd]
-
-    trainer.gradient_accumulation_steps:
-      values: [1, 2, 4, 8]
-
-    dataset.batch_size:
-      values: [32, 64, 128]
-
-  # Run trials in parallel (requires multiple devices or a cluster config).
-  parallelism: 1
-```
-
-Run a sweep:
-
-```sh
-tmm sweep sweep.yml
-# or inline with fit configs
-tmm sweep model.yml trainer.yml --sweep-config sweep_params.yml
+plugins:
+  - name: core
 ```
 
 ---
 
 ## Plugin System
 
-`tmm` plugins are **WebAssembly (WASM) binaries**. Because WASM is a portable compilation target, a single `.wasm` file runs identically on Linux, macOS, Windows, and any architecture — no re-compilation needed when distributing plugins.
+Plugins extend `tmm` with custom data sources, model loaders, LR schedulers, optimizers, callbacks, and loggers. Two plugin formats are supported:
 
-Plugins hook into the training lifecycle and can:
+- **WebAssembly (`.wasm`)** — portable, sandboxed, runs on every platform without recompilation.
+- **Native shared library (`.so` / `.dylib` / `.dll`)** — full OS access, used for plugins that need OS threads or GPU access (e.g. `console-ui`).
 
-- Modify training behavior (early stopping, gradient surgery)
-- Render interactive UIs (FTXUI-based console dashboard)
-- Forward metrics to external services (TensorBoard, Weights & Biases)
-- Implement custom learning rate schedules or loss functions
+### Plugin search
 
-### Installing Plugins
+`tmm` searches for a plugin named `"core"` in this order:
 
-```sh
-# Install from a .wasm file
-tmm plugin install ./my_plugin.wasm
+1. Same directory as the `tmm` binary (works without any configuration after a package install).
+2. Each directory listed in `TMM_PLUGIN_PATH` (colon-separated on Unix, semicolon-separated on Windows).
 
-# List installed plugins
-tmm plugin list
+Within each directory, both `tmm_<name>.so` (or `.dll`/`.dylib`) and `tmm_<name>.wasm` are tried. A native plugin is preferred over a WASM plugin when both exist.
 
-# Show plugin metadata and available hooks
-tmm plugin info console-ui
+Alternatively, specify an absolute path in the config with `plugins: [{path: /path/to/plugin.wasm}]`.
+
+### Writing a plugin
+
+Any language that compiles to WebAssembly or produces a native shared library with C linkage can be used (C, C++, Rust, Zig, …).
+
+A plugin must export three C functions:
+
+```c
+#include <tmm/plugins/abi.h>
+
+// Required — return metadata; called before tmm_plugin_init.
+tmm_plugin_info* tmm_plugin_get_info(void);
+
+// Required — register capabilities; called once after loading.
+tmm_error tmm_plugin_init(const tmm_host_api* host, const char* cfg, uint32_t cfg_len);
+
+// Optional — free resources; called on unload.
+void tmm_plugin_teardown(void);
 ```
 
-Plugins are stored in `~/.tmm/plugins/` by default. Override with `$TMM_PLUGIN_DIR`.
+`tmm_plugin_init` receives the host API and the JSON config from the `config:` field in the YAML. Use `host->register_source`, `host->register_scheduler`, etc. to publish capabilities to the runtime.
 
-### Writing a Plugin
+**Lifecycle hooks** (all optional — return non-zero from epoch_end to trigger early stop):
 
-Plugins export a set of well-known functions that `tmm` calls at lifecycle points. Any language that compiles to WASM can be used (C, C++, Rust, AssemblyScript, Zig, …).
+| Export | Signature | Called when |
+|--------|-----------|-------------|
+| `tmm_on_fit_begin`       | `(ctx_json, ctx_len)`                          | Training starts |
+| `tmm_on_epoch_begin`     | `(epoch, total_epochs)`                        | Each epoch starts |
+| `tmm_on_batch_begin`     | `(batch, total_batches)`                       | Each batch starts |
+| `tmm_on_loss_computed`   | `(loss_f32) -> float`                          | After loss; return value replaces loss |
+| `tmm_on_batch_end`       | `(batch, loss_f32, metrics_json, metrics_len)` | After optimizer step |
+| `tmm_on_epoch_end`       | `(epoch, metrics_json, metrics_len) -> int32`  | After epoch; non-zero = stop |
+| `tmm_on_validation_end`  | `(metrics_json, metrics_len)`                  | After validation pass |
+| `tmm_on_model_loaded`    | `(info_json, info_len)`                        | After model is loaded |
+| `tmm_on_metric`          | `(name, name_len, value_f32, step_i32)`        | Each metric logged |
+| `tmm_on_log`             | `(level, msg, msg_len)`                        | Each log message |
+| `tmm_on_fit_end`         | `(metrics_json, metrics_len)`                  | Training ends |
 
-**Plugin lifecycle hooks** (all optional):
+**Minimal C example:**
 
-| Export | Called when |
-|--------|-------------|
-| `tmm_init(config_json_ptr, config_len) -> i32` | Plugin loaded; receives JSON config from `trainer.plugins[].config` |
-| `tmm_on_train_begin(ctx_ptr, ctx_len)` | Training loop starts |
-| `tmm_on_epoch_begin(epoch, total_epochs)` | Each epoch starts |
-| `tmm_on_batch_begin(batch, total_batches)` | Each batch starts |
-| `tmm_on_loss_computed(loss_f32) -> f32` | After loss is computed; return value replaces loss |
-| `tmm_on_batch_end(batch, loss_f32, metrics_json_ptr, metrics_json_len)` | After optimizer step |
-| `tmm_on_epoch_end(epoch, metrics_json_ptr, metrics_json_len) -> i32` | After epoch; return non-zero to stop training early |
-| `tmm_on_validation_end(metrics_json_ptr, metrics_json_len)` | After validation loop |
-| `tmm_on_train_end(metrics_json_ptr, metrics_json_len)` | Training loop complete |
-| `tmm_destroy()` | Plugin unloaded |
+```c
+#include <tmm/plugins/abi.h>
+#include <stdio.h>
 
-**Host imports** available to plugins:
+static tmm_plugin_info g_info = { TMM_ABI_VERSION, "my-plugin", "0.1.0", "" };
 
-| Import | Description |
-|--------|-------------|
-| `tmm::log(level, msg_ptr, msg_len)` | Write to tmm's logger |
-| `tmm::emit_metric(name_ptr, name_len, value_f64, step_i64)` | Emit a scalar metric |
-| `tmm::get_param(name_ptr, name_len, out_ptr, out_len) -> i32` | Read a parameter tensor |
-| `tmm::set_hyperparameter(key_ptr, key_len, value_ptr, value_len)` | Modify a config value between epochs |
-| `tmm::request_stop()` | Request graceful training termination |
-| `tmm::alloc(size) -> ptr` | Allocate memory in the plugin's linear memory |
+tmm_plugin_info* tmm_plugin_get_info(void) { return &g_info; }
 
-**Minimal Rust plugin example:**
+tmm_error tmm_plugin_init(const tmm_host_api* host, const char* cfg, uint32_t len) {
+    (void)host; (void)cfg; (void)len;
+    return TMM_OK;
+}
 
-```rust
-// src/lib.rs
-#[no_mangle]
-pub extern "C" fn tmm_init(cfg: *const u8, len: usize) -> i32 { 0 }
-
-#[no_mangle]
-pub extern "C" fn tmm_on_epoch_end(epoch: i32, _metrics: *const u8, _len: usize) -> i32 {
-    // Return 1 to trigger early stop
-    0
+int32_t tmm_on_epoch_end(uint32_t epoch, const char* json, uint32_t len) {
+    printf("epoch %u done\n", epoch);
+    return 0; // non-zero triggers early stop
 }
 ```
 
-```toml
-# Cargo.toml
-[lib]
-crate-type = ["cdylib"]
-
-[profile.release]
-opt-level = "s"
-```
-
-```sh
-cargo build --target wasm32-unknown-unknown --release
-# Output: target/wasm32-unknown-unknown/release/my_plugin.wasm
-```
-
-### Built-in Plugins
-
-The following plugins are distributed alongside `tmm`:
-
-| Plugin | Description |
-|--------|-------------|
-| `console-ui` | Full-screen FTXUI terminal dashboard with live loss curves and parameter norms |
-| `tensorboard` | Emit metrics to a TensorBoard event file |
-| `wandb` | Log metrics and hyperparameters to Weights & Biases |
-| `early-stopping` | Stop training when a monitored metric stops improving |
-| `csv-logger` | Append per-epoch metrics to a CSV file |
-| `model-summary` | Print parameter count and shape table at training start |
-
 ---
 
-## Hyperparameter Sweeps
+## Built-in Plugins
 
-`tmm sweep` orchestrates multiple training runs over a search space:
-
-```sh
-tmm sweep model.yml trainer.yml --sweep-config sweep.yml
-```
-
-- **Grid search**: exhaustively tries all combinations
-- **Random search**: samples uniformly from the space for `max_trials` runs
-- **Bayesian search**: uses a Gaussian Process surrogate to focus on promising regions
-
-Results are written to `./sweep_results/` (override with `--output-dir`):
-
-```
-sweep_results/
-  summary.json          # all trials, sorted by objective metric
-  trial_0001/
-    config.yml          # effective config for this trial
-    metrics.json
-    checkpoints/
-  trial_0002/
-    ...
-```
-
-Parallel sweeps across multiple local devices:
-
-```yaml
-sweep:
-  parallelism: 4        # runs 4 trials concurrently, one per device
-  devices: [cuda:0, cuda:1, cuda:2, cuda:3]
-```
-
----
-
-## TVM FFI Integration
-
-`tmm` communicates with user models through the [DLPack](https://dmlc.github.io/dlpack/latest/) standard (`DLTensor`) which TVM's runtime exposes. No TVM Python runtime is required at inference/training time — only `libtvm_runtime`.
-
-### Expected Function Signature
-
-Your compiled module must export a function with the following contract:
-
-```
-forward_backward(param_0, param_1, ..., param_N, input_batch)
-  -> (output_batch, grad_0, grad_1, ..., grad_N)
-```
-
-- All tensors are `DLTensor` (or `tvm::runtime::NDArray`)
-- `param_i` are the trainable parameters (same order as declared in config)
-- `input_batch` is the current mini-batch (after preprocessing)
-- `output_batch` is the model prediction (used for loss computation)
-- `grad_i` are the loss gradients with respect to `param_i`
-
-The loss is computed by `tmm` using the configured `loss.type`. If you prefer to compute the loss inside your compiled function, set `loss.type: external` and return the scalar loss as the first output.
-
-### Compiling with TVM
-
-```python
-import tvm
-from tvm import relax
-
-# ... define your model graph in Relax or TE ...
-# Attach gradient pass
-with tvm.transform.PassContext(opt_level=3):
-    mod = relax.transform.Gradient()(mod)
-    lib = relax.build(mod, target="llvm")
-
-lib.export_library("model.so")
-```
-
-### Using Other Frameworks
-
-Any framework that can output a shared library exporting a function callable via the C ABI with `DLTensor` arguments is compatible. Examples:
-
-- **IREE**: compile with `iree-compile --iree-hal-target-backends=llvm-cpu`
-- **Custom MLIR**: lower through `bufferization` + `llvm` dialects, emit a C-ABI wrapper
-- **Manually**: write a C++ function that calls your framework and marshal tensors as `DLTensor`
-
----
-
-## Examples
-
-### MNIST MLP
-
-```sh
-cd examples/mnist-mlp
-tmm fit config.yml
-```
-
-### Image Classification with Sweep
-
-```sh
-cd examples/imagenet-sweep
-tmm sweep model.yml --sweep-config sweep.yml
-```
-
-### Using the Console UI Plugin
-
-```yaml
-trainer:
-  plugins:
-    - name: console-ui
-      config:
-        refresh_rate_ms: 100
-        show_parameter_norms: true
-```
-
-### Custom Early Stopping Plugin
-
-```yaml
-trainer:
-  plugins:
-    - name: early-stopping
-      config:
-        monitor: val_loss
-        patience: 10
-        min_delta: 1.0e-4
-        mode: min
-```
+| Plugin | Format | Description |
+|--------|--------|-------------|
+| `core` | Native | Dataset sources: `hf:` (HuggingFace), `gh:` (GitHub), `gl:` (GitLab), `bb:` (Bitbucket), `sr:` (generic git). TVM model loader. LR schedulers: `constant`, `step`, `linear`, `cosine`, `cosine_warmup`. Callbacks: `early_stopping`, `checkpoint`. Loggers: `tensorboard`, `wandb`. |
+| `python` | Native | Python model loader (requires Python 3 at runtime; PyTorch optional for full support). |
+| `console-ui` | Native + WASM | FTXUI terminal dashboard with live loss curves and metrics. Native build supports interactive mode (`"interactive":true`); WASM build renders ANSI output on each event. |
+| `nlp-tasks` | WASM | NLP task metadata and preprocessing utilities. |
 
 ---
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TMM_PLUGIN_DIR` | `~/.tmm/plugins` | Directory scanned for `.wasm` plugin files |
-| `TMM_CHECKPOINT_DIR` | `./checkpoints` | Default checkpoint output directory |
-| `TMM_LOG_LEVEL` | `info` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
-| `TMM_DEVICE` | `cpu` | Default device (overridden by config or `--device`) |
-| `TMM_CACHE_DIR` | `~/.tmm/cache` | Cache for downloaded datasets and TVM modules |
-| `TVM_HOME` | _(auto-detect)_ | Path to TVM installation |
+| Variable | Description |
+|----------|-------------|
+| `TMM_PLUGIN_PATH` | Colon-separated (Unix) or semicolon-separated (Windows) list of directories searched for plugins by name. Searched after the directory containing the `tmm` binary. |
+
+---
+
+## Building from Source
+
+**Requirements:** CMake ≥ 3.24, a C++23-capable compiler, Git.
+
+```sh
+git clone https://github.com/your-org/train-my-model.git
+cd train-my-model
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+sudo cmake --install build
+```
+
+### CMake options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `TMM_BUILD_TESTS` | `ON` | Build the Catch2 test suite |
+| `TMM_BUILD_EXTENSIONS` | `OFF` | Build the bundled plugins (`core`, `python`, `console-ui`, `nlp-tasks`) |
+| `TMM_BUILD_PACKAGE` | `OFF` | Configure CPack to produce a distributable package (DEB / DMG / NSIS+ZIP) |
+| `TMM_WASM_TOOLCHAIN` | _(auto)_ | Path to the WASI SDK CMake toolchain file. When empty and `TMM_BUILD_EXTENSIONS=ON`, the SDK is fetched automatically on Linux/macOS. |
+| `TMM_ENABLE_COVERAGE` | `OFF` | Instrument for gcov/llvm-cov coverage (GCC / Clang only) |
+
+### Building with plugins
+
+```sh
+cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DTMM_BUILD_EXTENSIONS=ON
+cmake --build build
+```
+
+### Running tests
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DTMM_BUILD_TESTS=ON
+cmake --build build --target tmm_tests
+ctest --test-dir build --output-on-failure
+```
 
 ---
 

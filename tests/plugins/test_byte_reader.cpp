@@ -7,7 +7,7 @@
  * without requiring any real plugin or filesystem access.
  */
 
-#include <ttm/plugins/extension.hpp>
+#include <tmm/plugins/extension.hpp>
 
 #include <algorithm>
 #include <array>
@@ -25,7 +25,7 @@ namespace {
 	/**
 	 * @brief Concrete IByteReader backed by a std::string for testing.
 	 */
-	class StringReader final : public ttm::plugins::IByteReader {
+	class StringReader final : public tmm::plugins::IByteReader {
 	public:
 		explicit StringReader(std::string data) : data_(std::move(data)) {}
 
@@ -72,7 +72,7 @@ namespace {
 	/**
 	 * @brief Concrete IByteReader that is never seekable, for negative-path tests.
 	 */
-	class UnseekableReader final : public ttm::plugins::IByteReader {
+	class UnseekableReader final : public tmm::plugins::IByteReader {
 	public:
 		explicit UnseekableReader(std::string data) : data_(std::move(data)) {}
 

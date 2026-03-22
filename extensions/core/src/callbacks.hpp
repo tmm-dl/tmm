@@ -16,19 +16,19 @@
 
 #pragma once
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-extern ttm_trainer_callback_vtable g_cb_early_stopping;
+extern tmm_trainer_callback_vtable g_cb_early_stopping;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-extern ttm_trainer_callback_vtable g_cb_checkpoint;
+extern tmm_trainer_callback_vtable g_cb_checkpoint;
 
 /**
  * @brief Register all built-in callbacks with the host.
  * Registers: early_stopping, checkpoint.
  * No-op if host->register_callback is nullptr.
  */
-void callbacksRegister(const ttm_host_api* host);
+void callbacksRegister(const tmm_host_api* host);
 
 /**
  * @brief Reset all callback slots (called on plugin teardown).

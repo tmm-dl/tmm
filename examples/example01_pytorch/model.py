@@ -1,7 +1,7 @@
 """
-DistilBERT text-classification model for TTM example 01.
+DistilBERT text-classification model for TMM example 01.
 
-The TTM python plugin discovers this class by scanning the module for a
+The TMM python plugin discovers this class by scanning the module for a
 torch.nn.Module subclass and instantiating it with no arguments.
 
 Input tensors (via DLPack from the hf-tokenize preprocessor):
@@ -9,7 +9,7 @@ Input tensors (via DLPack from the hf-tokenize preprocessor):
     inputs[1]  attention_mask int32  [batch, max_length]
     inputs[2]  labels         int64  [batch]   (squeezed from [batch, 1])
 
-Returns a HuggingFace SequenceClassifierOutput; the TTM python plugin reads
+Returns a HuggingFace SequenceClassifierOutput; the TMM python plugin reads
 .loss for training/validation and .logits for downstream evaluation.
 """
 

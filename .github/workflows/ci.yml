@@ -1,5 +1,5 @@
 ##########################################################################################
-# TTM Continuous Integration
+# TMM Continuous Integration
 #
 # Jobs:
 #   format   — clang-format style check (non-blocking annotation on PRs)

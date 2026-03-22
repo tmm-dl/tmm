@@ -4,8 +4,8 @@
  *        environment interpolation, and node → TrainingConfig conversion.
  */
 
-#include <ttm/compat/format.hpp>
-#include <ttm/conf/loader.hpp>
+#include <tmm/compat/format.hpp>
+#include <tmm/conf/loader.hpp>
 
 #include <yaml-cpp/yaml.h>
 
@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ttm::conf {
+namespace tmm::conf {
 
 	namespace {
 
@@ -30,13 +30,13 @@ namespace ttm::conf {
 		 * Maps are merged recursively; scalars and sequences are replaced by the
 		 * overlay value (right-wins semantics matching Helm chart merging).
 		 */
-		void deep_merge(YAML::Node base, const YAML::Node& overlay) {
+		void deepMerge(YAML::Node base, const YAML::Node& overlay) {
 			if (!overlay.IsMap() || !base.IsMap())
 				return;
 			for (const auto& kv : overlay) {
 				const std::string key = kv.first.as<std::string>();
 				if (base[key] && base[key].IsMap() && kv.second.IsMap()) {
-					deep_merge(base[key], kv.second);
+					deepMerge(base[key], kv.second);
 				} else {
 					base[key] = kv.second;
 				}
@@ -46,7 +46,7 @@ namespace ttm::conf {
 		/**
 		 * @brief Walk all scalar string nodes and expand `${VAR_NAME}` env references.
 		 */
-		void interpolate_env(YAML::Node node) {
+		void interpolateEnv(YAML::Node node) {
 			if (node.IsScalar()) {
 				std::string val = node.as<std::string>();
 				std::string result;
@@ -75,10 +75,10 @@ namespace ttm::conf {
 					node = result;
 			} else if (node.IsMap()) {
 				for (auto kv : node)
-					interpolate_env(kv.second);
+					interpolateEnv(kv.second);
 			} else if (node.IsSequence()) {
 				for (auto item : node)
-					interpolate_env(item);
+					interpolateEnv(item);
 			}
 		}
 
@@ -92,12 +92,12 @@ namespace ttm::conf {
 		 * into the document tree.
 		 */
 		static void
-		set_nested(YAML::Node node, const std::vector<std::string>& keys, std::size_t idx, const std::string& value) {
+		setNested(YAML::Node node, const std::vector<std::string>& keys, std::size_t idx, const std::string& value) {
 			if (idx + 1 == keys.size()) {
 				node[keys[idx]] = value;
 				return;
 			}
-			set_nested(node[keys[idx]], keys, idx + 1, value);
+			setNested(node[keys[idx]], keys, idx + 1, value);
 		}
 
 		/**
@@ -107,16 +107,16 @@ namespace ttm::conf {
 		 * written as a YAML scalar string; yaml-cpp converts to the target type when
 		 * read via `.as<T>()`.
 		 */
-		std::expected<void, std::string> apply_override(YAML::Node root, std::string_view kv) {
+		std::expected<void, std::string> applyOverride(YAML::Node root, std::string_view kv) {
 			const auto eq = kv.find('=');
 			if (eq == std::string_view::npos) {
 				return std::unexpected(std::format("load_config: invalid --set value '{}' (expected key=value)", kv));
 			}
-			const std::string key_path{kv.substr(0, eq)};
+			const std::string keyPath{kv.substr(0, eq)};
 			const std::string value{kv.substr(eq + 1)};
 
 			std::vector<std::string> keys;
-			std::istringstream ss{key_path};
+			std::istringstream ss{keyPath};
 			std::string part;
 			while (std::getline(ss, part, '.')) {
 				if (!part.empty())
@@ -126,7 +126,7 @@ namespace ttm::conf {
 				return std::unexpected(std::format("load_config: empty key in --set '{}'", kv));
 			}
 
-			set_nested(root, keys, 0, value);
+			setNested(root, keys, 0, value);
 			return {};
 		}
 
@@ -153,42 +153,42 @@ namespace ttm::conf {
 		 * Sub-config parsers
 		 * ================================================================== */
 
-		DatasetConfig parse_dataset(const YAML::Node& n) {
+		DatasetConfig parseDataset(const YAML::Node& n) {
 			return {
 					.uri = gets(n, "uri"),
-					.config_name = gets(n, "config"),
+					.configName = gets(n, "config"),
 					.split = gets(n, "split", "train"),
-					.batch_size = get<int64_t>(n, "batch_size", 32),
+					.batchSize = get<int64_t>(n, "batch_size", 32),
 					.shuffle = get<bool>(n, "shuffle", true),
-					.shuffle_buffer_size = get<int64_t>(n, "shuffle_buffer_size", 10'000),
-					.num_workers = get<int64_t>(n, "num_workers", 4),
+					.shuffleBufferSize = get<int64_t>(n, "shuffle_buffer_size", 10'000),
+					.numWorkers = get<int64_t>(n, "num_workers", 4),
 					.prefetch = get<int64_t>(n, "prefetch", 2),
 			};
 		}
 
-		ValidationConfig parse_validation(const YAML::Node& n) {
+		ValidationConfig parseValidation(const YAML::Node& n) {
 			return {
 					.uri = gets(n, "uri"),
-					.config_name = gets(n, "config"),
+					.configName = gets(n, "config"),
 					.split = gets(n, "split", "validation"),
-					.batch_size = get<int64_t>(n, "batch_size", 32),
+					.batchSize = get<int64_t>(n, "batch_size", 32),
 			};
 		}
 
-		ModelConfig parse_model(const YAML::Node& n) {
+		ModelConfig parseModel(const YAML::Node& n) {
 			return {
 					.path = gets(n, "path"),
-					.function_name = gets(n, "function", "main"),
+					.functionName = gets(n, "function", "main"),
 					.device = gets(n, "device", "cpu"),
-					.device_id = get<int32_t>(n, "device_id", 0),
+					.deviceId = get<int32_t>(n, "device_id", 0),
 			};
 		}
 
-		OptimizerConfig parse_optimizer(const YAML::Node& n) {
+		OptimizerConfig parseOptimizer(const YAML::Node& n) {
 			return {
 					.type = gets(n, "type", "adamw"),
 					.lr = get<float>(n, "lr", 1e-3f),
-					.weight_decay = get<float>(n, "weight_decay", 1e-2f),
+					.weightDecay = get<float>(n, "weight_decay", 1e-2f),
 					.momentum = get<float>(n, "momentum", 0.9f),
 					.beta1 = get<float>(n, "beta1", 0.9f),
 					.beta2 = get<float>(n, "beta2", 0.999f),
@@ -198,24 +198,24 @@ namespace ttm::conf {
 			};
 		}
 
-		SchedulerConfig parse_scheduler(const YAML::Node& n) {
+		SchedulerConfig parseScheduler(const YAML::Node& n) {
 			return {
 					.type = gets(n, "type", "cosine_warmup"),
-					.warmup_steps = get<int64_t>(n, "warmup_steps", 0),
-					.min_lr = get<float>(n, "min_lr", 0.0f),
-					.step_size = get<int64_t>(n, "step_size", 1),
+					.warmupSteps = get<int64_t>(n, "warmup_steps", 0),
+					.minLr = get<float>(n, "min_lr", 0.0f),
+					.stepSize = get<int64_t>(n, "step_size", 1),
 					.gamma = get<float>(n, "gamma", 0.1f),
-					.total_steps = get<int64_t>(n, "total_steps", 0),
+					.totalSteps = get<int64_t>(n, "total_steps", 0),
 			};
 		}
 
-		CheckpointConfig parse_checkpoint(const YAML::Node& n) {
+		CheckpointConfig parseCheckpoint(const YAML::Node& n) {
 			return {
 					.dir = gets(n, "dir", "checkpoints"),
-					.save_every_n_epochs = get<int32_t>(n, "save_every_n_epochs", 1),
-					.keep_top_k = get<int32_t>(n, "keep_top_k", 3),
+					.saveEveryNEpochs = get<int32_t>(n, "save_every_n_epochs", 1),
+					.keepTopK = get<int32_t>(n, "keep_top_k", 3),
 					.monitor = gets(n, "monitor", "val_loss"),
-					.monitor_mode = gets(n, "mode", "min"),
+					.monitorMode = gets(n, "mode", "min"),
 			};
 		}
 
@@ -231,7 +231,7 @@ namespace ttm::conf {
 		 * plugin entries from their YAML subtrees without custom per-type parsing.
 		 * Scalars are auto-detected as null / bool / number / string.
 		 */
-		std::string yaml_to_json(const YAML::Node& n) {
+		std::string yamlToJson(const YAML::Node& n) {
 			switch (n.Type()) {
 			case YAML::NodeType::Null:
 				return "null";
@@ -280,7 +280,7 @@ namespace ttm::conf {
 				for (const auto& item : n) {
 					if (!first)
 						out += ',';
-					out += yaml_to_json(item);
+					out += yamlToJson(item);
 					first = false;
 				}
 				return out + ']';
@@ -291,7 +291,7 @@ namespace ttm::conf {
 				for (const auto& kv : n) {
 					if (!first)
 						out += ',';
-					out += '"' + kv.first.as<std::string>() + "\":" + yaml_to_json(kv.second);
+					out += '"' + kv.first.as<std::string>() + "\":" + yamlToJson(kv.second);
 					first = false;
 				}
 				return out + '}';
@@ -301,7 +301,7 @@ namespace ttm::conf {
 			}
 		}
 
-		TrainingConfig node_to_config(const YAML::Node& root, const std::filesystem::path& config_dir) {
+		TrainingConfig nodeToConfig(const YAML::Node& root, const std::filesystem::path& configDir) {
 			TrainingConfig cfg;
 			cfg.version = gets(root, "version", "1");
 
@@ -313,10 +313,10 @@ namespace ttm::conf {
 				if (const auto n = data["train"]) {
 					cfg.dataset.uri = gets(n, "url", gets(n, "uri"));
 					cfg.dataset.split = gets(n, "split", "train");
-					cfg.dataset.batch_size = get<int64_t>(n, "batch_size", 32);
+					cfg.dataset.batchSize = get<int64_t>(n, "batch_size", 32);
 					cfg.dataset.shuffle = get<bool>(n, "shuffle", true);
-					cfg.dataset.shuffle_buffer_size = get<int64_t>(n, "shuffle_buffer_size", 10'000);
-					cfg.dataset.num_workers = get<int64_t>(n, "num_workers", 4);
+					cfg.dataset.shuffleBufferSize = get<int64_t>(n, "shuffle_buffer_size", 10'000);
+					cfg.dataset.numWorkers = get<int64_t>(n, "num_workers", 4);
 					cfg.dataset.prefetch = get<int64_t>(n, "prefetch", 2);
 
 					// Per-dataset preprocessors: data.train.preprocessor[]
@@ -333,15 +333,15 @@ namespace ttm::conf {
 					ValidationConfig vc;
 					vc.uri = gets(n, "url", gets(n, "uri", cfg.dataset.uri.empty() ? "" : cfg.dataset.uri));
 					vc.split = gets(n, "split", "validation");
-					vc.batch_size = get<int64_t>(n, "batch_size", 32);
+					vc.batchSize = get<int64_t>(n, "batch_size", 32);
 					cfg.validation = vc;
 				}
 			} else {
 				// Old schema fallback
 				if (const auto n = root["dataset"])
-					cfg.dataset = parse_dataset(n);
+					cfg.dataset = parseDataset(n);
 				if (const auto n = root["validation"])
-					cfg.validation = parse_validation(n);
+					cfg.validation = parseValidation(n);
 			}
 
 			/* ------------------------------------------------------------------
@@ -353,13 +353,13 @@ namespace ttm::conf {
 				const std::string path = gets(n, "path");
 				if (!file.empty()) {
 					// Resolve relative to the config file's directory
-					cfg.model.path = (config_dir / file).string();
+					cfg.model.path = (configDir / file).string();
 				} else {
 					cfg.model.path = path;
 				}
-				cfg.model.function_name = gets(n, "function", "main");
+				cfg.model.functionName = gets(n, "function", "main");
 				cfg.model.device = gets(n, "device", "cpu");
-				cfg.model.device_id = get<int32_t>(n, "device_id", 0);
+				cfg.model.deviceId = get<int32_t>(n, "device_id", 0);
 			}
 
 			/* ------------------------------------------------------------------
@@ -369,12 +369,12 @@ namespace ttm::conf {
 			 * ---------------------------------------------------------------- */
 			if (const auto t = root["trainer"]) {
 				cfg.epochs = get<int64_t>(t, "epochs", 10);
-				cfg.gradient_accumulation_steps = get<int64_t>(t, "gradient_accumulation_steps", 1);
+				cfg.gradientAccumulationSteps = get<int64_t>(t, "gradient_accumulation_steps", 1);
 
 				if (const auto o = t["optimizer"]) {
 					cfg.optimizer.type = gets(o, "type", "adamw");
 					cfg.optimizer.lr = get<float>(o, "lr", 1e-3f);
-					cfg.optimizer.weight_decay = get<float>(o, "weight_decay", 1e-2f);
+					cfg.optimizer.weightDecay = get<float>(o, "weight_decay", 1e-2f);
 					cfg.optimizer.beta1 = get<float>(o, "beta1", 0.9f);
 					cfg.optimizer.beta2 = get<float>(o, "beta2", 0.999f);
 					cfg.optimizer.eps = get<float>(o, "eps", 1e-8f);
@@ -382,28 +382,28 @@ namespace ttm::conf {
 				}
 				if (const auto s = t["lr_scheduler"]) {
 					cfg.scheduler.type = gets(s, "type", "cosine_warmup");
-					cfg.scheduler.warmup_steps = get<int64_t>(s, "warmup_steps", 0);
-					cfg.scheduler.min_lr = get<float>(s, "min_lr", 0.0f);
-					cfg.scheduler.step_size = get<int64_t>(s, "step_size", 1);
+					cfg.scheduler.warmupSteps = get<int64_t>(s, "warmup_steps", 0);
+					cfg.scheduler.minLr = get<float>(s, "min_lr", 0.0f);
+					cfg.scheduler.stepSize = get<int64_t>(s, "step_size", 1);
 					cfg.scheduler.gamma = get<float>(s, "gamma", 0.1f);
-					cfg.scheduler.total_steps = get<int64_t>(s, "total_steps", 0);
+					cfg.scheduler.totalSteps = get<int64_t>(s, "total_steps", 0);
 				}
 				if (const auto es = t["early_stopping"]) {
 					cfg.callbacks.push_back({
 							.type = "early_stopping",
-							.config = yaml_to_json(es),
+							.config = yamlToJson(es),
 					});
 				}
 				if (const auto ck = t["checkpoint"]) {
 					cfg.checkpoint.dir = gets(ck, "directory", gets(ck, "dir", "checkpoints"));
-					cfg.checkpoint.save_every_n_epochs =
+					cfg.checkpoint.saveEveryNEpochs =
 							get<int32_t>(ck, "every_n_epochs", get<int32_t>(ck, "save_every_n_epochs", 1));
-					cfg.checkpoint.keep_top_k = get<int32_t>(ck, "keep_top_k", 3);
+					cfg.checkpoint.keepTopK = get<int32_t>(ck, "keep_top_k", 3);
 					cfg.checkpoint.monitor = gets(ck, "monitor", "val_loss");
-					cfg.checkpoint.monitor_mode = gets(ck, "mode", "min");
+					cfg.checkpoint.monitorMode = gets(ck, "mode", "min");
 					cfg.callbacks.push_back({
 							.type = "checkpoint",
-							.config = yaml_to_json(ck),
+							.config = yamlToJson(ck),
 					});
 				}
 				// New schema: trainer.callbacks[] (takes priority over the above shorthands)
@@ -411,25 +411,25 @@ namespace ttm::conf {
 					for (const auto& c : cbs) {
 						cfg.callbacks.push_back({
 								.type = gets(c, "type", gets(c, "name")),
-								.config = yaml_to_json(c),
+								.config = yamlToJson(c),
 						});
 					}
 				}
 			} else {
 				// Old schema fallback
 				if (const auto n = root["optimizer"])
-					cfg.optimizer = parse_optimizer(n);
+					cfg.optimizer = parseOptimizer(n);
 				if (const auto n = root["scheduler"])
-					cfg.scheduler = parse_scheduler(n);
+					cfg.scheduler = parseScheduler(n);
 				if (const auto n = root["checkpoint"])
-					cfg.checkpoint = parse_checkpoint(n);
+					cfg.checkpoint = parseCheckpoint(n);
 				if (const auto tr = root["training"]) {
 					cfg.epochs = get<int64_t>(tr, "epochs", 10);
-					cfg.gradient_accumulation_steps = get<int64_t>(tr, "gradient_accumulation_steps", 1);
-					cfg.grad_clip_norm = get<float>(tr, "grad_clip_norm", 0.0f);
+					cfg.gradientAccumulationSteps = get<int64_t>(tr, "gradient_accumulation_steps", 1);
+					cfg.gradClipNorm = get<float>(tr, "grad_clip_norm", 0.0f);
 					cfg.fp16 = get<bool>(tr, "fp16", false);
 					cfg.seed = get<int64_t>(tr, "seed", 42);
-					cfg.log_level = gets(tr, "log_level", "info");
+					cfg.logLevel = gets(tr, "log_level", "info");
 				}
 			}
 
@@ -467,7 +467,7 @@ namespace ttm::conf {
 				for (const auto& c : cs) {
 					cfg.callbacks.push_back({
 							.type = gets(c, "type", gets(c, "name")),
-							.config = yaml_to_json(c),
+							.config = yamlToJson(c),
 					});
 				}
 			}
@@ -489,7 +489,7 @@ namespace ttm::conf {
 
 		// The config directory is the directory of the first (primary) config file.
 		// model.file paths are resolved relative to it.
-		const std::filesystem::path config_dir = std::filesystem::absolute(files[0]).parent_path();
+		const std::filesystem::path configDir = std::filesystem::absolute(files[0]).parent_path();
 
 		// YAML::Node default-constructs as Null (not Undefined), so we cannot
 		// rely on !merged or operator= to bootstrap the first document.
@@ -507,18 +507,18 @@ namespace ttm::conf {
 				merged = YAML::Clone(doc);
 				first = false;
 			} else {
-				deep_merge(merged, doc);
+				deepMerge(merged, doc);
 			}
 		}
 
 		for (const auto& kv : set_overrides) {
-			if (auto r = apply_override(merged, kv); !r) {
+			if (auto r = applyOverride(merged, kv); !r) {
 				return std::unexpected(r.error());
 			}
 		}
 
-		interpolate_env(merged);
-		return node_to_config(merged, config_dir);
+		interpolateEnv(merged);
+		return nodeToConfig(merged, configDir);
 	}
 
 	std::expected<TrainingConfig, std::string>
@@ -527,4 +527,4 @@ namespace ttm::conf {
 		return load_config(std::span{files}, set_overrides);
 	}
 
-} // namespace ttm::conf
+} // namespace tmm::conf

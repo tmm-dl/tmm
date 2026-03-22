@@ -1,12 +1,12 @@
 /**
  * @file preprocessor.hpp
  * @brief IPreprocessor — Arrow RecordBatch → Arrow RecordBatch transform.
- * @ingroup ttm_model
+ * @ingroup tmm_model
  */
 
 #pragma once
 
-#include <ttm/compat/expected.hpp>
+#include <tmm/compat/expected.hpp>
 
 #include <arrow/record_batch.h>
 
@@ -14,7 +14,7 @@
 #include <string>
 #include <string_view>
 
-namespace ttm::model {
+namespace tmm::model {
 
 	/**
 	 * @brief Transforms an Arrow RecordBatch before collation.
@@ -37,11 +37,11 @@ namespace ttm::model {
 	 *
 	 * ### Implementing a preprocessor
 	 * Native C++ preprocessors subclass IPreprocessor directly.  WASM / shared-
-	 * library plugins register a #ttm_transform_vtable and receive a C++ adapter
-	 * (ttm::plugins::ITransform) that wraps the vtable.
+	 * library plugins register a #tmm_transform_vtable and receive a C++ adapter
+	 * (tmm::plugins::ITransform) that wraps the vtable.
 	 *
-	 * @see ttm::plugins::ITransform  C ABI adapter around this interface
-	 * @ingroup ttm_model
+	 * @see tmm::plugins::ITransform  C ABI adapter around this interface
+	 * @ingroup tmm_model
 	 */
 	class IPreprocessor {
 	public:
@@ -72,4 +72,4 @@ namespace ttm::model {
 		apply(const arrow::RecordBatch& batch) const = 0;
 	};
 
-} // namespace ttm::model
+} // namespace tmm::model

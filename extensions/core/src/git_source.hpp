@@ -5,13 +5,13 @@
 
 #pragma once
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 /**
  * @brief Initialise libgit2 and register the git dataset source with the host.
- * @return TTM_OK on success; error code on failure.
+ * @return TMM_OK on success; error code on failure.
  */
-ttm_error gitSourceRegister(const ttm_host_api* host);
+tmm_error gitSourceRegister(const tmm_host_api* host);
 
 /**
  * @brief Close all open file handles and shut down libgit2.

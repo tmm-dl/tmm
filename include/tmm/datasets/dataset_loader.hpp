@@ -13,8 +13,8 @@
  *
  * @par Typical usage
  * @code{.cpp}
- * auto& source = *manager.find_source("hf:");
- * auto result  = ttm::datasets::load_dataset(source, "hf:ylecun/mnist", "train");
+ * auto& source = *manager.findSource("hf:");
+ * auto result  = tmm::datasets::load_dataset(source, "hf:ylecun/mnist", "train");
  * auto iter    = std::move(result).value();
  *
  * std::shared_ptr<arrow::RecordBatch> batch;
@@ -24,12 +24,12 @@
  * @endcode
  */
 
-#ifndef TTM_DATASETS_DATASET_LOADER_HPP
-#define TTM_DATASETS_DATASET_LOADER_HPP
+#ifndef TMM_DATASETS_DATASET_LOADER_HPP
+#define TMM_DATASETS_DATASET_LOADER_HPP
 
-#include <ttm/compat/expected.hpp>
-#include <ttm/datasets/dataset_info.hpp>
-#include <ttm/plugins/extension.hpp>
+#include <tmm/compat/expected.hpp>
+#include <tmm/datasets/dataset_info.hpp>
+#include <tmm/plugins/extension.hpp>
 
 #include <memory>
 #include <string>
@@ -41,7 +41,7 @@ namespace arrow {
 	class Schema;
 } // namespace arrow
 
-namespace ttm::datasets {
+namespace tmm::datasets {
 
 	/**
 	 * @brief Abstract iterator over a stream of Arrow RecordBatches.
@@ -97,11 +97,11 @@ namespace ttm::datasets {
 	 * @return A DatasetIterator on success, or an error string on failure.
 	 */
 	[[nodiscard]] std::expected<std::unique_ptr<DatasetIterator>, std::string> load_dataset(
-			ttm::plugins::IDatasetSource& source, std::string_view uri, std::string_view split = "train",
+			tmm::plugins::IDatasetSource& source, std::string_view uri, std::string_view split = "train",
 			std::string_view config = "",
 			int64_t batch_size = 0 ///< 0 = return full row groups as-is
 	);
 
-} // namespace ttm::datasets
+} // namespace tmm::datasets
 
-#endif /* TTM_DATASETS_DATASET_LOADER_HPP */
+#endif /* TMM_DATASETS_DATASET_LOADER_HPP */

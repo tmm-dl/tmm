@@ -4,7 +4,7 @@
  *
  * @details
  * These plain-data structs represent a fully-resolved training configuration.
- * They are populated by @ref ttm::conf::load_config after YAML parsing, deep
+ * They are populated by @ref tmm::conf::load_config after YAML parsing, deep
  * merge, `--set` override application, and `${ENV_VAR}` interpolation.
  */
 
@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace ttm::conf {
+namespace tmm::conf {
 
 	/* =========================================================================
 	 * Sub-configs
@@ -23,33 +23,33 @@ namespace ttm::conf {
 
 	struct DatasetConfig {
 		std::string uri;		 ///< Dataset URI (e.g. `hf:thagen/SCITE`, `file:/data`)
-		std::string config_name; ///< HF named config (e.g. `"causality detection"`)
+		std::string configName; ///< HF named config (e.g. `"causality detection"`)
 		std::string split = "train";
-		int64_t batch_size = 32;
+		int64_t batchSize = 32;
 		bool shuffle = true;
-		int64_t shuffle_buffer_size = 10'000;
-		int64_t num_workers = 4;
+		int64_t shuffleBufferSize = 10'000;
+		int64_t numWorkers = 4;
 		int64_t prefetch = 2;
 	};
 
 	struct ValidationConfig {
 		std::string uri; ///< If empty, reuses `dataset.uri`
-		std::string config_name;
+		std::string configName;
 		std::string split = "validation";
-		int64_t batch_size = 32;
+		int64_t batchSize = 32;
 	};
 
 	struct ModelConfig {
 		std::string path;					///< Path to compiled TVM module or shared lib
-		std::string function_name = "main"; ///< Entry-point function name
+		std::string functionName = "main"; ///< Entry-point function name
 		std::string device = "cpu";			///< `cpu`, `cuda`, `metal`, …
-		int32_t device_id = 0;
+		int32_t deviceId = 0;
 	};
 
 	struct OptimizerConfig {
 		std::string type = "adamw"; ///< `sgd` | `adam` | `adamw` | `rmsprop`
 		float lr = 1e-3f;
-		float weight_decay = 1e-2f;
+		float weightDecay = 1e-2f;
 		float momentum = 0.9f; ///< SGD momentum
 		float beta1 = 0.9f;	   ///< Adam β₁
 		float beta2 = 0.999f;  ///< Adam β₂
@@ -61,25 +61,25 @@ namespace ttm::conf {
 	struct SchedulerConfig {
 		/// `constant` | `step` | `linear` | `cosine` | `cosine_warmup`
 		std::string type = "cosine_warmup";
-		int64_t warmup_steps = 0;
-		float min_lr = 0.0f;	 ///< Floor for cosine / linear decay
-		int64_t step_size = 1;	 ///< StepLR: decay every N steps
+		int64_t warmupSteps = 0;
+		float minLr = 0.0f;	 ///< Floor for cosine / linear decay
+		int64_t stepSize = 1;	 ///< StepLR: decay every N steps
 		float gamma = 0.1f;		 ///< StepLR: multiplicative decay
-		int64_t total_steps = 0; ///< Total optimizer steps (0 = no decay limit)
+		int64_t totalSteps = 0; ///< Total optimizer steps (0 = no decay limit)
 	};
 
 	struct CheckpointConfig {
 		std::string dir = "checkpoints";
-		int32_t save_every_n_epochs = 1;
-		int32_t keep_top_k = 3;
+		int32_t saveEveryNEpochs = 1;
+		int32_t keepTopK = 3;
 		std::string monitor = "val_loss"; ///< Metric to track
-		std::string monitor_mode = "min"; ///< `min` | `max`
+		std::string monitorMode = "min"; ///< `min` | `max`
 	};
 
 	struct PluginEntry {
 		std::string name;	   ///< Logical name (e.g. `"core"`, `"python"`); resolved to a path at load time
 		std::string path;	   ///< Path to `.so`/`.dylib`/`.dll`; takes priority over `name` if set
-		std::string config;	   ///< Arbitrary JSON passed to `ttm_plugin_init`
+		std::string config;	   ///< Arbitrary JSON passed to `tmm_plugin_init`
 		bool optional = false; ///< If true, a missing plugin emits a warning instead of failing
 	};
 
@@ -158,11 +158,11 @@ namespace ttm::conf {
 
 		/* --- training loop knobs --- */
 		int64_t epochs = 10;
-		int64_t gradient_accumulation_steps = 1;
-		float grad_clip_norm = 0.0f; ///< 0 = disabled
+		int64_t gradientAccumulationSteps = 1;
+		float gradClipNorm = 0.0f; ///< 0 = disabled
 		bool fp16 = false;
 		int64_t seed = 42;
-		std::string log_level = "info";
+		std::string logLevel = "info";
 	};
 
-} // namespace ttm::conf
+} // namespace tmm::conf

@@ -52,7 +52,7 @@ bool httpDownload(const std::string& url, const std::filesystem::path& dest, cha
 std::FILE*
 lfsOpen(const std::string& git_url, const std::string& ref, const std::string& subpath,
 		const std::filesystem::path& localRepo, char* err, uint32_t err_cap) {
-	const auto cachePath = localRepo / ".ttm_lfs" / subpath;
+	const auto cachePath = localRepo / ".tmm_lfs" / subpath;
 
 	if (!std::filesystem::exists(cachePath)) {
 		const std::string resolveUrl = git_url + "/resolve/" + ref + "/" + subpath;

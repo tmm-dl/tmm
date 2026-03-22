@@ -14,7 +14,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 /**
  * @brief Return the torch.nn.Module PyObject* for a model handle.
@@ -29,22 +29,22 @@
  * @return Borrowed reference to the torch.nn.Module instance, or nullptr if
  *         @p h is invalid or the slot is unused.
  */
-PyObject* py_get_model_obj(ttm_handle h);
+PyObject* py_get_model_obj(tmm_handle h);
 
 /**
  * @brief Register all optimizer vtables (currently: adamw) with the host.
  *
  * @details
- * Called from ttm_plugin_init in python_model.cpp.  Registers:
+ * Called from tmm_plugin_init in python_model.cpp.  Registers:
  *   - "adamw"  — AdamW via torch.optim.AdamW
  *
  * @param host  Host API provided during plugin init.
- * @return #TTM_OK on success.
+ * @return #TMM_OK on success.
  */
-ttm_error pyOptimizerRegister(const ttm_host_api* host);
+tmm_error pyOptimizerRegister(const tmm_host_api* host);
 
 /**
- * @brief Release all optimizer slots (called from ttm_plugin_teardown).
+ * @brief Release all optimizer slots (called from tmm_plugin_teardown).
  */
 void pyOptimizerTeardown();
 
@@ -52,11 +52,11 @@ void pyOptimizerTeardown();
  * @brief Register the "hf-tokenize" transform vtable with the host.
  *
  * @param host  Host API provided during plugin init.
- * @return #TTM_OK on success.
+ * @return #TMM_OK on success.
  */
-ttm_error pyTransformRegister(const ttm_host_api* host);
+tmm_error pyTransformRegister(const tmm_host_api* host);
 
 /**
- * @brief Release all transform slots (called from ttm_plugin_teardown).
+ * @brief Release all transform slots (called from tmm_plugin_teardown).
  */
 void pyTransformTeardown();

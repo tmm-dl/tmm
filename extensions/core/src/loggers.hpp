@@ -15,19 +15,19 @@
 
 #pragma once
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-extern ttm_trainer_callback_vtable g_cb_tensorBoard;
+extern tmm_trainer_callback_vtable g_cb_tensorBoard;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-extern ttm_trainer_callback_vtable g_cb_wandb;
+extern tmm_trainer_callback_vtable g_cb_wandb;
 
 /**
  * @brief Register all built-in logger callbacks with the host.
  * Registers: tensorBoard, wandb.
  * No-op if host->register_callback is nullptr.
  */
-void loggersRegister(const ttm_host_api* host);
+void loggersRegister(const tmm_host_api* host);
 
 /**
  * @brief Reset all logger slots (called on plugin teardown).

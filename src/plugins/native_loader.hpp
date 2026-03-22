@@ -8,41 +8,41 @@
  * process and its libraries (e.g. libgit2) which cannot easily be compiled to
  * WASM.
  *
- * The loading sequence mirrors wasm_loader_load():
+ * The loading sequence mirrors wasmLoaderLoad():
  * 1. dlopen / LoadLibrary
- * 2. Resolve required exports (ttm_plugin_get_info, ttm_plugin_init)
+ * 2. Resolve required exports (tmm_plugin_get_info, tmm_plugin_init)
  * 3. Verify ABI version
- * 4. Call ttm_plugin_init with a real ttm_host_api (all function pointers are
+ * 4. Call tmm_plugin_init with a real tmm_host_api (all function pointers are
  *    valid host addresses — no WASM linear-memory translation needed)
  * 5. Resolve optional lifecycle hooks
  *
- * @note This header is private to the ttm_plugins library.
+ * @note This header is private to the tmm_plugins library.
  */
 
 #pragma once
 
-#include <ttm/plugins/abi.h>
-#include <ttm/plugins/extension.hpp>
+#include <tmm/plugins/abi.h>
+#include <tmm/plugins/extension.hpp>
 
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <ttm/compat/expected.hpp>
+#include <tmm/compat/expected.hpp>
 #include <vector>
 
-namespace ttm::plugins {
+namespace tmm::plugins {
 
 	/**
 	 * @brief Per-plugin runtime state for native shared-library plugins.
 	 *
 	 * @details
 	 * Holds the dynamic-library handle, resolved entry points, and the C++
-	 * extension objects (sources, tasks) registered during ttm_plugin_init.
+	 * extension objects (sources, tasks) registered during tmm_plugin_init.
 	 *
 	 * Lifecycle:
 	 * - Populated by native_loader_load().
-	 * - Destroyed by native_loader_unload(), which calls ttm_plugin_teardown
+	 * - Destroyed by native_loader_unload(), which calls tmm_plugin_teardown
 	 *   (if present) and then closes the library handle.
 	 */
 	struct NativePlugin {
@@ -54,20 +54,20 @@ namespace ttm::plugins {
 		/* -----------------------------------------------------------------
 		 * Persistent host API copy
 		 *
-		 * native_loader_load() copies the caller's ttm_host_api here before
-		 * passing &persistentApi to ttm_plugin_init, so that native plugins
+		 * native_loader_load() copies the caller's tmm_host_api here before
+		 * passing &persistentApi to tmm_plugin_init, so that native plugins
 		 * may safely retain the pointer for post-init use.  ctx is initially
 		 * the PluginRegistrationCtx* for registration; PluginManager::load()
 		 * updates it to PluginManager* after a successful load so lifecycle
 		 * callbacks receive a valid context.
 		 * -------------------------------------------------------------- */
-		ttm_host_api persistentApi{};
+		tmm_host_api persistentApi{};
 
 		/* -----------------------------------------------------------------
 		 * Required entry points (non-null after successful load)
 		 * -------------------------------------------------------------- */
-		ttm_plugin_info* (*fnGetInfo)() = nullptr;
-		ttm_error (*fnInit)(const ttm_host_api*, const char*, uint32_t) = nullptr;
+		tmm_plugin_info* (*fnGetInfo)() = nullptr;
+		tmm_error (*fnInit)(const tmm_host_api*, const char*, uint32_t) = nullptr;
 
 		/* -----------------------------------------------------------------
 		 * Optional entry points (nullptr = not exported by this plugin)
@@ -128,14 +128,14 @@ namespace ttm::plugins {
 	 * @brief Load, initialise, and resolve a native shared-library plugin.
 	 *
 	 * @param[in]  path         Path to the shared library (.so / .dylib / .dll).
-	 * @param[in]  config_json  JSON configuration string passed to ttm_plugin_init.
+	 * @param[in]  config_json  JSON configuration string passed to tmm_plugin_init.
 	 * @param[in]  host_api     Fully populated host API struct (callbacks + ctx).
 	 * @param[out] plugin       NativePlugin struct to populate on success.
 	 *
 	 * @return `{}` on success, or an error string describing which step failed.
 	 */
-	[[nodiscard]] std::expected<void, std::string> native_loader_load(
-			const std::filesystem::path& path, std::string_view config_json, const ttm_host_api& host_api,
+	[[nodiscard]] std::expected<void, std::string> nativeLoaderLoad(
+			const std::filesystem::path& path, std::string_view config_json, const tmm_host_api& host_api,
 			NativePlugin& plugin
 	);
 
@@ -143,11 +143,11 @@ namespace ttm::plugins {
 	 * @brief Tear down a native plugin and unload the library.
 	 *
 	 * @details
-	 * Calls ttm_plugin_teardown (if present) then closes the library handle.
+	 * Calls tmm_plugin_teardown (if present) then closes the library handle.
 	 * Always succeeds.
 	 *
 	 * @param[in,out] plugin  Plugin to unload; dlHandle is set to nullptr on return.
 	 */
-	void native_loader_unload(NativePlugin& plugin);
+	void nativeLoaderUnload(NativePlugin& plugin);
 
-} // namespace ttm::plugins
+} // namespace tmm::plugins

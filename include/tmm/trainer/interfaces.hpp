@@ -3,7 +3,7 @@
  * @brief Abstract interfaces for model, optimizer, and LR scheduler.
  *
  * @details
- * These interfaces are the extension points that a @ref ttm::trainer::Trainer
+ * These interfaces are the extension points that a @ref tmm::trainer::Trainer
  * depends on.  Concrete implementations are provided by the caller — either
  * hand-written for testing or loaded from a TVM module, ONNX model, etc.
  *
@@ -13,7 +13,7 @@
  * - @c infer() — forward only, no gradient side-effects (used for validation).
  *
  * ### Gradient accumulation
- * The Trainer calls @c IModel::zero_grad() once before the first micro-batch
+ * The Trainer calls @c IModel::zeroGrad() once before the first micro-batch
  * in an accumulation window and @c IModel::step() for each micro-batch.
  * @c IOptimizer::step() is called once at the end of the window.
  */
@@ -29,7 +29,7 @@
 
 #include <arrow/record_batch.h>
 
-namespace ttm::trainer {
+namespace tmm::trainer {
 
 	/* =========================================================================
 	 * Batch — one mini-batch of data from a DatasetIterator
@@ -37,8 +37,8 @@ namespace ttm::trainer {
 
 	struct Batch {
 		std::shared_ptr<arrow::RecordBatch> data;
-		int64_t global_index = 0; ///< Monotonically increasing across all epochs.
-		int64_t epoch_index = 0;  ///< Batch index within the current epoch.
+		int64_t globalIndex = 0; ///< Monotonically increasing across all epochs.
+		int64_t epochIndex = 0;  ///< Batch index within the current epoch.
 	};
 
 	/* =========================================================================
@@ -57,11 +57,11 @@ namespace ttm::trainer {
 
 	struct EpochMetrics {
 		int64_t epoch = 0;
-		int64_t global_step = 0; ///< Total optimizer steps taken so far.
-		float train_loss = 0.0f;
-		float val_loss = std::numeric_limits<float>::quiet_NaN();
-		float learning_rate = 0.0f;
-		double throughput_samples_per_sec = 0.0;
+		int64_t globalStep = 0; ///< Total optimizer steps taken so far.
+		float trainLoss = 0.0f;
+		float valLoss = std::numeric_limits<float>::quiet_NaN();
+		float learningRate = 0.0f;
+		double throughputSamplesPerSec = 0.0;
 		std::unordered_map<std::string, float> extras;
 	};
 
@@ -101,7 +101,7 @@ namespace ttm::trainer {
 		virtual StepOutput infer(const Batch& batch) = 0;
 
 		/// Zero out all accumulated gradients.
-		virtual void zero_grad() = 0;
+		virtual void zeroGrad() = 0;
 	};
 
 	/* =========================================================================
@@ -119,10 +119,10 @@ namespace ttm::trainer {
 
 		/// Apply one optimizer step using the gradients currently stored in the model.
 		virtual void step() = 0;
-		virtual void zero_grad() = 0;
+		virtual void zeroGrad() = 0;
 
-		[[nodiscard]] virtual float learning_rate() const = 0;
-		virtual void set_learning_rate(float lr) = 0;
+		[[nodiscard]] virtual float learningRate() const = 0;
+		virtual void setLearningRate(float lr) = 0;
 	};
 
 	/* =========================================================================
@@ -133,9 +133,9 @@ namespace ttm::trainer {
 	 * @brief Maps a global optimizer step index to a learning rate.
 	 *
 	 * The Trainer calls @c step() after each optimizer step and applies the
-	 * returned LR to the optimizer via @c IOptimizer::set_learning_rate().
+	 * returned LR to the optimizer via @c IOptimizer::setLearningRate().
 	 *
-	 * @note `global_optimizer_step` is 0-indexed.
+	 * @note `globalOptimizerStep` is 0-indexed.
 	 */
 	class ILRScheduler {
 	public:
@@ -146,7 +146,7 @@ namespace ttm::trainer {
 		ILRScheduler(ILRScheduler&&) = default;
 		ILRScheduler& operator=(ILRScheduler&&) = default;
 
-		[[nodiscard]] virtual float step(int64_t global_optimizer_step) = 0;
+		[[nodiscard]] virtual float step(int64_t globalOptimizerStep) = 0;
 	};
 
-} // namespace ttm::trainer
+} // namespace tmm::trainer

@@ -1,6 +1,6 @@
 /**
  * @file python_optimizer.cpp
- * @brief TTM Python plugin — AdamW optimizer backed by torch.optim.AdamW.
+ * @brief TMM Python plugin — AdamW optimizer backed by torch.optim.AdamW.
  *
  * @details
  * Registered under the name "adamw".  Creates a torch.optim.AdamW wrapping the
@@ -26,7 +26,7 @@
 
 #include "python_plugin.hpp"
 
-#include <ttm_python_export.h>
+#include <tmm_python_export.h>
 
 #include <array>
 #include <cstdint>
@@ -55,17 +55,17 @@ namespace {
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 	PyOptState g_opts[kMaxOpts]{};
 
-	ttm_handle alloc_opt_slot(PyObject* opt) {
+	tmm_handle alloc_opt_slot(PyObject* opt) {
 		for (int i = 0; i < kMaxOpts; ++i) {
 			if (!g_opts[i].used) {
 				g_opts[i] = {opt, true};
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	PyOptState* get_opt(ttm_handle h) {
+	PyOptState* get_opt(tmm_handle h) {
 		if (h < 0 || h >= kMaxOpts)
 			return nullptr;
 		return g_opts[static_cast<int>(h)].used ? &g_opts[static_cast<int>(h)] : nullptr;
@@ -148,17 +148,17 @@ namespace {
  * AdamW vtable implementations
  * ========================================================================= */
 
-static ttm_handle py_adamw_create(
-		ttm_handle model_h, const DLTensor* /*params*/, uint32_t /*param_count*/, const DLTensor* /*grads*/,
+static tmm_handle py_adamw_create(
+		tmm_handle model_h, const DLTensor* /*params*/, uint32_t /*param_count*/, const DLTensor* /*grads*/,
 		const char* cfg, uint32_t cfg_len, char* err, uint32_t err_cap
 ) {
-#ifndef TTM_PYTHON_HAS_TORCH
+#ifndef TMM_PYTHON_HAS_TORCH
 	std::snprintf(
 			err, err_cap,
 			"AdamW optimizer requires PyTorch.\n"
 			"Install PyTorch (pip install torch) and rebuild the plugin."
 	);
-	return TTM_INVALID_HANDLE;
+	return TMM_INVALID_HANDLE;
 #else
 	PyObject* model_obj = py_get_model_obj(model_h);
 	if (model_obj == nullptr) {
@@ -166,7 +166,7 @@ static ttm_handle py_adamw_create(
 				err, err_cap, "AdamW: invalid model handle %lld — model must be loaded first",
 				static_cast<long long>(model_h)
 		);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* Parse optimizer hyperparameters from cfg_json */
@@ -191,7 +191,7 @@ static ttm_handle py_adamw_create(
 				"check that the device is available",
 				device.c_str()
 		);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 	Py_DECREF(to_result);
 
@@ -200,7 +200,7 @@ static ttm_handle py_adamw_create(
 	if (params_iter == nullptr) {
 		PyErr_Clear();
 		std::snprintf(err, err_cap, "AdamW: model.parameters() failed");
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* Import torch.optim.AdamW -------------------------------------------- */
@@ -214,7 +214,7 @@ static ttm_handle py_adamw_create(
 		PyErr_Clear();
 		Py_DECREF(params_iter);
 		std::snprintf(err, err_cap, "AdamW: cannot access torch.optim.AdamW");
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* Build keyword-argument dict ----------------------------------------- */
@@ -257,53 +257,53 @@ static ttm_handle py_adamw_create(
 		PyErr_Print();
 		PyErr_Clear();
 		std::snprintf(err, err_cap, "AdamW: torch.optim.AdamW() constructor failed");
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	const ttm_handle h = alloc_opt_slot(optimizer);
-	if (h == TTM_INVALID_HANDLE) {
+	const tmm_handle h = alloc_opt_slot(optimizer);
+	if (h == TMM_INVALID_HANDLE) {
 		std::snprintf(err, err_cap, "AdamW: too many optimizers loaded simultaneously (max %d)", kMaxOpts);
 		Py_DECREF(optimizer);
 	}
 	return h;
-#endif // TTM_PYTHON_HAS_TORCH
+#endif // TMM_PYTHON_HAS_TORCH
 }
 
-static ttm_error py_adamw_step(ttm_handle h) {
+static tmm_error py_adamw_step(tmm_handle h) {
 	auto* st = get_opt(h);
 	if (st == nullptr)
-		return TTM_ERR_NOT_FOUND;
-#ifdef TTM_PYTHON_HAS_TORCH
+		return TMM_ERR_NOT_FOUND;
+#ifdef TMM_PYTHON_HAS_TORCH
 	PyObject* result = PyObject_CallMethod(st->optimizer, "step", nullptr);
 	if (result == nullptr) {
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 	Py_DECREF(result);
 #endif
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static ttm_error py_adamw_zero_grad(ttm_handle h) {
+static tmm_error py_adamw_zero_grad(tmm_handle h) {
 	auto* st = get_opt(h);
 	if (st == nullptr)
-		return TTM_ERR_NOT_FOUND;
-#ifdef TTM_PYTHON_HAS_TORCH
+		return TMM_ERR_NOT_FOUND;
+#ifdef TMM_PYTHON_HAS_TORCH
 	PyObject* result = PyObject_CallMethod(st->optimizer, "zero_grad", nullptr);
 	if (result == nullptr) {
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 	Py_DECREF(result);
 #endif
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static float py_adamw_get_lr(ttm_handle h) {
+static float py_adamw_get_lr(tmm_handle h) {
 	const auto* st = get_opt(h);
 	if (st == nullptr)
 		return 0.0f;
-#ifdef TTM_PYTHON_HAS_TORCH
+#ifdef TMM_PYTHON_HAS_TORCH
 	/* optimizer.param_groups[0]['lr'] */
 	PyObject* groups = PyObject_GetAttrString(st->optimizer, "param_groups");
 	if (groups == nullptr) {
@@ -324,11 +324,11 @@ static float py_adamw_get_lr(ttm_handle h) {
 #endif
 }
 
-static void py_adamw_set_lr(ttm_handle h, float lr) {
+static void py_adamw_set_lr(tmm_handle h, float lr) {
 	auto* st = get_opt(h);
 	if (st == nullptr)
 		return;
-#ifdef TTM_PYTHON_HAS_TORCH
+#ifdef TMM_PYTHON_HAS_TORCH
 	/* Update lr on every param group so all parameters use the new rate. */
 	PyObject* groups = PyObject_GetAttrString(st->optimizer, "param_groups");
 	if (groups == nullptr) {
@@ -346,7 +346,7 @@ static void py_adamw_set_lr(ttm_handle h, float lr) {
 #endif
 }
 
-static void py_adamw_destroy(ttm_handle h) {
+static void py_adamw_destroy(tmm_handle h) {
 	auto* st = get_opt(h);
 	if (st == nullptr)
 		return;
@@ -355,7 +355,7 @@ static void py_adamw_destroy(ttm_handle h) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static ttm_optimizer_vtable g_adamw_vtable = {
+static tmm_optimizer_vtable g_adamw_vtable = {
 		py_adamw_create, py_adamw_step, py_adamw_zero_grad, py_adamw_get_lr, py_adamw_set_lr, py_adamw_destroy,
 };
 
@@ -363,9 +363,9 @@ static ttm_optimizer_vtable g_adamw_vtable = {
  * Registration / teardown (called from python_model.cpp)
  * ========================================================================= */
 
-ttm_error pyOptimizerRegister(const ttm_host_api* host) {
+tmm_error pyOptimizerRegister(const tmm_host_api* host) {
 	if (host->register_optimizer == nullptr)
-		return TTM_OK;
+		return TMM_OK;
 	return host->register_optimizer(host->ctx, "adamw", &g_adamw_vtable);
 }
 

@@ -3,7 +3,7 @@
  * @brief Default Arrow → DLTensor collator implementation.
  */
 
-#include <ttm/model/collator.hpp>
+#include <tmm/model/collator.hpp>
 
 #include <arrow/array.h>
 #include <arrow/extension_type.h>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace ttm::model {
+namespace tmm::model {
 
 	namespace {
 
@@ -162,7 +162,7 @@ namespace ttm::model {
 						const auto value_type_id = fsl_type->value_type()->id();
 
 						if (!is_numeric_col(value_type_id)) {
-							std::cerr << "[ttm/collator] skipping FixedSizeList column '" << field->name()
+							std::cerr << "[tmm/collator] skipping FixedSizeList column '" << field->name()
 									  << "': non-numeric value type\n";
 							continue;
 						}
@@ -190,7 +190,7 @@ namespace ttm::model {
 							));
 						}
 					} else {
-						std::cerr << "[ttm/collator] skipping column '" << field->name() << "' (unsupported type)\n";
+						std::cerr << "[tmm/collator] skipping column '" << field->name() << "' (unsupported type)\n";
 					}
 				}
 
@@ -209,4 +209,4 @@ namespace ttm::model {
 		return std::make_unique<DefaultCollator>(arrow::schema(schema.fields(), schema.metadata()));
 	}
 
-} // namespace ttm::model
+} // namespace tmm::model

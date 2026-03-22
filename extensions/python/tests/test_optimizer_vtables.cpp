@@ -1,27 +1,27 @@
 /**
  * @file test_optimizer_vtables.cpp
- * @brief Integration tests for the AdamW optimizer vtable in ttm_python.
+ * @brief Integration tests for the AdamW optimizer vtable in tmm_python.
  *
  * @details
- * These tests load `ttm_python.so` via dlopen (or LoadLibrary on Windows),
- * call `ttm_plugin_init` with a mock host API that captures the registered
+ * These tests load `tmm_python.so` via dlopen (or LoadLibrary on Windows),
+ * call `tmm_plugin_init` with a mock host API that captures the registered
  * model loader and optimizer vtables, then exercise the AdamW optimizer
  * through the vtable function pointers.
  *
  * ### Running standalone
- * Build with `-DTTM_BUILD_EXTENSIONS=ON` then:
+ * Build with `-DTMM_BUILD_EXTENSIONS=ON` then:
  * @code
- *   ctest --test-dir build --output-on-failure -R "^ttm_python"
+ *   ctest --test-dir build --output-on-failure -R "^tmm_python"
  * @endcode
  *
  * ### Running PyTorch-dependent tests
  * The tests tagged `[.optional]` require PyTorch to be installed.  Run them
  * explicitly:
  * @code
- *   ctest --test-dir build -R "^ttm_python" -C ".*optional.*"
+ *   ctest --test-dir build -R "^tmm_python" -C ".*optional.*"
  *   # or via Catch2 directly:
- *   ./ttm_python_tests "[python][optimizer]"
- *   ./ttm_python_tests "[python][optimizer][.optional]"
+ *   ./tmm_python_tests "[python][optimizer]"
+ *   ./tmm_python_tests "[python][optimizer][.optional]"
  * @endcode
  *
  * ### Plugin singleton
@@ -32,7 +32,7 @@
  */
 
 #define PY_SSIZE_T_CLEAN // suppress Python.h warning if Python is found
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -109,7 +109,7 @@ class MinimalModel(torch.nn.Module):
 		explicit TempPyFile(const char* content) {
 			// Use the object address to ensure a unique filename per instance.
 			path_ = std::filesystem::temp_directory_path() /
-					("ttm_opt_test_" + std::to_string(reinterpret_cast<uintptr_t>(this)) + ".py");
+					("tmm_opt_test_" + std::to_string(reinterpret_cast<uintptr_t>(this)) + ".py");
 			std::ofstream f(path_);
 			f << content;
 		}
@@ -128,30 +128,30 @@ class MinimalModel(torch.nn.Module):
 	// Plugin fixture
 	// =============================================================================
 
-	/// Return the filesystem path to ttm_python.so, from environment or CMake def.
+	/// Return the filesystem path to tmm_python.so, from environment or CMake def.
 	std::filesystem::path python_plugin_path() {
-		if (const char* env = std::getenv("TTM_PYTHON_PLUGIN"); env != nullptr) {
+		if (const char* env = std::getenv("TMM_PYTHON_PLUGIN"); env != nullptr) {
 			return env;
 		}
-#ifdef TTM_PYTHON_PLUGIN_PATH
-		return TTM_PYTHON_PLUGIN_PATH;
+#ifdef TMM_PYTHON_PLUGIN_PATH
+		return TMM_PYTHON_PLUGIN_PATH;
 #else
 		return {};
 #endif
 	}
 
 	/**
-	 * @brief RAII guard that loads ttm_python.so and collects registered vtables.
+	 * @brief RAII guard that loads tmm_python.so and collects registered vtables.
 	 *
 	 * @details
-	 * On construction: opens the shared library, calls ttm_plugin_init with a mock
+	 * On construction: opens the shared library, calls tmm_plugin_init with a mock
 	 * host API that records the `register_model_loader` and `register_optimizer`
-	 * calls.  On destruction: calls ttm_plugin_teardown and closes the library.
+	 * calls.  On destruction: calls tmm_plugin_teardown and closes the library.
 	 */
 	class PythonPlugin {
 	public:
-		ttm_model_loader_vtable model_loader{};
-		std::unordered_map<std::string, ttm_optimizer_vtable> optimizers;
+		tmm_model_loader_vtable model_loader{};
+		std::unordered_map<std::string, tmm_optimizer_vtable> optimizers;
 		bool loaded = false;
 		bool has_model_loader = false;
 
@@ -166,9 +166,9 @@ class MinimalModel(torch.nn.Module):
 
 			// Resolve required entry points
 			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-			fnInit_ = reinterpret_cast<decltype(fnInit_)>(lib_sym(lib_, "ttm_plugin_init"));
+			fnInit_ = reinterpret_cast<decltype(fnInit_)>(lib_sym(lib_, "tmm_plugin_init"));
 			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-			fnTeardown_ = reinterpret_cast<decltype(fnTeardown_)>(lib_sym(lib_, "ttm_plugin_teardown"));
+			fnTeardown_ = reinterpret_cast<decltype(fnTeardown_)>(lib_sym(lib_, "tmm_plugin_teardown"));
 
 			if (fnInit_ == nullptr) {
 				lib_close(lib_);
@@ -178,7 +178,7 @@ class MinimalModel(torch.nn.Module):
 
 			// Build mock host API — only register_model_loader and register_optimizer
 			// are exercised here; all others are noops.
-			ttm_host_api api{};
+			tmm_host_api api{};
 			api.ctx = this;
 			api.register_source = &s_noop_register_source;
 			api.register_transform = &s_noop_register_transform;
@@ -194,7 +194,7 @@ class MinimalModel(torch.nn.Module):
 			api.alloc = &s_alloc;
 			api.free = &s_free;
 
-			if (fnInit_(&api, "{}", 2) == TTM_OK) {
+			if (fnInit_(&api, "{}", 2) == TMM_OK) {
 				loaded = true;
 			}
 		}
@@ -210,37 +210,37 @@ class MinimalModel(torch.nn.Module):
 
 	private:
 		void* lib_ = nullptr;
-		ttm_error (*fnInit_)(const ttm_host_api*, const char*, uint32_t) = nullptr;
+		tmm_error (*fnInit_)(const tmm_host_api*, const char*, uint32_t) = nullptr;
 		void (*fnTeardown_)() = nullptr;
 
 		// --- mock callbacks ---
-		static ttm_error s_register_optimizer(void* ctx, const char* name, const ttm_optimizer_vtable* vt) {
+		static tmm_error s_register_optimizer(void* ctx, const char* name, const tmm_optimizer_vtable* vt) {
 			if (ctx == nullptr || name == nullptr || vt == nullptr)
-				return TTM_ERR_ARGS;
+				return TMM_ERR_ARGS;
 			static_cast<PythonPlugin*>(ctx)->optimizers.insert_or_assign(std::string(name), *vt);
-			return TTM_OK;
+			return TMM_OK;
 		}
-		static ttm_error s_register_model_loader(void* ctx, const ttm_model_loader_vtable* vt) {
+		static tmm_error s_register_model_loader(void* ctx, const tmm_model_loader_vtable* vt) {
 			if (ctx == nullptr || vt == nullptr)
-				return TTM_ERR_ARGS;
+				return TMM_ERR_ARGS;
 			auto* self = static_cast<PythonPlugin*>(ctx);
 			self->model_loader = *vt;
 			self->has_model_loader = true;
-			return TTM_OK;
+			return TMM_OK;
 		}
-		static ttm_error s_noop_register_source(void*, const char**, const ttm_source_vtable*) { return TTM_OK; }
-		static ttm_error s_noop_register_transform(void*, const char*, const char**, const ttm_transform_vtable*) {
-			return TTM_OK;
+		static tmm_error s_noop_register_source(void*, const char**, const tmm_source_vtable*) { return TMM_OK; }
+		static tmm_error s_noop_register_transform(void*, const char*, const char**, const tmm_transform_vtable*) {
+			return TMM_OK;
 		}
-		static ttm_error s_noop_register_task(void*, const char*, const char**, const ttm_task_vtable*) {
-			return TTM_OK;
+		static tmm_error s_noop_register_task(void*, const char*, const char**, const tmm_task_vtable*) {
+			return TMM_OK;
 		}
-		static ttm_error s_noop_register_metric(void*, const char*, const char**, const ttm_metric_vtable*) {
-			return TTM_OK;
+		static tmm_error s_noop_register_metric(void*, const char*, const char**, const tmm_metric_vtable*) {
+			return TMM_OK;
 		}
-		static void s_noop_notify_model_info(void*, const ttm_model_info_t*) {}
-		static ttm_error s_noop_register_scheduler(void*, const char*, const ttm_scheduler_vtable*) { return TTM_OK; }
-		static void s_noop_log(void*, ttm_log_level, const char*, uint32_t) {}
+		static void s_noop_notify_model_info(void*, const tmm_model_info_t*) {}
+		static tmm_error s_noop_register_scheduler(void*, const char*, const tmm_scheduler_vtable*) { return TMM_OK; }
+		static void s_noop_log(void*, tmm_log_level, const char*, uint32_t) {}
 		static void s_noop_log_metric(void*, const char*, uint32_t, float, int32_t) {}
 		static void s_noop_terminal_size(void*, uint32_t* w, uint32_t* h) {
 			if (w)
@@ -286,7 +286,7 @@ class MinimalModel(torch.nn.Module):
 TEST_CASE("Python plugin loads and registers adamw optimizer", "[python][optimizer]") {
 	auto& p = python_plugin();
 	if (!p.loaded) {
-		WARN("ttm_python.so not found — skipping python optimizer tests");
+		WARN("tmm_python.so not found — skipping python optimizer tests");
 		return;
 	}
 
@@ -320,11 +320,11 @@ TEST_CASE("adamw create with invalid model handle returns error", "[python][opti
 	const auto cfg = make_opt_cfg();
 	char err[256]{};
 
-	const ttm_handle h = vt.create(
-			TTM_INVALID_HANDLE, nullptr, 0, nullptr, cfg.c_str(), static_cast<uint32_t>(cfg.size()), err, sizeof(err)
+	const tmm_handle h = vt.create(
+			TMM_INVALID_HANDLE, nullptr, 0, nullptr, cfg.c_str(), static_cast<uint32_t>(cfg.size()), err, sizeof(err)
 	);
 
-	CHECK(h == TTM_INVALID_HANDLE);
+	CHECK(h == TMM_INVALID_HANDLE);
 	CHECK(err[0] != '\0'); // error message must be set
 }
 
@@ -335,9 +335,9 @@ TEST_CASE("adamw step/zero_grad/get_lr on invalid handle return sentinel values"
 	REQUIRE(p.optimizers.count("adamw") == 1);
 
 	const auto& vt = p.optimizers.at("adamw");
-	CHECK(vt.step(TTM_INVALID_HANDLE) == TTM_ERR_NOT_FOUND);
-	CHECK(vt.zero_grad(TTM_INVALID_HANDLE) == TTM_ERR_NOT_FOUND);
-	CHECK(vt.get_lr(TTM_INVALID_HANDLE) == 0.0f);
+	CHECK(vt.step(TMM_INVALID_HANDLE) == TMM_ERR_NOT_FOUND);
+	CHECK(vt.zero_grad(TMM_INVALID_HANDLE) == TMM_ERR_NOT_FOUND);
+	CHECK(vt.get_lr(TMM_INVALID_HANDLE) == 0.0f);
 }
 
 TEST_CASE("adamw destroy on invalid handle is safe", "[python][optimizer]") {
@@ -348,8 +348,8 @@ TEST_CASE("adamw destroy on invalid handle is safe", "[python][optimizer]") {
 
 	const auto& vt = p.optimizers.at("adamw");
 	// Must not crash
-	vt.destroy(TTM_INVALID_HANDLE);
-	vt.destroy(static_cast<ttm_handle>(-2));
+	vt.destroy(TMM_INVALID_HANDLE);
+	vt.destroy(static_cast<tmm_handle>(-2));
 }
 
 // =============================================================================
@@ -367,10 +367,10 @@ TEST_CASE("adamw full lifecycle with a PyTorch model", "[python][optimizer][.opt
 	const std::string path = tmp.path().string();
 
 	char err[512]{};
-	const ttm_handle model_h =
+	const tmm_handle model_h =
 			p.model_loader.load(path.c_str(), static_cast<uint32_t>(path.size()), "{}", 2, err, sizeof(err));
 
-	if (model_h == TTM_INVALID_HANDLE) {
+	if (model_h == TMM_INVALID_HANDLE) {
 		WARN("PyTorch not available (" << err << ") — skipping lifecycle test");
 		return;
 	}
@@ -378,9 +378,9 @@ TEST_CASE("adamw full lifecycle with a PyTorch model", "[python][optimizer][.opt
 	const auto& vt = p.optimizers.at("adamw");
 	const auto cfg = make_opt_cfg(1e-3f);
 
-	const ttm_handle opt_h =
+	const tmm_handle opt_h =
 			vt.create(model_h, nullptr, 0, nullptr, cfg.c_str(), static_cast<uint32_t>(cfg.size()), err, sizeof(err));
-	REQUIRE(opt_h != TTM_INVALID_HANDLE);
+	REQUIRE(opt_h != TMM_INVALID_HANDLE);
 
 	// Initial LR must match what was configured
 	CHECK_THAT(vt.get_lr(opt_h), Catch::Matchers::WithinAbs(1e-3f, kEps));
@@ -391,8 +391,8 @@ TEST_CASE("adamw full lifecycle with a PyTorch model", "[python][optimizer][.opt
 
 	// zero_grad and step must not error (no real forward pass — gradients are
 	// zero, but the optimizer step is still a valid no-op)
-	CHECK(vt.zero_grad(opt_h) == TTM_OK);
-	CHECK(vt.step(opt_h) == TTM_OK);
+	CHECK(vt.zero_grad(opt_h) == TMM_OK);
+	CHECK(vt.step(opt_h) == TMM_OK);
 
 	vt.destroy(opt_h);
 	p.model_loader.destroy(model_h);
@@ -409,27 +409,27 @@ TEST_CASE("adamw multiple optimizer handles are independent", "[python][optimize
 	const std::string path = tmp.path().string();
 
 	char err[512]{};
-	const ttm_handle m1 =
+	const tmm_handle m1 =
 			p.model_loader.load(path.c_str(), static_cast<uint32_t>(path.size()), "{}", 2, err, sizeof(err));
-	if (m1 == TTM_INVALID_HANDLE) {
+	if (m1 == TMM_INVALID_HANDLE) {
 		WARN("PyTorch not available — skipping independence test");
 		return;
 	}
-	const ttm_handle m2 =
+	const tmm_handle m2 =
 			p.model_loader.load(path.c_str(), static_cast<uint32_t>(path.size()), "{}", 2, err, sizeof(err));
-	REQUIRE(m2 != TTM_INVALID_HANDLE);
+	REQUIRE(m2 != TMM_INVALID_HANDLE);
 
 	const auto& vt = p.optimizers.at("adamw");
 	const auto cfg1 = make_opt_cfg(1e-3f);
 	const auto cfg2 = make_opt_cfg(1e-2f);
 
-	const ttm_handle opt1 =
+	const tmm_handle opt1 =
 			vt.create(m1, nullptr, 0, nullptr, cfg1.c_str(), static_cast<uint32_t>(cfg1.size()), err, sizeof(err));
-	const ttm_handle opt2 =
+	const tmm_handle opt2 =
 			vt.create(m2, nullptr, 0, nullptr, cfg2.c_str(), static_cast<uint32_t>(cfg2.size()), err, sizeof(err));
 
-	REQUIRE(opt1 != TTM_INVALID_HANDLE);
-	REQUIRE(opt2 != TTM_INVALID_HANDLE);
+	REQUIRE(opt1 != TMM_INVALID_HANDLE);
+	REQUIRE(opt2 != TMM_INVALID_HANDLE);
 	REQUIRE(opt1 != opt2);
 
 	// Each handle reports its own configured LR
@@ -458,9 +458,9 @@ TEST_CASE("adamw lr integrates with scheduler-driven updates", "[python][optimiz
 	const std::string path = tmp.path().string();
 
 	char err[512]{};
-	const ttm_handle model_h =
+	const tmm_handle model_h =
 			p.model_loader.load(path.c_str(), static_cast<uint32_t>(path.size()), "{}", 2, err, sizeof(err));
-	if (model_h == TTM_INVALID_HANDLE) {
+	if (model_h == TMM_INVALID_HANDLE) {
 		WARN("PyTorch not available — skipping scheduler integration test");
 		return;
 	}
@@ -468,9 +468,9 @@ TEST_CASE("adamw lr integrates with scheduler-driven updates", "[python][optimiz
 	const auto& vt = p.optimizers.at("adamw");
 	const auto cfg = make_opt_cfg(1.0f); // start at lr=1.0 for easy arithmetic
 
-	const ttm_handle opt_h =
+	const tmm_handle opt_h =
 			vt.create(model_h, nullptr, 0, nullptr, cfg.c_str(), static_cast<uint32_t>(cfg.size()), err, sizeof(err));
-	REQUIRE(opt_h != TTM_INVALID_HANDLE);
+	REQUIRE(opt_h != TMM_INVALID_HANDLE);
 
 	// Simulate a scheduler halving the LR at each step
 	for (float expected = 1.0f; expected > 1e-3f; expected *= 0.5f) {

@@ -14,7 +14,7 @@
  * - seekoff() is forwarded to IByteReader::seek() only when seekable().
  */
 
-#include <ttm/plugins/extension.hpp>
+#include <tmm/plugins/extension.hpp>
 
 #include <array>
 #include <cstddef>
@@ -25,7 +25,7 @@
 #include <memory>
 #include <streambuf>
 
-namespace ttm::plugins {
+namespace tmm::plugins {
 
 	/* =========================================================================
 	 * detail::ByteReaderBuf — internal std::streambuf adapter
@@ -126,8 +126,9 @@ namespace ttm::plugins {
 			IByteReader& reader_;
 
 			/** Size of the internal read buffer — 64 KiB amortises plugin boundary crossings. */
-			static constexpr std::size_t kBufSize = 64UL * 1024UL; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-																   // -- 64 KiB is the intended buffer size
+			static constexpr std::size_t kBufSize =
+					64UL * 1024UL; // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+								   // -- 64 KiB is the intended buffer size
 			/** Internal read buffer. */
 			std::array<char, kBufSize> buf_{};
 		};
@@ -148,4 +149,4 @@ namespace ttm::plugins {
 		return *stream;
 	}
 
-} // namespace ttm::plugins
+} // namespace tmm::plugins

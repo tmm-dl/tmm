@@ -1,7 +1,7 @@
 /**
  * @file device.hpp
  * @brief Device descriptor for model execution.
- * @ingroup ttm_model
+ * @ingroup tmm_model
  */
 
 #pragma once
@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace ttm::model {
+namespace tmm::model {
 
 	/**
 	 * @brief Identifies the hardware device on which a model runs.
@@ -22,7 +22,7 @@ namespace ttm::model {
 	 * e.g. `"cpu"`, `"cuda:0"`, `"metal:0"`.  The `id` defaults to 0 when
 	 * omitted.  from_string() is lenient: unknown strings fall back to CPU.
 	 *
-	 * @ingroup ttm_model
+	 * @ingroup tmm_model
 	 */
 	struct Device {
 		DLDeviceType type = kDLCPU; ///< DLPack device type constant.
@@ -58,4 +58,4 @@ namespace ttm::model {
 		[[nodiscard]] DLDevice to_dl() const noexcept { return {type, id}; }
 	};
 
-} // namespace ttm::model
+} // namespace tmm::model

@@ -1,12 +1,12 @@
 /**
  * @file test_python_plugin_integration.cpp
- * @brief Integration test for the ttm_python plugin (PyTorch model loader).
+ * @brief Integration test for the tmm_python plugin (PyTorch model loader).
  *
  * @details
  * These tests exercise the full plugin lifecycle for `.py` model files:
  *
- *   1. Load `ttm_python.so` into a PluginManager via `mgr.load()`.
- *   2. Verify that `find_model_loader()` returns a loader that probes `.py`.
+ *   1. Load `tmm_python.so` into a PluginManager via `mgr.load()`.
+ *   2. Verify that `findModelLoader()` returns a loader that probes `.py`.
  *   3. Write a minimal `torch.nn.Module` subclass to a temporary `.py` file.
  *   4. Call `loader->open()` and inspect the result:
  *      - Without PyTorch installed: expect a descriptive error message.
@@ -14,9 +14,9 @@
  *   5. When loaded: call `get_info()`, `zero_grad()`, and `destroy()`.
  *
  * ### Running
- * The test requires that `ttm_python.so` was built (TTM_BUILD_EXTENSIONS=ON).
+ * The test requires that `tmm_python.so` was built (TMM_BUILD_EXTENSIONS=ON).
  * It is skipped at runtime when the plugin file is not present.  Set the
- * environment variable `TTM_PYTHON_PLUGIN` to override the plugin path.
+ * environment variable `TMM_PYTHON_PLUGIN` to override the plugin path.
  *
  * ### PyTorch availability
  * When PyTorch is **not** installed the test still passes — it verifies
@@ -24,8 +24,8 @@
  * PyTorch **is** installed the test additionally exercises the happy path.
  */
 
-#include <ttm/model/device.hpp>
-#include <ttm/plugins/plugin_manager.hpp>
+#include <tmm/model/device.hpp>
+#include <tmm/plugins/plugin_manager.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -41,15 +41,15 @@
 
 namespace {
 
-	/// Resolve the path to ttm_python.so.
-	/// Checks $TTM_PYTHON_PLUGIN env var first, then falls back to the
-	/// compile-time path injected by CMake (TTM_PYTHON_PLUGIN_PATH macro).
+	/// Resolve the path to tmm_python.so.
+	/// Checks $TMM_PYTHON_PLUGIN env var first, then falls back to the
+	/// compile-time path injected by CMake (TMM_PYTHON_PLUGIN_PATH macro).
 	std::filesystem::path plugin_path() {
-		if (const char* env = std::getenv("TTM_PYTHON_PLUGIN"); env != nullptr) {
+		if (const char* env = std::getenv("TMM_PYTHON_PLUGIN"); env != nullptr) {
 			return env;
 		}
-#ifdef TTM_PYTHON_PLUGIN_PATH
-		return TTM_PYTHON_PLUGIN_PATH;
+#ifdef TMM_PYTHON_PLUGIN_PATH
+		return TMM_PYTHON_PLUGIN_PATH;
 #else
 		return {}; // unknown — test will skip
 #endif
@@ -60,8 +60,8 @@ namespace {
 		std::filesystem::path path;
 
 		explicit TempPyFile(std::string_view content) {
-			path = std::filesystem::temp_directory_path() / "ttm_test_model_XXXXXX.py";
-			path.replace_filename("ttm_test_model_integration.py");
+			path = std::filesystem::temp_directory_path() / "tmm_test_model_XXXXXX.py";
+			path.replace_filename("tmm_test_model_integration.py");
 			std::ofstream ofs(path);
 			ofs << content;
 		}
@@ -92,13 +92,13 @@ class TinyModel(nn.Module):
 // Plugin presence guard
 // =============================================================================
 
-TEST_CASE("ttm_python plugin file is locatable", "[python][integration][.optional]") {
+TEST_CASE("tmm_python plugin file is locatable", "[python][integration][.optional]") {
 	const auto path = plugin_path();
 	if (path.empty()) {
-		SKIP("TTM_PYTHON_PLUGIN_PATH not set and $TTM_PYTHON_PLUGIN not in environment");
+		SKIP("TMM_PYTHON_PLUGIN_PATH not set and $TMM_PYTHON_PLUGIN not in environment");
 	}
 	if (!std::filesystem::exists(path)) {
-		SKIP("ttm_python plugin not built; run cmake with -DTTM_BUILD_EXTENSIONS=ON");
+		SKIP("tmm_python plugin not built; run cmake with -DTMM_BUILD_EXTENSIONS=ON");
 	}
 	CHECK(std::filesystem::exists(path));
 }
@@ -107,13 +107,13 @@ TEST_CASE("ttm_python plugin file is locatable", "[python][integration][.optiona
 // Plugin loads into PluginManager
 // =============================================================================
 
-TEST_CASE("PluginManager loads ttm_python plugin without error", "[python][integration][.optional]") {
+TEST_CASE("PluginManager loads tmm_python plugin without error", "[python][integration][.optional]") {
 	const auto path = plugin_path();
 	if (path.empty() || !std::filesystem::exists(path)) {
-		SKIP("ttm_python plugin not available");
+		SKIP("tmm_python plugin not available");
 	}
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	auto result = mgr.load(path);
 	REQUIRE(result.has_value());
 }
@@ -122,30 +122,30 @@ TEST_CASE("PluginManager loads ttm_python plugin without error", "[python][integ
 // Probe: .py extension is claimed
 // =============================================================================
 
-TEST_CASE("ttm_python registers a loader that probes .py files", "[python][integration][.optional]") {
+TEST_CASE("tmm_python registers a loader that probes .py files", "[python][integration][.optional]") {
 	const auto path = plugin_path();
 	if (path.empty() || !std::filesystem::exists(path)) {
-		SKIP("ttm_python plugin not available");
+		SKIP("tmm_python plugin not available");
 	}
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	REQUIRE(mgr.load(path).has_value());
 
-	auto* loader = mgr.find_model_loader("model.py");
+	auto* loader = mgr.findModelLoader("model.py");
 	REQUIRE(loader != nullptr);
 }
 
-TEST_CASE("ttm_python loader does not claim .so files", "[python][integration][.optional]") {
+TEST_CASE("tmm_python loader does not claim .so files", "[python][integration][.optional]") {
 	const auto path = plugin_path();
 	if (path.empty() || !std::filesystem::exists(path)) {
-		SKIP("ttm_python plugin not available");
+		SKIP("tmm_python plugin not available");
 	}
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	REQUIRE(mgr.load(path).has_value());
 
 	// .so files belong to the TVM loader, not the Python loader.
-	auto* loader = mgr.find_model_loader("model.so");
+	auto* loader = mgr.findModelLoader("model.so");
 	// Either nullptr (no TVM loader registered) or not the python loader.
 	// Either way, the python loader must not claim this extension.
 	if (loader != nullptr) {
@@ -154,8 +154,8 @@ TEST_CASE("ttm_python loader does not claim .so files", "[python][integration][.
 		// (We cannot introspect loader identity without down-casting.)
 	}
 	// Primary assertion: .py loader is not confused with .so
-	auto* py_loader = mgr.find_model_loader("model.py");
-	auto* so_loader = mgr.find_model_loader("model.so");
+	auto* py_loader = mgr.findModelLoader("model.py");
+	auto* so_loader = mgr.findModelLoader("model.so");
 	CHECK((py_loader != so_loader || so_loader == nullptr));
 }
 
@@ -164,28 +164,28 @@ TEST_CASE("ttm_python loader does not claim .so files", "[python][integration][.
 // =============================================================================
 
 TEST_CASE(
-		"ttm_python open() on a minimal model returns a valid handle or a helpful error",
+		"tmm_python open() on a minimal model returns a valid handle or a helpful error",
 		"[python][integration][.optional]"
 ) {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
-		SKIP("ttm_python plugin not available");
+		SKIP("tmm_python plugin not available");
 	}
 
 	const TempPyFile tmp{kMinimalModel};
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	REQUIRE(mgr.load(plugin).has_value());
 
-	auto* loader = mgr.find_model_loader(tmp.path.string());
+	auto* loader = mgr.findModelLoader(tmp.path.string());
 	REQUIRE(loader != nullptr);
 
 	auto result = loader->open(tmp.path.string(), "{}");
 
 	if (result.has_value()) {
 		// PyTorch is installed — happy path.
-		const ttm_handle h = result.value();
-		CHECK(h != TTM_INVALID_HANDLE);
+		const tmm_handle h = result.value();
+		CHECK(h != TMM_INVALID_HANDLE);
 
 		// get_info() should return a non-empty name.
 		const auto info = loader->get_info(h);
@@ -193,7 +193,7 @@ TEST_CASE(
 		CHECK(std::string_view{info.name}.size() > 0);
 
 		// zero_grad() must not crash.
-		CHECK(loader->zero_grad(h) == TTM_OK);
+		CHECK(loader->zero_grad(h) == TMM_OK);
 
 		loader->destroy(h);
 	} else {
@@ -211,19 +211,19 @@ TEST_CASE(
 // Load: file with no torch.nn.Module subclass
 // =============================================================================
 
-TEST_CASE("ttm_python open() fails gracefully on a .py file with no nn.Module", "[python][integration][.optional]") {
+TEST_CASE("tmm_python open() fails gracefully on a .py file with no nn.Module", "[python][integration][.optional]") {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
-		SKIP("ttm_python plugin not available");
+		SKIP("tmm_python plugin not available");
 	}
 
 	// A valid Python file but with no torch.nn.Module subclass.
 	const TempPyFile tmp{"x = 42\n"};
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	REQUIRE(mgr.load(plugin).has_value());
 
-	auto* loader = mgr.find_model_loader(tmp.path.string());
+	auto* loader = mgr.findModelLoader(tmp.path.string());
 	REQUIRE(loader != nullptr);
 
 	auto result = loader->open(tmp.path.string(), "{}");
@@ -234,7 +234,7 @@ TEST_CASE("ttm_python open() fails gracefully on a .py file with no nn.Module", 
 		CHECK(!result.error().empty());
 	} else {
 		// If torch is available, the load should have failed because there's
-		// no nn.Module subclass — still possible if TTM_PYTHON_HAS_TORCH is
+		// no nn.Module subclass — still possible if TMM_PYTHON_HAS_TORCH is
 		// not compiled in (stub accepts the handle).
 		loader->destroy(result.value());
 	}
@@ -244,16 +244,16 @@ TEST_CASE("ttm_python open() fails gracefully on a .py file with no nn.Module", 
 // Load: non-existent file
 // =============================================================================
 
-TEST_CASE("ttm_python open() fails cleanly for a missing file", "[python][integration][.optional]") {
+TEST_CASE("tmm_python open() fails cleanly for a missing file", "[python][integration][.optional]") {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
-		SKIP("ttm_python plugin not available");
+		SKIP("tmm_python plugin not available");
 	}
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	REQUIRE(mgr.load(plugin).has_value());
 
-	auto* loader = mgr.find_model_loader("nonexistent_model.py");
+	auto* loader = mgr.findModelLoader("nonexistent_model.py");
 	REQUIRE(loader != nullptr);
 
 	auto result = loader->open("/this/path/does/not/exist.py", "{}");
@@ -268,19 +268,19 @@ TEST_CASE("ttm_python open() fails cleanly for a missing file", "[python][integr
 // =============================================================================
 
 TEST_CASE(
-		"ttm_python describe_params returns zero params (PyTorch manages memory)", "[python][integration][.optional]"
+		"tmm_python describe_params returns zero params (PyTorch manages memory)", "[python][integration][.optional]"
 ) {
 	const auto plugin = plugin_path();
 	if (plugin.empty() || !std::filesystem::exists(plugin)) {
-		SKIP("ttm_python plugin not available");
+		SKIP("tmm_python plugin not available");
 	}
 
 	const TempPyFile tmp{kMinimalModel};
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	REQUIRE(mgr.load(plugin).has_value());
 
-	auto* loader = mgr.find_model_loader(tmp.path.string());
+	auto* loader = mgr.findModelLoader(tmp.path.string());
 	REQUIRE(loader != nullptr);
 
 	auto result = loader->open(tmp.path.string(), "{}");
@@ -288,10 +288,10 @@ TEST_CASE(
 		SKIP("PyTorch not available — skipping happy-path describe_params test");
 	}
 
-	const ttm_handle h = result.value();
-	const ttm_param_desc_t* descs = nullptr;
+	const tmm_handle h = result.value();
+	const tmm_param_desc_t* descs = nullptr;
 	uint32_t count = 99; // sentinel — must be overwritten to 0
-	CHECK(loader->describe_params(h, &descs, &count) == TTM_OK);
+	CHECK(loader->describe_params(h, &descs, &count) == TMM_OK);
 	CHECK(count == 0); // Python plugin defers param management to PyTorch
 	CHECK(descs == nullptr);
 

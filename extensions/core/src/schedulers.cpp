@@ -6,7 +6,7 @@
 #include "schedulers.hpp"
 #include "scheduler_state.hpp"
 
-void schedulersRegister(const ttm_host_api* host) {
+void schedulersRegister(const tmm_host_api* host) {
 	if (host->register_scheduler == nullptr)
 		return;
 	host->register_scheduler(host->ctx, "constant", &g_sched_constant);

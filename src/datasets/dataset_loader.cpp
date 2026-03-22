@@ -9,18 +9,18 @@
  * files are chained into a single DatasetIterator.
  */
 
-#include <ttm/datasets/dataset_loader.hpp>
+#include <tmm/datasets/dataset_loader.hpp>
 
-#include <ttm/datasets/dataset_info.hpp>
-#include <ttm/plugins/extension.hpp>
+#include <tmm/datasets/dataset_info.hpp>
+#include <tmm/plugins/extension.hpp>
 
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <ttm/compat/expected.hpp>
-#include <ttm/compat/format.hpp>
+#include <tmm/compat/expected.hpp>
+#include <tmm/compat/format.hpp>
 #include <utility>
 #include <vector>
 
@@ -35,7 +35,7 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/exception.h>
 
-namespace ttm::datasets {
+namespace tmm::datasets {
 
 	namespace {
 
@@ -44,7 +44,7 @@ namespace ttm::datasets {
 		 * ====================================================================== */
 
 		/**
-		 * @brief Arrow `RandomAccessFile` backed by a `ttm::plugins::IByteReader`.
+		 * @brief Arrow `RandomAccessFile` backed by a `tmm::plugins::IByteReader`.
 		 *
 		 * @details
 		 * Arrow's `RecordBatchFileReader` and Parquet reader both require a
@@ -157,7 +157,7 @@ namespace ttm::datasets {
 				}
 				const auto result = reader_->ReadRecordBatch(idx_);
 				if (!result.ok()) {
-					std::cerr << "[ttm] ArrowIpcIterator::next error: " << result.status().ToString() << '\n';
+					std::cerr << "[tmm] ArrowIpcIterator::next error: " << result.status().ToString() << '\n';
 					return false;
 				}
 				out = *result;
@@ -192,7 +192,7 @@ namespace ttm::datasets {
 					const auto status = reader_->ReadRowGroup(idx_, &table);
 					++idx_;
 					if (!status.ok()) {
-						std::cerr << "[ttm] ParquetIterator::next error: " << status.ToString() << '\n';
+						std::cerr << "[tmm] ParquetIterator::next error: " << status.ToString() << '\n';
 						continue;
 					}
 					/* Convert table to a single record batch via TableBatchReader */
@@ -441,7 +441,7 @@ namespace ttm::datasets {
 			const std::string ext = std::filesystem::path(shardUri).extension().string();
 			auto shardResult = open_shard(source, shardUri, ext);
 			if (!shardResult) {
-				std::cerr << "[ttm] load_dataset: skipping shard '" << shardUri << "': " << shardResult.error() << '\n';
+				std::cerr << "[tmm] load_dataset: skipping shard '" << shardUri << "': " << shardResult.error() << '\n';
 				continue;
 			}
 			if (!schema) {
@@ -464,4 +464,4 @@ namespace ttm::datasets {
 		return result;
 	}
 
-} // namespace ttm::datasets
+} // namespace tmm::datasets

@@ -1,21 +1,21 @@
 # TODO
 
-Implementation roadmap for `ttm` (train-my-model). Tasks are grouped by component and ordered roughly by dependency/priority. All XDG paths follow the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/):
+Implementation roadmap for `tmm` (train-my-model). Tasks are grouped by component and ordered roughly by dependency/priority. All XDG paths follow the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/):
 
 | Purpose | Path |
 |---|---|
-| Configuration | `$XDG_CONFIG_HOME/ttm/` (`~/.config/ttm/`) |
-| Persistent data (dataset index) | `$XDG_DATA_HOME/ttm/` (`~/.local/share/ttm/`) |
-| Cache (cloned repos, prepared datasets) | `$XDG_CACHE_HOME/ttm/` (`~/.cache/ttm/`) |
-| Runtime state (PID files, lock files) | `$XDG_RUNTIME_DIR/ttm/` |
-| Log files | `$XDG_STATE_HOME/ttm/` (`~/.local/state/ttm/`) |
+| Configuration | `$XDG_CONFIG_HOME/tmm/` (`~/.config/tmm/`) |
+| Persistent data (dataset index) | `$XDG_DATA_HOME/tmm/` (`~/.local/share/tmm/`) |
+| Cache (cloned repos, prepared datasets) | `$XDG_CACHE_HOME/tmm/` (`~/.cache/tmm/`) |
+| Runtime state (PID files, lock files) | `$XDG_RUNTIME_DIR/tmm/` |
+| Log files | `$XDG_STATE_HOME/tmm/` (`~/.local/state/tmm/`) |
 
 ---
 
 ## Infrastructure
 
-- [ ] Implement XDG directory resolution helper (`ttm::xdg`) with fallbacks per spec
-- [ ] Add structured logging via spdlog: verbosity levels, optional log file under `$XDG_STATE_HOME/ttm/logs/`
+- [ ] Implement XDG directory resolution helper (`tmm::xdg`) with fallbacks per spec
+- [ ] Add structured logging via spdlog: verbosity levels, optional log file under `$XDG_STATE_HOME/tmm/logs/`
 - [ ] Set up Catch2 testing framework; create `tests/` directory with CMakeLists.txt
 - [ ] Add CI pipeline (GitHub Actions): build, lint (clang-tidy), format check (clang-format), test
 - [ ] Establish error-handling conventions: typed errors / `std::expected<T, Error>` throughout
@@ -29,7 +29,7 @@ The config system is the spine of the tool; most other components depend on it.
 
 ### Loading
 - [ ] Choose and integrate a YAML library (e.g., [yaml-cpp](https://github.com/jbeder/yaml-cpp) or [rapidyaml](https://github.com/biojppm/rapidyaml)) via CPM
-- [ ] Load a single configuration file (explicit path or auto-discovery: `./ttm.yaml`, `$XDG_CONFIG_HOME/ttm/config.yaml`)
+- [ ] Load a single configuration file (explicit path or auto-discovery: `./tmm.yaml`, `$XDG_CONFIG_HOME/tmm/config.yaml`)
 - [ ] Load and deep-merge multiple config files (later files override earlier; same semantics as Helm values)
 - [ ] Support `--config` flag (repeatable) and `--set key=value` CLI overrides (highest priority)
 
@@ -52,7 +52,7 @@ The config system is the spine of the tool; most other components depend on it.
 
 ## Plugins
 
-Plugins extend ttm with new ML task types (in the [Dataset Cards](https://huggingface.co/docs/hub/datasets-cards) sense: text classification, sequence tagging, image segmentation, …), new dataset sources, transforms, optimizers, schedulers, callbacks, and loggers. `fit`, `validate`, `predict`, and `sweep` are built into core and are not plugins.
+Plugins extend tmm with new ML task types (in the [Dataset Cards](https://huggingface.co/docs/hub/datasets-cards) sense: text classification, sequence tagging, image segmentation, …), new dataset sources, transforms, optimizers, schedulers, callbacks, and loggers. `fit`, `validate`, `predict`, and `sweep` are built into core and are not plugins.
 
 ### Core Plugin System
 - [ ] Define stable C ABI for WASM plugins (function signatures, memory layout, versioning)
@@ -64,16 +64,16 @@ Plugins extend ttm with new ML task types (in the [Dataset Cards](https://huggin
 - [ ] Plugin capability model: declare required capabilities (filesystem access, network, GPU) in plugin manifest
 
 ### Plugin Sources & Registry
-Plugins are **project-local only** — modelled after npm. The project config (`plugins:` section in `ttm.yaml`) is the manifest declaring plugins and version ranges (like `package.json`). A `ttm.lock` file pins exact content hashes / git SHAs for reproducible installs (like `package-lock.json`). Downloaded WASM binaries are cached globally under `$XDG_CACHE_HOME/ttm/plugins/<content-hash>/` and shared across projects that use the same content hash.
+Plugins are **project-local only** — modelled after npm. The project config (`plugins:` section in `tmm.yaml`) is the manifest declaring plugins and version ranges (like `package.json`). A `tmm.lock` file pins exact content hashes / git SHAs for reproducible installs (like `package-lock.json`). Downloaded WASM binaries are cached globally under `$XDG_CACHE_HOME/tmm/plugins/<content-hash>/` and shared across projects that use the same content hash.
 
-- [ ] Design `ttm.lock` format: maps plugin name → URI + exact content hash + resolved download URL
-- [ ] `ttm plugin install [<uri> [--as name] [--save-dev]]` — without args: fetch all plugins declared in manifest (like `npm install`); with a URI: add to manifest and lock file
-- [ ] `ttm plugin update [name]` — re-resolve version constraint, update lock file entry
-- [ ] `ttm plugin remove <name>` — remove from manifest and lock file
-- [ ] `ttm plugin list` — show installed plugins (from lock file) and their cache status
-- [ ] `ttm plugin fetch` — fetch all locked plugins into cache without running a task (CI-friendly)
+- [ ] Design `tmm.lock` format: maps plugin name → URI + exact content hash + resolved download URL
+- [ ] `tmm plugin install [<uri> [--as name] [--save-dev]]` — without args: fetch all plugins declared in manifest (like `npm install`); with a URI: add to manifest and lock file
+- [ ] `tmm plugin update [name]` — re-resolve version constraint, update lock file entry
+- [ ] `tmm plugin remove <name>` — remove from manifest and lock file
+- [ ] `tmm plugin list` — show installed plugins (from lock file) and their cache status
+- [ ] `tmm plugin fetch` — fetch all locked plugins into cache without running a task (CI-friendly)
 - [ ] Load plugins from local filesystem path (absolute or relative to config file)
-- [ ] Download and cache plugins from Git URLs via libgit2 (into `$XDG_CACHE_HOME/ttm/plugins/<content-hash>/`)
+- [ ] Download and cache plugins from Git URLs via libgit2 (into `$XDG_CACHE_HOME/tmm/plugins/<content-hash>/`)
 - [ ] Support shorthand URIs: `gh:owner/repo[@ref]`, `gl:`, `bb:`, `hf:` (Hugging Face Hub spaces/plugins), `sr:` (SourceHut), `gitea:` (self-hosted)
 - [ ] OCI/ORAS registry support (`oras://registry/image:tag`) — emerging standard for WASM artifact distribution
 
@@ -86,7 +86,7 @@ Plugins are **project-local only** — modelled after npm. The project config (`
 - [ ] **Callback/event registry** — register on_epoch_start, on_batch_end, on_train_end, etc.
 - [ ] **Metric registry** — register custom evaluation metrics; metrics may declare aliases
 
-### Built-in Plugins (shipped with ttm)
+### Built-in Plugins (shipped with tmm)
 
 #### ML Task Types
 - [ ] `task-text-classification` — single-label and multi-label text classification (aliases: `text-clf`, `tc`)
@@ -99,7 +99,7 @@ Plugins are **project-local only** — modelled after npm. The project config (`
 
 #### UI / Logging
 - [ ] `console-ui` — rich terminal progress bars and metrics table (using e.g. FTXUI or a simpler approach)
-- [ ] `csv-logger` — append epoch/step metrics to a CSV file under `$XDG_STATE_HOME/ttm/runs/`
+- [ ] `csv-logger` — append epoch/step metrics to a CSV file under `$XDG_STATE_HOME/tmm/runs/`
 - [ ] `tensorboard-logger` — write TensorBoard event files
 - [ ] `json-logger` — newline-delimited JSON log (JSONL) for easy post-processing
 
@@ -138,7 +138,7 @@ Plugins are **project-local only** — modelled after npm. The project config (`
   - [ ] CSV / TSV (via Arrow CSV reader)
   - [ ] JSONL (via Arrow JSON reader)
   - [ ] Folder of files (glob: `data/**/*.parquet`)
-- [ ] Git repositories: clone/fetch via libgit2 into `$XDG_CACHE_HOME/ttm/datasets/<hash>/`
+- [ ] Git repositories: clone/fetch via libgit2 into `$XDG_CACHE_HOME/tmm/datasets/<hash>/`
   - [ ] Shorthand URI expansion: `gh:owner/repo[@ref]`, `gl:`, `bb:`, `hf:`, `sr:`, `gitea://host/`
   - [ ] Sparse checkout (only the relevant subdirectory if specified)
   - [ ] Incremental updates: `git fetch` + fast-forward if already cached
@@ -147,13 +147,13 @@ Plugins are **project-local only** — modelled after npm. The project config (`
 - [ ] Multi-source datasets: concatenate or interleave multiple sources with optional weights
 
 ### Caching & Preparation
-- [ ] Raw data cache: store downloaded/cloned data in `$XDG_CACHE_HOME/ttm/datasets/raw/<content-hash>/`
-- [ ] Prepared data cache: store transform output in `$XDG_CACHE_HOME/ttm/datasets/prepared/<config-hash>/`
+- [ ] Raw data cache: store downloaded/cloned data in `$XDG_CACHE_HOME/tmm/datasets/raw/<content-hash>/`
+- [ ] Prepared data cache: store transform output in `$XDG_CACHE_HOME/tmm/datasets/prepared/<config-hash>/`
 - [ ] Cache invalidation: recompute if config hash changes (dataset URI + transforms + version)
 - [ ] Lock file during preparation to prevent concurrent re-computation
-- [ ] `ttm dataset prepare` — explicit preparation command (also run implicitly before training)
-- [ ] `ttm dataset inspect` — show schema, row count, sample rows, cache status
-- [ ] `ttm dataset clear-cache [uri]`
+- [ ] `tmm dataset prepare` — explicit preparation command (also run implicitly before training)
+- [ ] `tmm dataset inspect` — show schema, row count, sample rows, cache status
+- [ ] `tmm dataset clear-cache [uri]`
 
 ### Data Pipeline
 - [ ] Design `DatasetIterator` / `DataLoader` C++ abstraction (DLPack tensors as the exchange format)
@@ -217,7 +217,7 @@ The following formats appear frequently in the ML ecosystem and should be covere
 
 ### Checkpointing
 - [ ] Save checkpoint: model weights, optimizer state, scheduler state, epoch, step, RNG state
-- [ ] Save to `$XDG_STATE_HOME/ttm/checkpoints/<run-id>/` or user-specified path
+- [ ] Save to `$XDG_STATE_HOME/tmm/checkpoints/<run-id>/` or user-specified path
 - [ ] Load checkpoint: resume training from a checkpoint (automatic latest-checkpoint detection)
 - [ ] Best-model checkpointing: keep top-K checkpoints by a monitored metric
 - [ ] Export: convert a checkpoint to a standalone TVM compiled module for deployment
@@ -247,20 +247,20 @@ The following formats appear frequently in the ML ecosystem and should be covere
 
 Built on CLI11. `fit`, `validate`, `predict`, and `sweep` are built-in subcommands. Plugins extend behaviour through registries (ML task types, dataset sources, transforms, etc.), not by adding subcommands.
 
-- [ ] `ttm fit [--config ...] [--set key=val] [checkpoint]` — train a model
-- [ ] `ttm validate [--config ...] [checkpoint]` — evaluate on val/test split
-- [ ] `ttm predict [--config ...] [--output file] [checkpoint] [input]` — run inference
-- [ ] `ttm sweep [--config ...]` — hyperparameter search
-- [ ] `ttm plugin install <uri> [--as name]` — add plugin to project config
-- [ ] `ttm plugin list` — show plugins declared in current project config and their cache status
-- [ ] `ttm plugin update [name]` — update pinned version in project config
-- [ ] `ttm plugin remove <name>` — remove plugin from project config
-- [ ] `ttm plugin fetch` — pre-fetch all project plugins into cache
-- [ ] `ttm dataset prepare [--config ...]` — explicitly prepare datasets
-- [ ] `ttm dataset inspect <uri>` — show schema and statistics
-- [ ] `ttm dataset clear-cache [uri]` — remove cached datasets
-- [ ] `ttm config dump [--config ...]` — print final merged config (useful for debugging)
-- [ ] `ttm version` — print versions
+- [ ] `tmm fit [--config ...] [--set key=val] [checkpoint]` — train a model
+- [ ] `tmm validate [--config ...] [checkpoint]` — evaluate on val/test split
+- [ ] `tmm predict [--config ...] [--output file] [checkpoint] [input]` — run inference
+- [ ] `tmm sweep [--config ...]` — hyperparameter search
+- [ ] `tmm plugin install <uri> [--as name]` — add plugin to project config
+- [ ] `tmm plugin list` — show plugins declared in current project config and their cache status
+- [ ] `tmm plugin update [name]` — update pinned version in project config
+- [ ] `tmm plugin remove <name>` — remove plugin from project config
+- [ ] `tmm plugin fetch` — pre-fetch all project plugins into cache
+- [ ] `tmm dataset prepare [--config ...]` — explicitly prepare datasets
+- [ ] `tmm dataset inspect <uri>` — show schema and statistics
+- [ ] `tmm dataset clear-cache [uri]` — remove cached datasets
+- [ ] `tmm config dump [--config ...]` — print final merged config (useful for debugging)
+- [ ] `tmm version` — print versions
 - [ ] Shell completion scripts (bash, zsh, fish) via CLI11
 
 ---

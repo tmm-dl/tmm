@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ttm-python-plugin CXX)
+project(tmm-python-plugin CXX)
 
 ##########################################################################################
 # Dependencies
@@ -23,18 +23,18 @@ if(TORCH_CMAKE_PREFIX)
 endif()
 
 ##########################################################################################
-# ttm_python shared library
+# tmm_python shared library
 ##########################################################################################
 
-add_library(ttm_python MODULE
+add_library(tmm_python MODULE
     src/python_model.cpp
     src/python_optimizer.cpp
     src/python_transform.cpp
 )
 
-target_compile_features(ttm_python PRIVATE cxx_std_23)
+target_compile_features(tmm_python PRIVATE cxx_std_23)
 
-target_include_directories(ttm_python PRIVATE
+target_include_directories(tmm_python PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
     ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -46,32 +46,32 @@ CPMAddPackage(
     VERSION 0.8
     EXCLUDE_FROM_ALL YES
 )
-target_link_libraries(ttm_python PRIVATE dlpack)
+target_link_libraries(tmm_python PRIVATE dlpack)
 
-set_target_properties(ttm_python PROPERTIES
+set_target_properties(tmm_python PROPERTIES
     PREFIX ""
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
 )
 
 include(GenerateExportHeader)
-generate_export_header(ttm_python
-    EXPORT_FILE_NAME ttm_python_export.h
-    EXPORT_MACRO_NAME TTM_PYTHON_EXPORT
+generate_export_header(tmm_python
+    EXPORT_FILE_NAME tmm_python_export.h
+    EXPORT_MACRO_NAME TMM_PYTHON_EXPORT
 )
 
-target_link_libraries(ttm_python PRIVATE Python3::Python)
+target_link_libraries(tmm_python PRIVATE Python3::Python)
 
 if(Torch_FOUND)
-    target_link_libraries(ttm_python PRIVATE ${TORCH_LIBRARIES})
-    target_compile_definitions(ttm_python PRIVATE TTM_PYTHON_HAS_TORCH)
-    message(STATUS "ttm-python-plugin: PyTorch found — full loader enabled")
+    target_link_libraries(tmm_python PRIVATE ${TORCH_LIBRARIES})
+    target_compile_definitions(tmm_python PRIVATE TMM_PYTHON_HAS_TORCH)
+    message(STATUS "tmm-python-plugin: PyTorch found — full loader enabled")
 else()
-    message(STATUS "ttm-python-plugin: PyTorch not found — stub loader only")
+    message(STATUS "tmm-python-plugin: PyTorch not found — stub loader only")
 endif()
 
 include(GNUInstallDirs)
-install(TARGETS ttm_python LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS tmm_python LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # ---------------------------------------------------------------------------
 # Tests — add when building tests are enabled (mirrors root TMM_BUILD_TESTS).

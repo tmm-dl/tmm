@@ -3,17 +3,17 @@
  * @brief Trainer callback interface — analogous to PyTorch Lightning Callbacks.
  *
  * @details
- * Callbacks are C++ objects attached to the @ref ttm::trainer::Trainer before
+ * Callbacks are C++ objects attached to the @ref tmm::trainer::Trainer before
  * @c fit() is called.  They receive the same lifecycle events as WASM/native
  * plugins (epoch begin/end, validation, fit begin/end, individual metric logs)
  * but run in-process, with direct access to the Trainer and its current metrics.
  *
  * ### Typical usage
  * @code{.cpp}
- * #include <ttm/trainer/trainer.hpp>
- * #include <ttm/callbacks/early_stopping.hpp>   // from extensions/core
+ * #include <tmm/trainer/trainer.hpp>
+ * #include <tmm/callbacks/early_stopping.hpp>   // from extensions/core
  *
- * trainer.add_callback(
+ * trainer.addCallback(
  *     std::make_unique<EarlyStopping>("val_loss", 5));
  * trainer.fit();
  * @endcode
@@ -23,7 +23,7 @@
  * have default no-op implementations so you only write what you care about.
  *
  * @code{.cpp}
- * class PrintLoss final : public ttm::trainer::Callback {
+ * class PrintLoss final : public tmm::trainer::Callback {
  * public:
  *     bool on_epoch_end(Trainer&, int64_t epoch,
  *                       const CallbackMetrics& m) override {
@@ -43,7 +43,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace ttm::trainer {
+namespace tmm::trainer {
 
 	/* Forward declaration — full definition in trainer.hpp.
 	 * Callbacks receive a Trainer& so they can call log(), but they do not
@@ -192,4 +192,4 @@ namespace ttm::trainer {
 			   [[maybe_unused]] int32_t step) {}
 	};
 
-} // namespace ttm::trainer
+} // namespace tmm::trainer

@@ -8,7 +8,7 @@
  * task_categories from the YAML frontmatter.
  */
 
-#include <ttm/datasets/dataset_info.hpp>
+#include <tmm/datasets/dataset_info.hpp>
 
 #include <cstdlib>
 #include <filesystem>
@@ -30,7 +30,7 @@ namespace {
 
 		explicit TempRepo() {
 			root = std::filesystem::temp_directory_path() /
-				   ("ttm_dataset_test_" + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())));
+				   ("tmm_dataset_test_" + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())));
 			std::filesystem::create_directories(root);
 		}
 
@@ -59,7 +59,7 @@ namespace {
 
 TEST_CASE("parse_dataset_card returns error for missing README", "[dataset_info]") {
 	const TempRepo tmp;
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE_FALSE(result.has_value());
 	CHECK(result.error().find("README.md") != std::string::npos);
 }
@@ -67,7 +67,7 @@ TEST_CASE("parse_dataset_card returns error for missing README", "[dataset_info]
 TEST_CASE("parse_dataset_card returns error for missing front-matter delimiter", "[dataset_info]") {
 	const TempRepo tmp;
 	tmp.write_readme("# My Dataset\nNo YAML front matter here.\n");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE_FALSE(result.has_value());
 }
 
@@ -82,7 +82,7 @@ pretty_name: My Test Dataset
 ---
 # My Test Dataset
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	CHECK(result->pretty_name == "My Test Dataset");
 }
@@ -95,7 +95,7 @@ task_categories:
 - token-classification
 ---
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	REQUIRE(result->task_categories.size() == 2);
 	CHECK(result->task_categories[0] == "text-classification");
@@ -117,14 +117,14 @@ dataset_info:
     dtype: int32
 ---
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	REQUIRE(result->features.size() == 2);
 	CHECK(result->features[0].name == "text");
 	CHECK(result->features[0].dtype == "string");
-	CHECK(result->features[0].kind == ttm::datasets::FeatureKind::Scalar);
+	CHECK(result->features[0].kind == tmm::datasets::FeatureKind::Scalar);
 	CHECK(result->features[1].name == "idx");
-	CHECK(result->features[1].kind == ttm::datasets::FeatureKind::Scalar);
+	CHECK(result->features[1].kind == tmm::datasets::FeatureKind::Scalar);
 }
 
 TEST_CASE("parse_dataset_card parses class_label feature", "[dataset_info]") {
@@ -141,12 +141,12 @@ dataset_info:
         - neutral
 ---
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	REQUIRE(result->features.size() == 1);
 	const auto& feat = result->features[0];
 	CHECK(feat.name == "label");
-	CHECK(feat.kind == ttm::datasets::FeatureKind::ClassLabel);
+	CHECK(feat.kind == tmm::datasets::FeatureKind::ClassLabel);
 	REQUIRE(feat.class_names.size() == 3);
 	CHECK(feat.class_names[0] == "positive");
 	CHECK(feat.class_names[1] == "negative");
@@ -162,12 +162,12 @@ dataset_info:
     sequence: string
 ---
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	REQUIRE(result->features.size() == 1);
 	const auto& feat = result->features[0];
 	CHECK(feat.name == "tokens");
-	CHECK(feat.kind == ttm::datasets::FeatureKind::Sequence);
+	CHECK(feat.kind == tmm::datasets::FeatureKind::Sequence);
 }
 
 // =============================================================================
@@ -187,7 +187,7 @@ dataset_info:
     num_bytes: 20480
 ---
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	REQUIRE(result->splits.size() == 2);
 	CHECK(result->splits[0].name == "train");
@@ -221,7 +221,7 @@ dataset_info:
     num_examples: 800
 ---
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	CHECK(result->config_name == "en");
 	REQUIRE(result->splits.size() == 1);
@@ -259,7 +259,7 @@ dataset_info:
 ---
 # IMDB Movie Reviews
 )");
-	const auto result = ttm::datasets::parse_dataset_card(tmp.root);
+	const auto result = tmm::datasets::parse_dataset_card(tmp.root);
 	REQUIRE(result.has_value());
 	CHECK(result->pretty_name == "IMDB Movie Reviews");
 	CHECK(result->config_name == "plain_text");
@@ -267,9 +267,9 @@ dataset_info:
 	CHECK(result->task_categories[0] == "text-classification");
 	REQUIRE(result->features.size() == 2);
 	CHECK(result->features[0].name == "text");
-	CHECK(result->features[0].kind == ttm::datasets::FeatureKind::Scalar);
+	CHECK(result->features[0].kind == tmm::datasets::FeatureKind::Scalar);
 	CHECK(result->features[1].name == "label");
-	CHECK(result->features[1].kind == ttm::datasets::FeatureKind::ClassLabel);
+	CHECK(result->features[1].kind == tmm::datasets::FeatureKind::ClassLabel);
 	REQUIRE(result->features[1].class_names.size() == 2);
 	REQUIRE(result->splits.size() == 2);
 	CHECK(result->splits[0].name == "train");
@@ -282,8 +282,8 @@ dataset_info:
 
 TEST_CASE("find_split_files returns empty when data/ directory is missing", "[dataset_info]") {
 	const TempRepo tmp;
-	const ttm::datasets::DatasetInfo info;
-	const auto files = ttm::datasets::find_split_files(info, "train", tmp.root);
+	const tmm::datasets::DatasetInfo info;
+	const auto files = tmm::datasets::find_split_files(info, "train", tmp.root);
 	CHECK(files.empty());
 }
 
@@ -297,15 +297,15 @@ TEST_CASE("find_split_files finds parquet shards for a split", "[dataset_info]")
 		std::ofstream{tmp.root / "data" / name};
 	}
 
-	const ttm::datasets::DatasetInfo info;
-	const auto trainFiles = ttm::datasets::find_split_files(info, "train", tmp.root);
+	const tmm::datasets::DatasetInfo info;
+	const auto trainFiles = tmm::datasets::find_split_files(info, "train", tmp.root);
 	REQUIRE(trainFiles.size() == 2);
 	/* Verify sorting */
 	CHECK(trainFiles[0].filename().string() < trainFiles[1].filename().string());
 
-	const auto testFiles = ttm::datasets::find_split_files(info, "test", tmp.root);
+	const auto testFiles = tmm::datasets::find_split_files(info, "test", tmp.root);
 	CHECK(testFiles.size() == 1);
 
-	const auto valFiles = ttm::datasets::find_split_files(info, "validation", tmp.root);
+	const auto valFiles = tmm::datasets::find_split_files(info, "validation", tmp.root);
 	CHECK(valFiles.empty());
 }

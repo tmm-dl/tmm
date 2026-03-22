@@ -1,32 +1,32 @@
 /**
  * @file pipeline.hpp
  * @brief ModelPipeline — end-to-end preprocessing → collation → model.
- * @ingroup ttm_model
+ * @ingroup tmm_model
  */
 
 #pragma once
 
-#include <ttm/conf/config.hpp>
-#include <ttm/model/collator.hpp>
-#include <ttm/model/model.hpp>
-#include <ttm/model/params.hpp>
-#include <ttm/model/preprocessor.hpp>
-#include <ttm/plugins/abi.h>
-#include <ttm/plugins/plugin_manager.hpp>
-#include <ttm/compat/expected.hpp>
+#include <tmm/conf/config.hpp>
+#include <tmm/model/collator.hpp>
+#include <tmm/model/model.hpp>
+#include <tmm/model/params.hpp>
+#include <tmm/model/preprocessor.hpp>
+#include <tmm/plugins/abi.h>
+#include <tmm/plugins/plugin_manager.hpp>
+#include <tmm/compat/expected.hpp>
 
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace ttm::model {
+namespace tmm::model {
 
 	/**
 	 * @brief End-to-end training pipeline: preprocess → collate → model.
 	 *
 	 * @details
-	 * ModelPipeline implements ttm::trainer::IModel and is therefore what the
+	 * ModelPipeline implements tmm::trainer::IModel and is therefore what the
 	 * Trainer receives as its `model` argument.  Internally it orchestrates:
 	 *
 	 * 1. **Preprocessors** — zero or more IPreprocessor instances applied in
@@ -35,17 +35,17 @@ namespace ttm::model {
 	 * 2. **Collator** — converts the preprocessed RecordBatch to a set of
 	 *    DLTensors understood by the underlying model plugin.
 	 * 3. **Plugin model** — the actual model (TVM compiled, PyTorch via Python
-	 *    embedding, etc.) called through the #ttm_model_loader_vtable C ABI.
+	 *    embedding, etc.) called through the #tmm_model_loader_vtable C ABI.
 	 * 4. **Param store** — host-allocated parameter and gradient buffers bound
 	 *    to the model before training begins.
 	 *
 	 * ### Loading
 	 * Use the static factory ModelPipeline::load():
 	 * @code{.cpp}
-	 * auto dev = ttm::model::Device::from_string(cfg.model.device);
-	 * auto pipe = ttm::model::ModelPipeline::load(cfg.model, mgr, dev);
+	 * auto dev = tmm::model::Device::from_string(cfg.model.device);
+	 * auto pipe = tmm::model::ModelPipeline::load(cfg.model, mgr, dev);
 	 * if (!pipe) { std::cerr << pipe.error() << '\n'; return 1; }
-	 * auto trainer = ttm::trainer::Trainer(cfg, mgr, std::move(*pipe), train_factory);
+	 * auto trainer = tmm::trainer::Trainer(cfg, mgr, std::move(*pipe), train_factory);
 	 * @endcode
 	 *
 	 * ### Parameter lifecycle
@@ -54,7 +54,7 @@ namespace ttm::model {
 	 * the model via bind_params(), and then calls init_params("random") (or
 	 * "checkpoint:<path>" if cfg.model.path references a checkpoint).
 	 *
-	 * @ingroup ttm_model
+	 * @ingroup tmm_model
 	 */
 	class ModelPipeline final : public IModel {
 	public:
@@ -63,7 +63,7 @@ namespace ttm::model {
 		~ModelPipeline() override;
 
 		/** @brief Return the underlying plugin model handle (e.g. for optimizer creation). */
-		[[nodiscard]] ttm_handle model_handle() const { return handle_; }
+		[[nodiscard]] tmm_handle model_handle() const { return handle_; }
 
 		/**
 		 * @brief Load a model and set up the full preprocessing pipeline.
@@ -77,7 +77,7 @@ namespace ttm::model {
 		 * 4. Build a default ICollator from the model's input_schema_json.
 		 * 5. Allocate param + grad buffers (CPU only for now).
 		 * 6. Call bind_params() + init_params("random") on the model.
-		 * 7. Call mgr.emit_model_loaded() to broadcast model metadata.
+		 * 7. Call mgr.emitModelLoaded() to broadcast model metadata.
 		 *
 		 * @param cfg              Model configuration section.
 		 * @param preprocessors    Ordered list of preprocessor config entries.
@@ -93,7 +93,7 @@ namespace ttm::model {
 			Device                                       dev
 		);
 
-		// ── ttm::trainer::IModel ──────────────────────────────────────────
+		// ── tmm::trainer::IModel ──────────────────────────────────────────
 
 		[[nodiscard]] std::string_view name() const override;
 
@@ -110,9 +110,9 @@ namespace ttm::model {
 		trainer::StepOutput infer(const trainer::Batch& batch) override;
 
 		/** @brief Zero all gradient buffers. */
-		void zero_grad() override;
+		void zeroGrad() override;
 
-		// ── ttm::model::IModel ────────────────────────────────────────────
+		// ── tmm::model::IModel ────────────────────────────────────────────
 
 		/** @brief Return static model metadata. */
 		[[nodiscard]] const ModelInfo& info() const override { return info_; }
@@ -125,13 +125,13 @@ namespace ttm::model {
 
 		/** @brief Apply the preprocessor chain and return the transformed batch. */
 		[[nodiscard]] std::expected<std::shared_ptr<arrow::RecordBatch>, std::string>
-		run_preprocessors(const arrow::RecordBatch& raw) const;
+		runPreprocessors(const arrow::RecordBatch& raw) const;
 
 		// Owned resources
 		std::unique_ptr<IModel>             inner_;         ///< Plugin-provided model.
 		std::unique_ptr<ICollator>          collator_;      ///< Arrow → DLTensor collator.
 		std::vector<ParamBuffer>            params_;        ///< Param + grad buffers.
-		ttm_handle                          handle_ = TTM_INVALID_HANDLE; ///< Underlying model handle.
+		tmm_handle                          handle_ = TMM_INVALID_HANDLE; ///< Underlying model handle.
 
 		// Owned preprocessors (instantiated with per-entry config at load time)
 		std::vector<std::unique_ptr<IPreprocessor>> preprocessors_;
@@ -139,4 +139,4 @@ namespace ttm::model {
 		ModelInfo                           info_;
 	};
 
-} // namespace ttm::model
+} // namespace tmm::model

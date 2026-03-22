@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
-project(ttm-console-ui-plugin CXX)
+project(tmm-console-ui-plugin CXX)
 
 # ---------------------------------------------------------------------------
 # Compiler requirements
@@ -56,25 +56,25 @@ CPMAddPackage(URI "gh:ArthurSonzogni/FTXUI@6.1.9"
 # present.  add_executable + -Wl,--no-entry produces a proper standalone WASM
 # module without a _start entry point.
 # ---------------------------------------------------------------------------
-add_executable(ttm_console_ui src/console_ui.cpp)
+add_executable(tmm_console_ui src/console_ui.cpp)
 
-target_include_directories(ttm_console_ui PRIVATE
+target_include_directories(tmm_console_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
 )
 
-target_link_libraries(ttm_console_ui PRIVATE
+target_link_libraries(tmm_console_ui PRIVATE
     ftxui::screen
     ftxui::dom
     dlpack
 )
 
 # WASM/WASI-specific settings
-target_compile_options(ttm_console_ui PRIVATE
+target_compile_options(tmm_console_ui PRIVATE
     -Wall
     -Wextra
 )
 
-set_target_properties(ttm_console_ui PROPERTIES
+set_target_properties(tmm_console_ui PROPERTIES
     PREFIX    ""
     SUFFIX    ".wasm"
     # Hide all symbols by default — only export the ABI entry points.
@@ -85,19 +85,19 @@ set_target_properties(ttm_console_ui PROPERTIES
 # WASM linker flags: no-entry (WASI does not call _start), export-table so
 # the host can call back into the plugin's function table, and explicit ABI
 # export list.
-target_link_options(ttm_console_ui PRIVATE
+target_link_options(tmm_console_ui PRIVATE
     -Wl,--no-entry
     -Wl,--export-table
-    -Wl,--export=ttm_plugin_get_info
-    -Wl,--export=ttm_plugin_init
-    -Wl,--export=ttm_plugin_teardown
-    -Wl,--export=ttm_on_fit_begin
-    -Wl,--export=ttm_on_epoch_begin
-    -Wl,--export=ttm_on_batch_end
-    -Wl,--export=ttm_on_epoch_end
-    -Wl,--export=ttm_on_fit_end
-    -Wl,--export=ttm_on_log
-    -Wl,--export=ttm_on_metric
+    -Wl,--export=tmm_plugin_get_info
+    -Wl,--export=tmm_plugin_init
+    -Wl,--export=tmm_plugin_teardown
+    -Wl,--export=tmm_on_fit_begin
+    -Wl,--export=tmm_on_epoch_begin
+    -Wl,--export=tmm_on_batch_end
+    -Wl,--export=tmm_on_epoch_end
+    -Wl,--export=tmm_on_fit_end
+    -Wl,--export=tmm_on_log
+    -Wl,--export=tmm_on_metric
     -Wl,--export=__heap_base
     -Wl,--export=__data_end
     -Wl,--export=malloc
@@ -107,4 +107,4 @@ target_link_options(ttm_console_ui PRIVATE
 # ---------------------------------------------------------------------------
 # Install the .wasm into the extensions output directory
 # ---------------------------------------------------------------------------
-install(TARGETS ttm_console_ui DESTINATION .)
+install(TARGETS tmm_console_ui DESTINATION .)

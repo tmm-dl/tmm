@@ -1,9 +1,9 @@
 /**
- * @defgroup ttm_model Model System
+ * @defgroup tmm_model Model System
  * @brief End-to-end model loading, parameter management, and inference pipeline.
  *
  * @details
- * The TTM model system connects the dataset pipeline to a trainable model
+ * The TMM model system connects the dataset pipeline to a trainable model
  * through a sequence of well-defined stages:
  *
  * ```
@@ -26,10 +26,10 @@
  *
  * @section model_pipeline Pipeline overview
  *
- * ttm::model::ModelPipeline is the main entry point.  It is constructed by
+ * tmm::model::ModelPipeline is the main entry point.  It is constructed by
  * the static factory ModelPipeline::load() which:
  *
- * 1. Finds a registered #ttm_model_loader_vtable whose `probe()` accepts the
+ * 1. Finds a registered #tmm_model_loader_vtable whose `probe()` accepts the
  *    configured model path.
  * 2. Calls `load()` on the loader to obtain a handle and vtable pointer.
  * 3. Resolves preprocessors from the plugin registry.
@@ -64,8 +64,8 @@
  *
  * @section model_loader Writing a model loader plugin
  *
- * A model loader plugin registers a #ttm_model_loader_vtable during
- * #ttm_plugin_init:
+ * A model loader plugin registers a #tmm_model_loader_vtable during
+ * #tmm_plugin_init:
  *
  * @code{.c}
  * static int32_t my_probe(const char* path, uint32_t len) {
@@ -73,23 +73,23 @@
  *     return strncmp(path + len - 3, ".so", 3) == 0 ? 1 : 0;
  * }
  *
- * static ttm_handle my_load(const char* path, uint32_t path_len,
+ * static tmm_handle my_load(const char* path, uint32_t path_len,
  *                            const char* cfg, uint32_t cfg_len,
  *                            char* err, uint32_t err_cap) {
  *     MyModel* m = my_model_open(path, path_len, cfg, cfg_len, err, err_cap);
- *     if (!m) return TTM_INVALID_HANDLE;
- *     return (ttm_handle)(uintptr_t)m;
+ *     if (!m) return TMM_INVALID_HANDLE;
+ *     return (tmm_handle)(uintptr_t)m;
  * }
  *
  * // ... step(), infer(), zero_grad(), destroy(), etc. ...
  *
- * static ttm_model_loader_vtable g_vtable = {
+ * static tmm_model_loader_vtable g_vtable = {
  *     my_probe, my_load, my_get_info,
  *     my_describe_params, my_bind_params, my_init_params,
  *     my_step, my_infer, my_zero_grad, my_destroy
  * };
  *
- * ttm_error ttm_plugin_init(const ttm_host_api* host, const char* cfg, uint32_t len) {
+ * tmm_error tmm_plugin_init(const tmm_host_api* host, const char* cfg, uint32_t len) {
  *     return host->register_model_loader(host->ctx, &g_vtable);
  * }
  * @endcode
@@ -98,9 +98,9 @@
  *
  * @section model_preprocessor Writing a preprocessor plugin
  *
- * Preprocessors are registered as #ttm_transform_vtable instances.  The host
- * wraps them in ttm::plugins::ITransform adapters which implement
- * ttm::model::IPreprocessor.
+ * Preprocessors are registered as #tmm_transform_vtable instances.  The host
+ * wraps them in tmm::plugins::ITransform adapters which implement
+ * tmm::model::IPreprocessor.
  *
  * @code{.yaml}
  * preprocessors:
@@ -132,7 +132,7 @@
  * }
  * @endcode
  *
- * Plugins that export #ttm_on_model_loaded receive this string and can
+ * Plugins that export #tmm_on_model_loaded receive this string and can
  * display it in a UI, store it in a log, or expose it via an API.
  *
  * ---
@@ -149,7 +149,7 @@
  * | `metal:0`   | kDLMetal      | Apple Metal (macOS/iOS).      |
  * | `opencl:0`  | kDLOpenCL     | OpenCL device 0.              |
  *
- * Use ttm::model::Device::from_string() to parse and Device::to_string() to
+ * Use tmm::model::Device::from_string() to parse and Device::to_string() to
  * serialise.
  *
  * ---

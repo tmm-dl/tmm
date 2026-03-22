@@ -1,13 +1,13 @@
 /**
  * @file test_device.cpp
- * @brief Unit tests for ttm::model::Device — parsing and serialisation.
+ * @brief Unit tests for tmm::model::Device — parsing and serialisation.
  */
 
-#include <ttm/model/device.hpp>
+#include <tmm/model/device.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-using ttm::model::Device;
+using tmm::model::Device;
 
 // =============================================================================
 // from_string — well-known device types

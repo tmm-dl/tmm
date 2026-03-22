@@ -8,10 +8,10 @@
  * Trainer before calling fit():
  *
  * @code{.cpp}
- * #include <ttm/callbacks/early_stopping.hpp>
+ * #include <tmm/callbacks/early_stopping.hpp>
  *
  * trainer
- *     .add_callback(std::make_unique<ttm::callbacks::EarlyStopping>(
+ *     .addCallback(std::make_unique<tmm::callbacks::EarlyStopping>(
  *         "val_loss", 5))   // monitor, patience
  *     .fit();
  * @endcode
@@ -33,17 +33,17 @@
 
 #pragma once
 
-#include <ttm/trainer/callback.hpp>
+#include <tmm/trainer/callback.hpp>
 
 #include <limits>
 #include <string>
 
-namespace ttm::callbacks {
+namespace tmm::callbacks {
 
 	/**
 	 * @brief Stop training when a monitored metric stops improving.
 	 */
-	class EarlyStopping final : public ttm::trainer::Callback {
+	class EarlyStopping final : public tmm::trainer::Callback {
 	public:
 		/** @brief Whether lower or higher metric values represent improvement. */
 		enum class Mode { min, max };
@@ -58,7 +58,7 @@ namespace ttm::callbacks {
 				: monitor_(std::move(monitor)), patience_(patience), mode_(mode), min_delta_(min_delta) {}
 
 		void on_fit_begin(
-				ttm::trainer::Trainer& /*trainer*/, const ttm::trainer::CallbackMetrics& /*metrics*/
+				tmm::trainer::Trainer& /*trainer*/, const tmm::trainer::CallbackMetrics& /*metrics*/
 		) override {
 			best_ = (mode_ == Mode::min) ? std::numeric_limits<float>::infinity()
 										 : -std::numeric_limits<float>::infinity();
@@ -67,13 +67,13 @@ namespace ttm::callbacks {
 		}
 
 		bool on_epoch_end(
-				ttm::trainer::Trainer& trainer, int64_t /*epoch*/, const ttm::trainer::CallbackMetrics& metrics
+				tmm::trainer::Trainer& trainer, int64_t /*epoch*/, const tmm::trainer::CallbackMetrics& metrics
 		) override {
 			if (stopped_)
 				return true;
 
 			if (!metrics.has(monitor_)) {
-				trainer.log("early_stopping_warn", 0.0f); // no-op sentinel; real warning via emit_log
+				trainer.log("early_stopping_warn", 0.0f); // no-op sentinel; real warning via emitLog
 				return false;
 			}
 
@@ -105,4 +105,4 @@ namespace ttm::callbacks {
 		bool stopped_ = false;
 	};
 
-} // namespace ttm::callbacks
+} // namespace tmm::callbacks

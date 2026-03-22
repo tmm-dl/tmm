@@ -4,13 +4,13 @@
  *
  * @details
  * Both callbacks are implemented as plain C state structs wrapped in
- * ttm_trainer_callback_vtable entries.  JSON config is parsed with a minimal
+ * tmm_trainer_callback_vtable entries.  JSON config is parsed with a minimal
  * hand-rolled parser that avoids external dependencies.
  */
 
 #include "callbacks.hpp"
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <array>
 #include <cassert>
@@ -111,27 +111,27 @@ namespace {
 	static EarlyStoppingState s_es_slots[kMaxSlots];
 	static bool s_es_used[kMaxSlots] = {};
 
-	static ttm_handle es_alloc() {
+	static tmm_handle es_alloc() {
 		for (int i = 0; i < kMaxSlots; ++i) {
 			if (!s_es_used[i]) {
 				s_es_used[i] = true;
 				s_es_slots[i] = EarlyStoppingState{};
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	static EarlyStoppingState* es_get(ttm_handle h) {
+	static EarlyStoppingState* es_get(tmm_handle h) {
 		if (h < 0 || h >= kMaxSlots || !s_es_used[static_cast<int>(h)])
 			return nullptr;
 		return &s_es_slots[static_cast<int>(h)];
 	}
 
-	static ttm_handle early_stopping_create(const char* cfg, uint32_t cfg_len) {
+	static tmm_handle early_stopping_create(const char* cfg, uint32_t cfg_len) {
 		const auto h = es_alloc();
-		if (h == TTM_INVALID_HANDLE)
-			return TTM_INVALID_HANDLE;
+		if (h == TMM_INVALID_HANDLE)
+			return TMM_INVALID_HANDLE;
 		auto* st = es_get(h);
 		const std::string_view json{cfg, cfg_len};
 		const auto monitor = json_get_str(json, "monitor", "val_loss");
@@ -143,7 +143,7 @@ namespace {
 		return h;
 	}
 
-	static void early_stopping_on_fit_begin(ttm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
+	static void early_stopping_on_fit_begin(tmm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
 		auto* st = es_get(h);
 		if (st == nullptr)
 			return;
@@ -153,7 +153,7 @@ namespace {
 	}
 
 	static int32_t
-	early_stopping_on_epoch_end(ttm_handle h, int64_t /*epoch*/, const char* metrics_json, uint32_t len) {
+	early_stopping_on_epoch_end(tmm_handle h, int64_t /*epoch*/, const char* metrics_json, uint32_t len) {
 		auto* st = es_get(h);
 		if (st == nullptr || st->stopped)
 			return (st != nullptr && st->stopped) ? 1 : 0;
@@ -179,14 +179,14 @@ namespace {
 		return 0;
 	}
 
-	static void early_stopping_destroy(ttm_handle h) {
+	static void early_stopping_destroy(tmm_handle h) {
 		if (h >= 0 && h < kMaxSlots)
 			s_es_used[static_cast<int>(h)] = false;
 	}
 
 } // anonymous namespace
 
-ttm_trainer_callback_vtable g_cb_early_stopping = {
+tmm_trainer_callback_vtable g_cb_early_stopping = {
 		/* create         */ early_stopping_create,
 		/* on_fit_begin   */ early_stopping_on_fit_begin,
 		/* on_epoch_begin */ nullptr,
@@ -210,27 +210,27 @@ namespace {
 	static CheckpointState s_ck_slots[kMaxSlots];
 	static bool s_ck_used[kMaxSlots] = {};
 
-	static ttm_handle ck_alloc() {
+	static tmm_handle ck_alloc() {
 		for (int i = 0; i < kMaxSlots; ++i) {
 			if (!s_ck_used[i]) {
 				s_ck_used[i] = true;
 				s_ck_slots[i] = CheckpointState{};
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	static CheckpointState* ck_get(ttm_handle h) {
+	static CheckpointState* ck_get(tmm_handle h) {
 		if (h < 0 || h >= kMaxSlots || !s_ck_used[static_cast<int>(h)])
 			return nullptr;
 		return &s_ck_slots[static_cast<int>(h)];
 	}
 
-	static ttm_handle checkpoint_create(const char* cfg, uint32_t cfg_len) {
+	static tmm_handle checkpoint_create(const char* cfg, uint32_t cfg_len) {
 		const auto h = ck_alloc();
-		if (h == TTM_INVALID_HANDLE)
-			return TTM_INVALID_HANDLE;
+		if (h == TMM_INVALID_HANDLE)
+			return TMM_INVALID_HANDLE;
 		auto* st = ck_get(h);
 		const std::string_view json{cfg, cfg_len};
 		// Support both "directory" and "dir" keys
@@ -246,7 +246,7 @@ namespace {
 		return h;
 	}
 
-	static void checkpoint_on_fit_begin(ttm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
+	static void checkpoint_on_fit_begin(tmm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
 		auto* st = ck_get(h);
 		if (st == nullptr)
 			return;
@@ -256,7 +256,7 @@ namespace {
 		std::filesystem::create_directories(st->directory, ec);
 	}
 
-	static int32_t checkpoint_on_epoch_end(ttm_handle h, int64_t epoch, const char* metrics_json, uint32_t len) {
+	static int32_t checkpoint_on_epoch_end(tmm_handle h, int64_t epoch, const char* metrics_json, uint32_t len) {
 		auto* st = ck_get(h);
 		if (st == nullptr)
 			return 0;
@@ -272,14 +272,14 @@ namespace {
 		return 0;
 	}
 
-	static void checkpoint_destroy(ttm_handle h) {
+	static void checkpoint_destroy(tmm_handle h) {
 		if (h >= 0 && h < kMaxSlots)
 			s_ck_used[static_cast<int>(h)] = false;
 	}
 
 } // anonymous namespace
 
-ttm_trainer_callback_vtable g_cb_checkpoint = {
+tmm_trainer_callback_vtable g_cb_checkpoint = {
 		/* create         */ checkpoint_create,
 		/* on_fit_begin   */ checkpoint_on_fit_begin,
 		/* on_epoch_begin */ nullptr,
@@ -292,7 +292,7 @@ ttm_trainer_callback_vtable g_cb_checkpoint = {
  * Public registration / teardown
  * ========================================================================== */
 
-void callbacksRegister(const ttm_host_api* host) {
+void callbacksRegister(const tmm_host_api* host) {
 	if (host == nullptr || host->register_callback == nullptr)
 		return;
 	host->register_callback(host->ctx, "early_stopping", &g_cb_early_stopping);

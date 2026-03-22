@@ -1,12 +1,12 @@
 /**
  * @file collator.hpp
  * @brief ICollator — converts an Arrow RecordBatch to a set of DLTensors.
- * @ingroup ttm_model
+ * @ingroup tmm_model
  */
 
 #pragma once
 
-#include <ttm/compat/expected.hpp>
+#include <tmm/compat/expected.hpp>
 
 #include <arrow/record_batch.h>
 #include <arrow/type.h>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace ttm::model {
+namespace tmm::model {
 
 	/**
 	 * @brief A collated mini-batch ready for the model's forward pass.
@@ -31,7 +31,7 @@ namespace ttm::model {
 	 * `raw` retains the Arrow RecordBatch from which `inputs` were collated;
 	 * it keeps the Arrow memory buffers alive and is useful for debugging.
 	 *
-	 * @ingroup ttm_model
+	 * @ingroup tmm_model
 	 */
 	struct ModelBatch {
 		std::vector<DLTensor> inputs;			 ///< Collated input tensors.
@@ -62,7 +62,7 @@ namespace ttm::model {
 	 * - Encoding categorical features.
 	 * - Combining multiple columns into a single tensor.
 	 *
-	 * @ingroup ttm_model
+	 * @ingroup tmm_model
 	 */
 	class ICollator {
 	public:
@@ -104,4 +104,4 @@ namespace ttm::model {
 	 */
 	[[nodiscard]] std::unique_ptr<ICollator> make_default_collator(const arrow::Schema& schema);
 
-} // namespace ttm::model
+} // namespace tmm::model

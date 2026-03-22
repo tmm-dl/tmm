@@ -15,10 +15,10 @@
  * step() and infer() run preprocessors → collation → plugin vtable call.
  */
 
-#include <ttm/model/collator.hpp>
-#include <ttm/model/pipeline.hpp>
-#include <ttm/plugins/extension.hpp>
-#include <ttm/plugins/plugin_manager.hpp>
+#include <tmm/model/collator.hpp>
+#include <tmm/model/pipeline.hpp>
+#include <tmm/plugins/extension.hpp>
+#include <tmm/plugins/plugin_manager.hpp>
 
 #include <arrow/buffer.h>
 #include <arrow/io/memory.h>
@@ -38,28 +38,28 @@
 // Platform-specific aligned allocation
 #if defined(_WIN32)
 #include <malloc.h>
-#define TTM_ALIGNED_ALLOC(align, size) _aligned_malloc((size), (align))
-#define TTM_ALIGNED_FREE(ptr) _aligned_free(ptr)
+#define TMM_ALIGNED_ALLOC(align, size) _aligned_malloc((size), (align))
+#define TMM_ALIGNED_FREE(ptr) _aligned_free(ptr)
 #else
 #include <cstdlib>
-static void* ttm_aligned_alloc(std::size_t align, std::size_t size) {
+static void* tmm_aligned_alloc(std::size_t align, std::size_t size) {
 	void* p = nullptr;
 	if (::posix_memalign(&p, align, size) != 0)
 		return nullptr;
 	return p;
 }
-#define TTM_ALIGNED_ALLOC(align, size) ttm_aligned_alloc((align), (size))
-#define TTM_ALIGNED_FREE(ptr) ::free(ptr)
+#define TMM_ALIGNED_ALLOC(align, size) tmm_aligned_alloc((align), (size))
+#define TMM_ALIGNED_FREE(ptr) ::free(ptr)
 #endif
 
-namespace ttm::model {
+namespace tmm::model {
 
 	/* =========================================================================
-	 * CVtableModel — wraps a plugin's ttm_model_loader_vtable handle
+	 * CVtableModel — wraps a plugin's tmm_model_loader_vtable handle
 	 * ====================================================================== */
 
 	/**
-	 * @brief IModel backed by a plugin-provided ttm_model_loader_vtable.
+	 * @brief IModel backed by a plugin-provided tmm_model_loader_vtable.
 	 *
 	 * @details
 	 * Created by ModelPipeline::load(); not directly visible to callers.
@@ -67,13 +67,13 @@ namespace ttm::model {
 	 */
 	class CVtableModel final : public IModel {
 	public:
-		CVtableModel(plugins::IModelLoader* loader, ttm_handle handle, ModelInfo info)
+		CVtableModel(plugins::IModelLoader* loader, tmm_handle handle, ModelInfo info)
 				: loader_(loader), handle_(handle), info_(std::move(info)) {}
 
 		~CVtableModel() override {
-			if (handle_ != TTM_INVALID_HANDLE) {
+			if (handle_ != TMM_INVALID_HANDLE) {
 				loader_->destroy(handle_);
-				handle_ = TTM_INVALID_HANDLE;
+				handle_ = TMM_INVALID_HANDLE;
 			}
 		}
 
@@ -106,33 +106,33 @@ namespace ttm::model {
 		}
 
 		trainer::StepOutput step(const trainer::Batch& /*batch*/) override {
-			// Should not be called directly; ModelPipeline calls step_with_tensors
+			// Should not be called directly; ModelPipeline calls stepWithTensors
 			return {};
 		}
 
 		trainer::StepOutput infer(const trainer::Batch& /*batch*/) override {
-			// Should not be called directly; ModelPipeline calls infer_with_tensors
+			// Should not be called directly; ModelPipeline calls inferWithTensors
 			return {};
 		}
 
-		void zero_grad() override { loader_->zero_grad(handle_); }
+		void zeroGrad() override { loader_->zeroGrad(handle_); }
 
 		// Direct tensor-based call paths used by ModelPipeline ──────────────
 
-		[[nodiscard]] trainer::StepOutput step_with_tensors(const std::vector<DLTensor>& inputs) {
+		[[nodiscard]] trainer::StepOutput stepWithTensors(const std::vector<DLTensor>& inputs) {
 			float loss = 0.0f;
 			const auto err = loader_->step(
 					handle_, inputs.empty() ? nullptr : inputs.data(), static_cast<uint32_t>(inputs.size()), &loss
 			);
-			if (err == TTM_ERR_INTERRUPTED)
+			if (err == TMM_ERR_INTERRUPTED)
 				return {.loss = 0.0f, .interrupted = true};
-			if (err != TTM_OK) {
-				std::cerr << "[ttm/pipeline] step() returned error " << err << '\n';
+			if (err != TMM_OK) {
+				std::cerr << "[tmm/pipeline] step() returned error " << err << '\n';
 			}
 			return {.loss = loss};
 		}
 
-		[[nodiscard]] trainer::StepOutput infer_with_tensors(const std::vector<DLTensor>& inputs) {
+		[[nodiscard]] trainer::StepOutput inferWithTensors(const std::vector<DLTensor>& inputs) {
 			// For simple loss-based models, use step with a maximum output buffer.
 			// Richer infer() output is accessible via the loader directly.
 			constexpr uint32_t kMaxOutputs = 8;
@@ -142,9 +142,9 @@ namespace ttm::model {
 					handle_, inputs.empty() ? nullptr : inputs.data(), static_cast<uint32_t>(inputs.size()),
 					outputs.data(), &out_count
 			);
-			if (err != TTM_OK) {
+			if (err != TMM_OK) {
 				// Fallback: try step (many models only implement step)
-				return step_with_tensors(inputs);
+				return stepWithTensors(inputs);
 			}
 			// Return loss from first output if available
 			float loss = std::numeric_limits<float>::quiet_NaN();
@@ -154,18 +154,18 @@ namespace ttm::model {
 			return {loss};
 		}
 
-		[[nodiscard]] ttm_error describe_params(const ttm_param_desc_t** out_descs, uint32_t* out_count) {
+		[[nodiscard]] tmm_error describe_params(const tmm_param_desc_t** out_descs, uint32_t* out_count) {
 			return loader_->describe_params(handle_, out_descs, out_count);
 		}
 
-		[[nodiscard]] ttm_error init_params(std::string_view method) { return loader_->init_params(handle_, method); }
+		[[nodiscard]] tmm_error init_params(std::string_view method) { return loader_->init_params(handle_, method); }
 
 		plugins::IModelLoader* loader() const { return loader_; }
-		ttm_handle handle() const { return handle_; }
+		tmm_handle handle() const { return handle_; }
 
 	private:
 		plugins::IModelLoader* loader_ = nullptr;
-		ttm_handle handle_ = TTM_INVALID_HANDLE;
+		tmm_handle handle_ = TMM_INVALID_HANDLE;
 		ModelInfo info_;
 	};
 
@@ -175,8 +175,8 @@ namespace ttm::model {
 
 	namespace {
 
-		/// Convert ttm_model_info_t → ModelInfo using info string.
-		ModelInfo from_c_info(const ttm_model_info_t& ci, Device dev) {
+		/// Convert tmm_model_info_t → ModelInfo using info string.
+		ModelInfo from_c_info(const tmm_model_info_t& ci, Device dev) {
 			ModelInfo m;
 			if (ci.name)
 				m.name = ci.name;
@@ -191,7 +191,7 @@ namespace ttm::model {
 			return m;
 		}
 
-		/// Build a JSON model info string for emit_model_loaded().
+		/// Build a JSON model info string for emitModelLoaded().
 		std::string build_model_info_json(const ModelInfo& m) {
 			return std::format(
 					R"({{"name":"{}","arch":"{}","num_parameters":{},"num_trainable":{},"bytes_on_device":{},"device":"{}","device_id":{}}})",
@@ -221,11 +221,11 @@ namespace ttm::model {
 		void* alloc_param_buf(std::size_t nbytes) {
 			if (nbytes == 0)
 				return nullptr;
-			return TTM_ALIGNED_ALLOC(kParamAlign, nbytes);
+			return TMM_ALIGNED_ALLOC(kParamAlign, nbytes);
 		}
 
 		/// Compute the byte size of a parameter descriptor.
-		std::size_t param_byte_size(const ttm_param_desc_t& desc) {
+		std::size_t param_byte_size(const tmm_param_desc_t& desc) {
 			std::size_t elems = 1;
 			for (int32_t d = 0; d < desc.ndim; ++d) {
 				elems *= static_cast<std::size_t>(desc.shape[d]);
@@ -236,11 +236,11 @@ namespace ttm::model {
 	} // anonymous namespace
 
 	/* =========================================================================
-	 * TransformPreprocessorAdapter — wraps ttm_transform_vtable as IPreprocessor
+	 * TransformPreprocessorAdapter — wraps tmm_transform_vtable as IPreprocessor
 	 * ====================================================================== */
 
 	/**
-	 * @brief Adapts a plugin-registered ttm_transform_vtable as an IPreprocessor.
+	 * @brief Adapts a plugin-registered tmm_transform_vtable as an IPreprocessor.
 	 *
 	 * @details
 	 * Creates a new transform instance using the per-preprocessor config JSON
@@ -251,16 +251,16 @@ namespace ttm::model {
 	class TransformPreprocessorAdapter final : public model::IPreprocessor {
 	public:
 		TransformPreprocessorAdapter(
-				std::string type_name, const ttm_transform_vtable& vt, std::string_view config_json
+				std::string type_name, const tmm_transform_vtable& vt, std::string_view config_json
 		)
-				: name_(std::move(type_name)), vt_(vt), handle_(TTM_INVALID_HANDLE) {
+				: name_(std::move(type_name)), vt_(vt), handle_(TMM_INVALID_HANDLE) {
 			if (vt_.create != nullptr) {
 				handle_ = vt_.create(config_json.data(), static_cast<uint32_t>(config_json.size()));
 			}
 		}
 
 		~TransformPreprocessorAdapter() override {
-			if (handle_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+			if (handle_ != TMM_INVALID_HANDLE && vt_.destroy != nullptr) {
 				vt_.destroy(handle_);
 			}
 		}
@@ -274,7 +274,7 @@ namespace ttm::model {
 
 		[[nodiscard]] std::expected<std::shared_ptr<arrow::RecordBatch>, std::string>
 		apply(const arrow::RecordBatch& batch) const override {
-			if (handle_ == TTM_INVALID_HANDLE) {
+			if (handle_ == TMM_INVALID_HANDLE) {
 				return std::unexpected(
 						std::format("TransformPreprocessorAdapter('{}'): handle is invalid (create failed?)", name_)
 				);
@@ -314,7 +314,7 @@ namespace ttm::model {
 			uint32_t out_len = 0;
 			const auto err =
 					vt_.apply(handle_, in_buf->data(), static_cast<uint32_t>(in_buf->size()), &out_raw, &out_len);
-			if (err != TTM_OK) {
+			if (err != TMM_OK) {
 				return std::unexpected(
 						std::format(
 								"TransformPreprocessorAdapter('{}'): apply() returned error {}", name_,
@@ -366,8 +366,8 @@ namespace ttm::model {
 
 	private:
 		std::string name_;
-		ttm_transform_vtable vt_;
-		ttm_handle handle_;
+		tmm_transform_vtable vt_;
+		tmm_handle handle_;
 	};
 
 	/* =========================================================================
@@ -377,8 +377,8 @@ namespace ttm::model {
 	ModelPipeline::~ModelPipeline() {
 		// Free host-allocated param / grad buffers
 		for (auto& pb : params_) {
-			TTM_ALIGNED_FREE(pb.tensor.data);
-			TTM_ALIGNED_FREE(pb.grad.data);
+			TMM_ALIGNED_FREE(pb.tensor.data);
+			TMM_ALIGNED_FREE(pb.grad.data);
 		}
 	}
 
@@ -391,12 +391,12 @@ namespace ttm::model {
 			plugins::PluginManager& mgr, Device dev
 	) {
 		// 1. Find a loader ────────────────────────────────────────────────────
-		plugins::IModelLoader* loader = mgr.find_model_loader(cfg.path);
+		plugins::IModelLoader* loader = mgr.findModelLoader(cfg.path);
 		if (loader == nullptr) {
 			return std::unexpected(
 					std::format(
 							"ModelPipeline: no registered loader accepts '{}'.\n"
-							"  Make sure a plugin implementing ttm_model_loader_vtable is loaded\n"
+							"  Make sure a plugin implementing tmm_model_loader_vtable is loaded\n"
 							"  and its probe() function returns non-zero for this file extension.",
 							cfg.path
 					)
@@ -408,10 +408,10 @@ namespace ttm::model {
 		if (!openResult) {
 			return std::unexpected(std::format("ModelPipeline: failed to load '{}': {}", cfg.path, openResult.error()));
 		}
-		const ttm_handle handle = *openResult;
+		const tmm_handle handle = *openResult;
 
 		// 3. Build ModelInfo from the plugin ──────────────────────────────────
-		const ttm_model_info_t ci = loader->get_info(handle);
+		const tmm_model_info_t ci = loader->get_info(handle);
 		ModelInfo info = from_c_info(ci, dev);
 		if (info.name.empty())
 			info.name = cfg.path;
@@ -422,7 +422,7 @@ namespace ttm::model {
 		// 5. Resolve preprocessors from plugin registry ───────────────────────
 		std::vector<std::unique_ptr<IPreprocessor>> preprocessors;
 		for (const auto& pe : preprocessor_entries) {
-			const auto* vt = mgr.find_transform_vtable(pe.type);
+			const auto* vt = mgr.findTransformVtable(pe.type);
 			if (vt == nullptr) {
 				return std::unexpected(
 						std::format(
@@ -443,12 +443,12 @@ namespace ttm::model {
 		auto collator = make_default_collator(*schema);
 
 		// 7. Describe and allocate parameters ─────────────────────────────────
-		const ttm_param_desc_t* descs = nullptr;
+		const tmm_param_desc_t* descs = nullptr;
 		uint32_t n_descs = 0;
 		std::vector<ParamBuffer> params;
 
 		const auto desc_err = inner->describe_params(&descs, &n_descs);
-		if (desc_err == TTM_OK && descs != nullptr && n_descs > 0) {
+		if (desc_err == TMM_OK && descs != nullptr && n_descs > 0) {
 			params.resize(n_descs);
 			uint64_t total_bytes = 0;
 			uint64_t trainable_count = 0;
@@ -467,8 +467,8 @@ namespace ttm::model {
 				void* param_buf = alloc_param_buf(nbytes);
 				void* grad_buf = alloc_param_buf(nbytes);
 				if ((nbytes > 0) && (param_buf == nullptr || grad_buf == nullptr)) {
-					TTM_ALIGNED_FREE(param_buf);
-					TTM_ALIGNED_FREE(grad_buf);
+					TMM_ALIGNED_FREE(param_buf);
+					TMM_ALIGNED_FREE(grad_buf);
 					return std::unexpected("ModelPipeline: out of memory allocating parameters");
 				}
 				if (nbytes > 0) {
@@ -515,7 +515,7 @@ namespace ttm::model {
 		pipe->info_ = std::move(info);
 
 		// 11. Broadcast model metadata ────────────────────────────────────────
-		mgr.emit_model_loaded(build_model_info_json(pipe->info_));
+		mgr.emitModelLoaded(build_model_info_json(pipe->info_));
 
 		return pipe;
 	}
@@ -525,7 +525,7 @@ namespace ttm::model {
 	 * ====================================================================== */
 
 	std::expected<std::shared_ptr<arrow::RecordBatch>, std::string>
-	ModelPipeline::run_preprocessors(const arrow::RecordBatch& raw) const {
+	ModelPipeline::runPreprocessors(const arrow::RecordBatch& raw) const {
 		// Wrap the raw batch in a shared_ptr without copying — preprocessors
 		// that need ownership can copy themselves.
 		std::shared_ptr<arrow::RecordBatch> batch{
@@ -542,23 +542,23 @@ namespace ttm::model {
 	}
 
 	/* =========================================================================
-	 * step / infer / zero_grad / name / bind_params
+	 * step / infer / zeroGrad / name / bind_params
 	 * ====================================================================== */
 
 	std::string_view ModelPipeline::name() const { return info_.name; }
 
 	trainer::StepOutput ModelPipeline::step(const trainer::Batch& batch) {
 		// 1. Preprocess
-		auto processed = run_preprocessors(*batch.data);
+		auto processed = runPreprocessors(*batch.data);
 		if (!processed) {
-			std::cerr << "[ttm/pipeline] preprocessing failed: " << processed.error() << '\n';
+			std::cerr << "[tmm/pipeline] preprocessing failed: " << processed.error() << '\n';
 			return {};
 		}
 
 		// 2. Collate
 		auto collated = collator_->collate(**processed);
 		if (!collated) {
-			std::cerr << "[ttm/pipeline] collation failed: " << collated.error() << '\n';
+			std::cerr << "[tmm/pipeline] collation failed: " << collated.error() << '\n';
 			return {};
 		}
 
@@ -566,31 +566,31 @@ namespace ttm::model {
 		auto* inner = dynamic_cast<CVtableModel*>(inner_.get());
 		if (inner == nullptr)
 			return {};
-		return inner->step_with_tensors(collated->inputs);
+		return inner->stepWithTensors(collated->inputs);
 	}
 
 	trainer::StepOutput ModelPipeline::infer(const trainer::Batch& batch) {
-		auto processed = run_preprocessors(*batch.data);
+		auto processed = runPreprocessors(*batch.data);
 		if (!processed) {
-			std::cerr << "[ttm/pipeline] preprocessing failed (infer): " << processed.error() << '\n';
+			std::cerr << "[tmm/pipeline] preprocessing failed (infer): " << processed.error() << '\n';
 			return {};
 		}
 
 		auto collated = collator_->collate(**processed);
 		if (!collated) {
-			std::cerr << "[ttm/pipeline] collation failed (infer): " << collated.error() << '\n';
+			std::cerr << "[tmm/pipeline] collation failed (infer): " << collated.error() << '\n';
 			return {};
 		}
 
 		auto* inner = dynamic_cast<CVtableModel*>(inner_.get());
 		if (inner == nullptr)
 			return {};
-		return inner->infer_with_tensors(collated->inputs);
+		return inner->inferWithTensors(collated->inputs);
 	}
 
-	void ModelPipeline::zero_grad() {
+	void ModelPipeline::zeroGrad() {
 		if (inner_)
-			inner_->zero_grad();
+			inner_->zeroGrad();
 	}
 
 	void ModelPipeline::bind_params(std::vector<ParamBuffer>& params) {
@@ -598,4 +598,4 @@ namespace ttm::model {
 			inner_->bind_params(params);
 	}
 
-} // namespace ttm::model
+} // namespace tmm::model

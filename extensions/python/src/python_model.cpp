@@ -1,10 +1,10 @@
 /**
  * @file python_model.cpp
- * @brief TTM Python plugin — loads PyTorch models from .py files.
+ * @brief TMM Python plugin — loads PyTorch models from .py files.
  *
  * @details
  * This plugin embeds CPython and uses importlib to load a Python file,
- * locate a torch.nn.Module subclass, and expose it as a TTM model loader.
+ * locate a torch.nn.Module subclass, and expose it as a TMM model loader.
  *
  * ### Data flow
  * 1. probe(): returns true for .py files.
@@ -26,19 +26,19 @@
  *
  * ### Availability
  * Full functionality requires Python 3.8+ and PyTorch 2.x.
- * When compiled without PyTorch (TTM_PYTHON_HAS_TORCH not defined), the
+ * When compiled without PyTorch (TMM_PYTHON_HAS_TORCH not defined), the
  * plugin registers itself but returns a helpful error at load time.
  */
 
 #include "python_plugin.hpp"
 
-#include <ttm/plugins/abi.h>
-#include <ttm_python_export.h>
+#include <tmm/plugins/abi.h>
+#include <tmm_python_export.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#ifdef TTM_PYTHON_HAS_TORCH
+#ifdef TMM_PYTHON_HAS_TORCH
 #include <dlpack/dlpack.h>
 #endif
 
@@ -59,35 +59,35 @@
 static constexpr int kMaxModels = 16;
 
 /* ============================================================================
- * Host API reference — stored during ttm_plugin_init for Python log bridge.
+ * Host API reference — stored during tmm_plugin_init for Python log bridge.
  * ========================================================================= */
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static ttm_host_api g_hostApi{};
+static tmm_host_api g_hostApi{};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool g_stdoutRedirected = false;
 
-/// C function exposed to Python as _ttm_host.log(level: int, msg: str).
+/// C function exposed to Python as _tmm_host.log(level: int, msg: str).
 static PyObject* pyHostLog(PyObject* /*self*/, PyObject* args) {
 	int level = 0;
 	const char* msg = nullptr;
 	if (!PyArg_ParseTuple(args, "is", &level, &msg))
 		return nullptr;
 	if (g_hostApi.log != nullptr) {
-		g_hostApi.log(g_hostApi.ctx, static_cast<ttm_log_level>(level), msg, static_cast<uint32_t>(std::strlen(msg)));
+		g_hostApi.log(g_hostApi.ctx, static_cast<tmm_log_level>(level), msg, static_cast<uint32_t>(std::strlen(msg)));
 	}
 	Py_RETURN_NONE;
 }
 
 static PyMethodDef kTtmHostMethods[] = {
-		{"log", pyHostLog, METH_VARARGS, "log(level, msg) — route a message via TTM host logger"},
+		{"log", pyHostLog, METH_VARARGS, "log(level, msg) — route a message via TMM host logger"},
 		{nullptr, nullptr, 0, nullptr},
 };
 static PyModuleDef kTtmHostModuleDef = {
-		PyModuleDef_HEAD_INIT, "_ttm_host", nullptr, -1, kTtmHostMethods, nullptr, nullptr, nullptr, nullptr,
+		PyModuleDef_HEAD_INIT, "_tmm_host", nullptr, -1, kTtmHostMethods, nullptr, nullptr, nullptr, nullptr,
 };
 
-/// Inject _ttm_host into sys.modules and redirect sys.stdout/sys.stderr.
+/// Inject _tmm_host into sys.modules and redirect sys.stdout/sys.stderr.
 /// Must be called after Py_Initialize().
 static void installPythonLogBridge() {
 	if (g_stdoutRedirected)
@@ -101,15 +101,15 @@ static void installPythonLogBridge() {
 		return;
 	}
 	PyObject* sysModules = PyImport_GetModuleDict();
-	PyDict_SetItemString(sysModules, "_ttm_host", mod);
+	PyDict_SetItemString(sysModules, "_tmm_host", mod);
 	Py_DECREF(mod);
 
 	/* Redirect sys.stdout and sys.stderr through the host logger. */
 	PyRun_SimpleString(R"py(
-import sys, _ttm_host
+import sys, _tmm_host
 
 class _TtmWriter:
-    """Routes Python stdout/stderr into the TTM host logger (e.g. console-ui Logs panel)."""
+    """Routes Python stdout/stderr into the TMM host logger (e.g. console-ui Logs panel)."""
     def __init__(self, level):
         self._level = level
         self._buf   = ""
@@ -118,18 +118,18 @@ class _TtmWriter:
         while "\n" in self._buf:
             line, self._buf = self._buf.split("\n", 1)
             if line:
-                _ttm_host.log(self._level, line)
+                _tmm_host.log(self._level, line)
     def flush(self):
         if self._buf:
-            _ttm_host.log(self._level, self._buf)
+            _tmm_host.log(self._level, self._buf)
             self._buf = ""
     def isatty(self):
         return False
     def fileno(self):
         raise OSError("_TtmWriter has no file descriptor")
 
-sys.stdout = _TtmWriter(2)  # TTM_LOG_INFO
-sys.stderr = _TtmWriter(3)  # TTM_LOG_WARN
+sys.stdout = _TtmWriter(2)  # TMM_LOG_INFO
+sys.stderr = _TtmWriter(3)  # TMM_LOG_WARN
 )py");
 	PyErr_Clear(); // ignore any errors from the redirect (best-effort)
 	g_stdoutRedirected = true;
@@ -150,17 +150,17 @@ namespace {
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- plugin-level model table
 	PyModelState g_models[kMaxModels]{};
 
-	ttm_handle alloc_model_slot(PyObject* module, PyObject* model_obj) {
+	tmm_handle alloc_model_slot(PyObject* module, PyObject* model_obj) {
 		for (int i = 0; i < kMaxModels; ++i) {
 			if (!g_models[i].used) {
 				g_models[i] = {module, model_obj, true};
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	PyModelState* get_model(ttm_handle h) {
+	PyModelState* get_model(tmm_handle h) {
 		if (h < 0 || h >= kMaxModels)
 			return nullptr;
 		return g_models[static_cast<int>(h)].used ? &g_models[static_cast<int>(h)] : nullptr;
@@ -169,7 +169,7 @@ namespace {
 } // anonymous namespace
 
 // Non-static accessor for python_optimizer.cpp (declared in python_plugin.hpp).
-PyObject* py_get_model_obj(ttm_handle h) {
+PyObject* py_get_model_obj(tmm_handle h) {
 	const auto* st =
 			(h >= 0 && h < kMaxModels && g_models[static_cast<int>(h)].used) ? &g_models[static_cast<int>(h)] : nullptr;
 	return st ? st->model_obj : nullptr;
@@ -179,7 +179,7 @@ PyObject* py_get_model_obj(ttm_handle h) {
  * DLPack helpers
  * ========================================================================= */
 
-#ifdef TTM_PYTHON_HAS_TORCH
+#ifdef TMM_PYTHON_HAS_TORCH
 
 /// Heap-allocated DLManagedTensor that copies the shape from a DLTensor.
 /// Freed by managed_dlpack_deleter() which PyTorch calls when it releases the tensor.
@@ -277,7 +277,7 @@ static PyObject* call_model_forward(PyObject* model_obj, PyObject* tensors) {
 	return output;
 }
 
-#endif // TTM_PYTHON_HAS_TORCH
+#endif // TMM_PYTHON_HAS_TORCH
 
 /* ============================================================================
  * Model loader vtable implementations
@@ -290,15 +290,15 @@ static int32_t py_probe(const char* path, uint32_t len) {
 	return (ext[0] == '.' && ext[1] == 'p' && ext[2] == 'y') ? 1 : 0;
 }
 
-static ttm_handle
+static tmm_handle
 py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg_len*/, char* err, uint32_t err_cap) {
-#ifndef TTM_PYTHON_HAS_TORCH
+#ifndef TMM_PYTHON_HAS_TORCH
 	std::snprintf(
 			err, err_cap,
 			"Python model loader requires PyTorch.\n"
 			"Install PyTorch (pip install torch) and rebuild the plugin."
 	);
-	return TTM_INVALID_HANDLE;
+	return TMM_INVALID_HANDLE;
 #else
 	/* Ensure Python is initialised */
 	if (!Py_IsInitialized()) {
@@ -327,7 +327,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 	if (importlib_util == nullptr) {
 		std::snprintf(err, err_cap, "Python: cannot import importlib.util");
 		PyErr_Clear();
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* spec_from_file_location("model", path) */
@@ -337,7 +337,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 		PyErr_Clear();
 		Py_XDECREF(importlib_util);
 		Py_XDECREF(spec);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* module_from_spec(spec) */
@@ -347,7 +347,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 		std::snprintf(err, err_cap, "Python: module_from_spec failed");
 		PyErr_Clear();
 		Py_DECREF(spec);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* spec.loader.exec_module(module) */
@@ -357,7 +357,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 		std::snprintf(err, err_cap, "Python: spec has no loader");
 		PyErr_Clear();
 		Py_DECREF(pymod);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	PyObject* exec_result = PyObject_CallMethod(loader, "exec_module", "O", pymod);
@@ -367,7 +367,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 		PyErr_Print();
 		PyErr_Clear();
 		Py_DECREF(pymod);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 	Py_DECREF(exec_result);
 
@@ -377,7 +377,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 		std::snprintf(err, err_cap, "Python: cannot import torch");
 		PyErr_Clear();
 		Py_DECREF(pymod);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 	PyObject* nn_mod = PyObject_GetAttrString(torch_mod, "nn");
 	Py_DECREF(torch_mod);
@@ -388,7 +388,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 		std::snprintf(err, err_cap, "Python: cannot get torch.nn.Module class");
 		PyErr_Clear();
 		Py_DECREF(pymod);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* Find first torch.nn.Module subclass DEFINED in this module's dict.
@@ -427,7 +427,7 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 	if (model_class == nullptr) {
 		std::snprintf(err, err_cap, "Python: no torch.nn.Module subclass found in '%s'", path_str.c_str());
 		Py_DECREF(pymod);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	/* Instantiate the model */
@@ -437,27 +437,27 @@ py_load(const char* path, uint32_t path_len, const char* /*cfg*/, uint32_t /*cfg
 		PyErr_Print();
 		PyErr_Clear();
 		Py_DECREF(pymod);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	const ttm_handle h = alloc_model_slot(pymod, model_instance);
-	if (h == TTM_INVALID_HANDLE) {
+	const tmm_handle h = alloc_model_slot(pymod, model_instance);
+	if (h == TMM_INVALID_HANDLE) {
 		std::snprintf(err, err_cap, "Python: too many models loaded simultaneously");
 		Py_DECREF(pymod);
 		Py_DECREF(model_instance);
 	}
 	return h;
-#endif // TTM_PYTHON_HAS_TORCH
+#endif // TMM_PYTHON_HAS_TORCH
 }
 
-static ttm_model_info_t py_get_info([[maybe_unused]] ttm_handle h) {
-	ttm_model_info_t info{};
+static tmm_model_info_t py_get_info([[maybe_unused]] tmm_handle h) {
+	tmm_model_info_t info{};
 	info.name = "python-model";
 	info.arch = "torch.nn.Module";
 	return info;
 }
 
-static ttm_error py_describe_params(ttm_handle /*h*/, const ttm_param_desc_t** out_descs, uint32_t* out_count) {
+static tmm_error py_describe_params(tmm_handle /*h*/, const tmm_param_desc_t** out_descs, uint32_t* out_count) {
 	/* Parameter description via DLPack is deferred to bind_params().
 	 * Returning 0 params causes ModelPipeline to skip buffer allocation
 	 * and let PyTorch manage parameter memory natively. */
@@ -465,40 +465,40 @@ static ttm_error py_describe_params(ttm_handle /*h*/, const ttm_param_desc_t** o
 		*out_descs = nullptr;
 	if (out_count)
 		*out_count = 0;
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static ttm_error py_bind_params(
-		ttm_handle /*h*/, const DLTensor* /*params*/, uint32_t /*param_count*/, const DLTensor* /*grads*/,
+static tmm_error py_bind_params(
+		tmm_handle /*h*/, const DLTensor* /*params*/, uint32_t /*param_count*/, const DLTensor* /*grads*/,
 		uint32_t /*grad_count*/
 ) {
 	/* With describe_params returning 0, the host does not allocate external
 	 * buffers.  PyTorch manages its own parameter tensors. */
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static ttm_error py_init_params(ttm_handle /*h*/, const char* /*method*/, uint32_t /*len*/) {
+static tmm_error py_init_params(tmm_handle /*h*/, const char* /*method*/, uint32_t /*len*/) {
 	/* PyTorch modules initialise their own parameters in __init__. */
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static ttm_error py_step(ttm_handle h, const DLTensor* inputs, uint32_t n, float* out_loss) {
+static tmm_error py_step(tmm_handle h, const DLTensor* inputs, uint32_t n, float* out_loss) {
 	if (out_loss)
 		*out_loss = 0.0f;
 	auto* st = get_model(h);
 	if (st == nullptr)
-		return TTM_ERR_NOT_FOUND;
+		return TMM_ERR_NOT_FOUND;
 
-#ifdef TTM_PYTHON_HAS_TORCH
+#ifdef TMM_PYTHON_HAS_TORCH
 	if (n < 1)
-		return TTM_ERR_ARGS;
+		return TMM_ERR_ARGS;
 
 	// 1. Convert DLTensors → torch.Tensors via DLPack
 	PyObject* tensors = tensors_to_torch(inputs, n);
 	if (tensors == nullptr) {
 		PyErr_Print();
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 
 	// 2. Forward pass
@@ -507,11 +507,11 @@ static ttm_error py_step(ttm_handle h, const DLTensor* inputs, uint32_t n, float
 	if (output == nullptr) {
 		if (PyErr_ExceptionMatches(PyExc_KeyboardInterrupt)) {
 			PyErr_Clear();
-			return TTM_ERR_INTERRUPTED;
+			return TMM_ERR_INTERRUPTED;
 		}
 		PyErr_Print();
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 
 	// 3. loss.backward()
@@ -520,7 +520,7 @@ static ttm_error py_step(ttm_handle h, const DLTensor* inputs, uint32_t n, float
 	if (loss_tensor == nullptr || loss_tensor == Py_None) {
 		Py_XDECREF(loss_tensor);
 		PyErr_Clear();
-		return TTM_OK; // no loss (inference-only model?)
+		return TMM_OK; // no loss (inference-only model?)
 	}
 	PyObject* bwd = PyObject_CallMethod(loss_tensor, "backward", nullptr);
 	Py_XDECREF(bwd);
@@ -539,7 +539,7 @@ static ttm_error py_step(ttm_handle h, const DLTensor* inputs, uint32_t n, float
 	}
 	if (PyErr_ExceptionMatches(PyExc_KeyboardInterrupt)) {
 		PyErr_Clear();
-		return TTM_ERR_INTERRUPTED;
+		return TMM_ERR_INTERRUPTED;
 	}
 	PyErr_Clear(); // swallow any remaining python error
 
@@ -558,7 +558,7 @@ static ttm_error py_step(ttm_handle h, const DLTensor* inputs, uint32_t n, float
 		PyErr_Clear();
 	}
 #endif
-	return TTM_OK;
+	return TMM_OK;
 }
 
 // thread_local float so py_infer can pass validation loss back to the caller
@@ -566,38 +566,38 @@ static ttm_error py_step(ttm_handle h, const DLTensor* inputs, uint32_t n, float
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local float g_infer_loss = 0.0f;
 
-static ttm_error
-py_infer(ttm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outputs, uint32_t* out_count) {
+static tmm_error
+py_infer(tmm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outputs, uint32_t* out_count) {
 	if (out_count)
 		*out_count = 0;
 	auto* st = get_model(h);
 	if (st == nullptr)
-		return TTM_ERR_NOT_FOUND;
+		return TMM_ERR_NOT_FOUND;
 
-#ifdef TTM_PYTHON_HAS_TORCH
+#ifdef TMM_PYTHON_HAS_TORCH
 	if (in_count < 1)
-		return TTM_ERR_ARGS;
+		return TMM_ERR_ARGS;
 
 	// Disable gradient computation for inference
 	PyObject* torch_mod = PyImport_ImportModule("torch");
 	if (torch_mod == nullptr) {
 		PyErr_Print();
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 	PyObject* no_grad_cls = PyObject_GetAttrString(torch_mod, "no_grad");
 	Py_DECREF(torch_mod);
 	if (no_grad_cls == nullptr) {
 		PyErr_Print();
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 	PyObject* no_grad_ctx = PyObject_CallObject(no_grad_cls, nullptr);
 	Py_DECREF(no_grad_cls);
 	if (no_grad_ctx == nullptr) {
 		PyErr_Print();
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 	PyObject* enter_result = PyObject_CallMethod(no_grad_ctx, "__enter__", nullptr);
 	Py_XDECREF(enter_result);
@@ -605,7 +605,7 @@ py_infer(ttm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outp
 		PyErr_Print();
 		PyErr_Clear();
 		Py_DECREF(no_grad_ctx);
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 
 	// Convert DLTensors → torch.Tensors and run forward
@@ -622,7 +622,7 @@ py_infer(ttm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outp
 	if (output == nullptr) {
 		PyErr_Print();
 		PyErr_Clear();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 
 	// Extract validation loss → store in thread_local so caller can memcpy it
@@ -649,24 +649,24 @@ py_infer(ttm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outp
 	}
 	PyErr_Clear();
 #endif
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static ttm_error py_zero_grad(ttm_handle h) {
+static tmm_error py_zero_grad(tmm_handle h) {
 	auto* st = get_model(h);
 	if (st == nullptr)
-		return TTM_ERR_NOT_FOUND;
-#ifdef TTM_PYTHON_HAS_TORCH
+		return TMM_ERR_NOT_FOUND;
+#ifdef TMM_PYTHON_HAS_TORCH
 	if (st->model_obj != nullptr) {
 		PyObject* result = PyObject_CallMethod(st->model_obj, "zero_grad", nullptr);
 		Py_XDECREF(result);
 		PyErr_Clear();
 	}
 #endif
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static void py_destroy(ttm_handle h) {
+static void py_destroy(tmm_handle h) {
 	auto* st = get_model(h);
 	if (st == nullptr)
 		return;
@@ -675,36 +675,36 @@ static void py_destroy(ttm_handle h) {
 	*st = {};
 }
 
-static ttm_model_loader_vtable g_py_loader = {py_probe,		  py_load, py_get_info, py_describe_params, py_bind_params,
+static tmm_model_loader_vtable g_py_loader = {py_probe,		  py_load, py_get_info, py_describe_params, py_bind_params,
 											  py_init_params, py_step, py_infer,	py_zero_grad,		py_destroy};
 
 /* ============================================================================
  * Required plugin exports
  * ========================================================================= */
 
-static ttm_plugin_info g_info = {TTM_ABI_VERSION, "python", "0.1.0", "PyTorch model loader for .py files"};
+static tmm_plugin_info g_info = {TMM_ABI_VERSION, "python", "0.1.0", "PyTorch model loader for .py files"};
 
 extern "C" {
 
-TTM_PYTHON_EXPORT ttm_plugin_info* ttm_plugin_get_info(void) { return &g_info; }
+TMM_PYTHON_EXPORT tmm_plugin_info* tmm_plugin_get_info(void) { return &g_info; }
 
-TTM_PYTHON_EXPORT ttm_error ttm_plugin_init(const ttm_host_api* host, const char* /*cfg*/, uint32_t /*len*/) {
+TMM_PYTHON_EXPORT tmm_error tmm_plugin_init(const tmm_host_api* host, const char* /*cfg*/, uint32_t /*len*/) {
 	if (host != nullptr)
 		g_hostApi = *host;
 	if (host->register_model_loader != nullptr) {
-		const ttm_error rc = host->register_model_loader(host->ctx, &g_py_loader);
-		if (rc != TTM_OK)
+		const tmm_error rc = host->register_model_loader(host->ctx, &g_py_loader);
+		if (rc != TMM_OK)
 			return rc;
 	}
 	{
-		const ttm_error rc = pyOptimizerRegister(host);
-		if (rc != TTM_OK)
+		const tmm_error rc = pyOptimizerRegister(host);
+		if (rc != TMM_OK)
 			return rc;
 	}
 	return pyTransformRegister(host);
 }
 
-TTM_PYTHON_EXPORT void ttm_plugin_teardown(void) {
+TMM_PYTHON_EXPORT void tmm_plugin_teardown(void) {
 	pyOptimizerTeardown();
 	pyTransformTeardown();
 	for (auto& st : g_models) {

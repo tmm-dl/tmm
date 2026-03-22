@@ -12,29 +12,29 @@
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SchedulerState g_scheds[kMaxScheds]{};
 
-ttm_handle allocSched(SchedulerState s) {
+tmm_handle allocSched(SchedulerState s) {
 	for (int i = 0; i < kMaxScheds; ++i) {
 		if (!g_scheds[i].used) {
 			s.used = true;
 			g_scheds[i] = s;
-			return static_cast<ttm_handle>(i);
+			return static_cast<tmm_handle>(i);
 		}
 	}
-	return TTM_INVALID_HANDLE;
+	return TMM_INVALID_HANDLE;
 }
 
-SchedulerState* getSched(ttm_handle h) {
+SchedulerState* getSched(tmm_handle h) {
 	if (h < 0 || h >= kMaxScheds)
 		return nullptr;
 	return g_scheds[static_cast<int>(h)].used ? &g_scheds[static_cast<int>(h)] : nullptr;
 }
 
-void freeSched(ttm_handle h) {
+void freeSched(tmm_handle h) {
 	if (h >= 0 && h < kMaxScheds)
 		g_scheds[static_cast<int>(h)] = {};
 }
 
-void schedDestroy(ttm_handle h) { freeSched(h); }
+void schedDestroy(tmm_handle h) { freeSched(h); }
 
 /* -------------------------------------------------------------------------
  * Minimal JSON scalar extraction (no external library dependency)

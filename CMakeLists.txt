@@ -5,14 +5,14 @@ cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 ##########################################################################################
 include(FeatureSummary)
 option(TMM_BUILD_TESTS "Build tests" ON)
-option(TTM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)" OFF)
-option(TTM_BUILD_PACKAGE "Build installable package via CPack (DEB/DMG/NSIS+ZIP)" OFF)
-set(TTM_WASM_TOOLCHAIN "" CACHE FILEPATH
+option(TMM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)" OFF)
+option(TMM_BUILD_PACKAGE "Build installable package via CPack (DEB/DMG/NSIS+ZIP)" OFF)
+set(TMM_WASM_TOOLCHAIN "" CACHE FILEPATH
     "Path to the WASI SDK CMake toolchain file (required for WASM extensions)")
 # Auto-fetch WASI SDK via FetchContent when building WASM extensions and no
 # toolchain was supplied explicitly.  The tarball is cached in CPM_SOURCE_CACHE
 # (or the build tree) and never re-downloaded on subsequent configures.
-if(TTM_BUILD_EXTENSIONS AND NOT TTM_WASM_TOOLCHAIN)
+if(TMM_BUILD_EXTENSIONS AND NOT TMM_WASM_TOOLCHAIN)
     set(_wasi_version "32")
     set(_wasi_base "wasi-sdk-${_wasi_version}.0")
     # Resolve the platform-specific asset name
@@ -37,20 +37,20 @@ if(TTM_BUILD_EXTENSIONS AND NOT TTM_WASM_TOOLCHAIN)
     )
     FetchContent_GetProperties(wasi_sdk)
     if(NOT wasi_sdk_POPULATED)
-        message(STATUS "ttm: Fetching WASI SDK ${_wasi_base} (${_wasi_asset})...")
+        message(STATUS "tmm: Fetching WASI SDK ${_wasi_base} (${_wasi_asset})...")
         FetchContent_Populate(wasi_sdk)
     endif()
-    set(TTM_WASM_TOOLCHAIN "${wasi_sdk_SOURCE_DIR}/share/cmake/wasi-sdk.cmake" CACHE FILEPATH
+    set(TMM_WASM_TOOLCHAIN "${wasi_sdk_SOURCE_DIR}/share/cmake/wasi-sdk.cmake" CACHE FILEPATH
         "Path to the WASI SDK CMake toolchain file (required for WASM extensions)" FORCE)
-    message(STATUS "ttm: WASI SDK toolchain: ${TTM_WASM_TOOLCHAIN}")
+    message(STATUS "tmm: WASI SDK toolchain: ${TMM_WASM_TOOLCHAIN}")
     unset(_wasi_version)
     unset(_wasi_base)
     unset(_wasi_asset)
 endif()
 
 add_feature_info(tests      TMM_BUILD_TESTS      "Build tests")
-add_feature_info(extensions TTM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)")
-add_feature_info(package    TTM_BUILD_PACKAGE    "Build installable package via CPack (DEB/DMG/NSIS+ZIP)")
+add_feature_info(extensions TMM_BUILD_EXTENSIONS "Build plugin extensions (extensions/core, extensions/nlp-tasks)")
+add_feature_info(package    TMM_BUILD_PACKAGE    "Build installable package via CPack (DEB/DMG/NSIS+ZIP)")
 feature_summary(WHAT ALL)
 
 ##########################################################################################
@@ -123,8 +123,8 @@ add_subdirectory(src)
 ########################################################################################################################
 # Plugin Extensions                                                                                                    #
 ########################################################################################################################
-if(TTM_BUILD_EXTENSIONS)
-    # Native core plugin — shares the libgit2 instance fetched by ttm_datasets.
+if(TMM_BUILD_EXTENSIONS)
+    # Native core plugin — shares the libgit2 instance fetched by tmm_datasets.
     # Must be added after src/ so that the libgit2 CPM package is already available.
     add_subdirectory(extensions/core)
 
@@ -133,7 +133,7 @@ if(TTM_BUILD_EXTENSIONS)
     if(Python3_FOUND)
         add_subdirectory(extensions/python)
     else()
-        message(STATUS "ttm: Python3 not found — skipping extensions/python")
+        message(STATUS "tmm: Python3 not found — skipping extensions/python")
     endif()
 
     # console-ui native plugin — full FTXUI component API (ScreenInteractive,
@@ -149,20 +149,20 @@ if(TTM_BUILD_EXTENSIONS)
             "FTXUI_ENABLE_INSTALL OFF"
         EXCLUDE_FROM_ALL YES
     )
-    add_library(ttm_console_ui MODULE
+    add_library(tmm_console_ui MODULE
         extensions/console-ui/src/console_ui.cpp
     )
-    set_target_properties(ttm_console_ui PROPERTIES
+    set_target_properties(tmm_console_ui PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/extensions/console-ui"
     )
-    target_compile_features(ttm_console_ui PRIVATE cxx_std_20)
-    target_include_directories(ttm_console_ui PRIVATE
+    target_compile_features(tmm_console_ui PRIVATE cxx_std_20)
+    target_include_directories(tmm_console_ui PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
     # dlpack is already fetched by extensions/core above; CPM deduplicates.
     CPMAddPackage(URI "gh:dmlc/dlpack@0.8" EXCLUDE_FROM_ALL YES)
-    target_link_libraries(ttm_console_ui PRIVATE
+    target_link_libraries(tmm_console_ui PRIVATE
         ftxui::screen
         ftxui::dom
         ftxui::component
@@ -171,14 +171,14 @@ if(TTM_BUILD_EXTENSIONS)
 
     # WASM plugins require WASI SDK; cross-compiled via ExternalProject so they
     # do not pollute the host build tree.
-    if(TTM_WASM_TOOLCHAIN)
+    if(TMM_WASM_TOOLCHAIN)
         include(ExternalProject)
 
-        ExternalProject_Add(ttm_nlp_tasks_wasm
+        ExternalProject_Add(tmm_nlp_tasks_wasm
             SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/extensions/nlp-tasks
             BINARY_DIR  ${CMAKE_BINARY_DIR}/extensions/nlp-tasks
             CMAKE_ARGS
-                -DCMAKE_TOOLCHAIN_FILE=${TTM_WASM_TOOLCHAIN}
+                -DCMAKE_TOOLCHAIN_FILE=${TMM_WASM_TOOLCHAIN}
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/extensions
             BUILD_ALWAYS YES
@@ -188,11 +188,11 @@ if(TTM_BUILD_EXTENSIONS)
         # console-ui: live TUI dashboard plugin (FTXUI DOM, WASI).
         # FTXUI is fetched by the sub-project via CPM; compiled with
         # -D__EMSCRIPTEN__=1 so Terminal::Size() skips ioctl.
-        ExternalProject_Add(ttm_console_ui_wasm
+        ExternalProject_Add(tmm_console_ui_wasm
             SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/extensions/console-ui
             BINARY_DIR  ${CMAKE_BINARY_DIR}/extensions/console-ui
             CMAKE_ARGS
-                -DCMAKE_TOOLCHAIN_FILE=${TTM_WASM_TOOLCHAIN}
+                -DCMAKE_TOOLCHAIN_FILE=${TMM_WASM_TOOLCHAIN}
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/extensions
                 -DCPM_SOURCE_CACHE=${CPM_SOURCE_CACHE}
@@ -201,21 +201,21 @@ if(TTM_BUILD_EXTENSIONS)
         )
     else()
         message(STATUS
-            "TTM_WASM_TOOLCHAIN not set; skipping WASM plugins (nlp-tasks, console-ui). "
-            "Set -DTTM_WASM_TOOLCHAIN=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake to enable.")
+            "TMM_WASM_TOOLCHAIN not set; skipping WASM plugins (nlp-tasks, console-ui). "
+            "Set -DTMM_WASM_TOOLCHAIN=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake to enable.")
     endif()
 endif()
 
 ########################################################################################################################
 # Coverage                                                                                                             #
 ########################################################################################################################
-option(TTM_ENABLE_COVERAGE "Enable test coverage instrumentation (GCC / Clang only)" OFF)
-if(TTM_ENABLE_COVERAGE)
+option(TMM_ENABLE_COVERAGE "Enable test coverage instrumentation (GCC / Clang only)" OFF)
+if(TMM_ENABLE_COVERAGE)
 	if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 		add_compile_options(--coverage -O0 -g)
 		add_link_options(--coverage)
 	else()
-		message(WARNING "TTM_ENABLE_COVERAGE is only supported with GCC/Clang; ignoring.")
+		message(WARNING "TMM_ENABLE_COVERAGE is only supported with GCC/Clang; ignoring.")
 	endif()
 endif()
 
@@ -232,31 +232,31 @@ endif()
 ########################################################################################################################
 # Packaging                                                                                                            #
 ########################################################################################################################
-if(TTM_BUILD_PACKAGE)
+if(TMM_BUILD_PACKAGE)
     include(GNUInstallDirs)
-    install(TARGETS ttm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS tmm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # --- Plugin extensions ---
-    # Native plugins built from this root scope (only present when TTM_BUILD_EXTENSIONS=ON).
-    # ttm_core and ttm_python install themselves via their own sub-CMakeLists.txt rules;
-    # we only need to handle the MODULE built inline in the root (ttm_console_ui native).
-    if(TARGET ttm_console_ui)
-        install(TARGETS ttm_console_ui LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # Native plugins built from this root scope (only present when TMM_BUILD_EXTENSIONS=ON).
+    # tmm_core and tmm_python install themselves via their own sub-CMakeLists.txt rules;
+    # we only need to handle the MODULE built inline in the root (tmm_console_ui native).
+    if(TARGET tmm_console_ui)
+        install(TARGETS tmm_console_ui LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
 
     # WASM plugins built by ExternalProject are staged to ${CMAKE_BINARY_DIR}/extensions/
-    # with a plain filename (e.g. ttm_nlp_tasks.wasm). Install them alongside the binary
-    # so the runtime's exe-dir search finds them without TTM_PLUGIN_PATH.
+    # with a plain filename (e.g. tmm_nlp_tasks.wasm). Install them alongside the binary
+    # so the runtime's exe-dir search finds them without TMM_PLUGIN_PATH.
     # OPTIONAL: the files are absent when no WASI toolchain was available.
-    foreach(_wasm_plugin ttm_nlp_tasks ttm_console_ui)
+    foreach(_wasm_plugin tmm_nlp_tasks tmm_console_ui)
         install(FILES "${CMAKE_BINARY_DIR}/extensions/${_wasm_plugin}.wasm"
             DESTINATION ${CMAKE_INSTALL_BINDIR}
             OPTIONAL
         )
     endforeach()
 
-    set(CPACK_PACKAGE_NAME                "ttm")
-    set(CPACK_PACKAGE_VENDOR              "ttm contributors")
+    set(CPACK_PACKAGE_NAME                "tmm")
+    set(CPACK_PACKAGE_VENDOR              "tmm contributors")
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "train-my-model -- flexible model training CLI")
     set(CPACK_PACKAGE_VERSION             "${TMM_VERSION}")
     set(CPACK_PACKAGE_VERSION_MAJOR       "${TMM_VER_MAJOR}")
@@ -273,7 +273,7 @@ if(TTM_BUILD_PACKAGE)
         set(CPACK_GENERATOR "DragNDrop;TGZ" CACHE STRING "CPack generators to use")
     else()
         set(CPACK_GENERATOR "DEB;TGZ" CACHE STRING "CPack generators to use")
-        set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ttm contributors")
+        set(CPACK_DEBIAN_PACKAGE_MAINTAINER "tmm contributors")
         set(CPACK_DEBIAN_PACKAGE_SECTION    "utils")
     endif()
 

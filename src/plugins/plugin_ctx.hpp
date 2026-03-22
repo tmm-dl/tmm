@@ -3,30 +3,30 @@
  * @brief PluginRegistrationCtx — context passed to plugin host-API callbacks.
  *
  * @details
- * Both WASM and native plugins receive a ttm_host_api whose ctx field points
+ * Both WASM and native plugins receive a tmm_host_api whose ctx field points
  * to a PluginRegistrationCtx.  This struct lets the static host callbacks
  * (s_register_source, s_register_task, …) know both the owning PluginManager
  * and which plugin record should receive newly-registered extension objects.
  *
  * The struct is stack-allocated inside PluginManager::load() and is valid
- * for the duration of the ttm_plugin_init call only.
+ * for the duration of the tmm_plugin_init call only.
  */
 
 #pragma once
 
-#include <ttm/plugins/extension.hpp>
+#include <tmm/plugins/extension.hpp>
 
 #include <functional>
 #include <memory>
 
-namespace ttm::plugins {
+namespace tmm::plugins {
 
 	struct Plugin;
 	struct NativePlugin;
 	class PluginManager;
 
 	/**
-	 * @brief Context threaded through ttm_host_api.ctx during plugin init.
+	 * @brief Context threaded through tmm_host_api.ctx during plugin init.
 	 *
 	 * Exactly one of wasmPlugin / nativePlugin is non-null, depending on which
 	 * loader is being used.
@@ -60,4 +60,4 @@ namespace ttm::plugins {
 		std::function<void(std::unique_ptr<ITransform>)> attach_transform;
 	};
 
-} // namespace ttm::plugins
+} // namespace tmm::plugins

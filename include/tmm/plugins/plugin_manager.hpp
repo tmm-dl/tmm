@@ -3,74 +3,74 @@
  * @brief PluginManager — loads WASM plugins and dispatches lifecycle events.
  *
  * @details
- * PluginManager is the central runtime registry for all TTM plugin extensions.
+ * PluginManager is the central runtime registry for all TMM plugin extensions.
  * It owns the WAMR runtime and all plugin instances.  A single PluginManager
  * is expected to live for the duration of the process.
  *
  * @par Typical usage
  * @code{.cpp}
- * auto mgr = ttm::plugins::PluginManager::create().value();
+ * auto mgr = tmm::plugins::PluginManager::create().value();
  *
  * // Load plugins declared in the project config
  * mgr.load("plugins/my-source.wasm", R"({"token":"..."})").value();
  *
  * // Resolve a dataset source and open a URI
- * auto* src = mgr.find_source("gh:");
+ * auto* src = mgr.findSource("gh:");
  * auto reader = src->open("gh:owner/repo/train.jsonl");
  *
  * // Training loop
- * mgr.emit_fit_begin(ctx_json);
+ * mgr.emitFitBegin(ctx_json);
  * for (uint32_t ep = 0; ep < epochs; ++ep) {
- *     mgr.emit_epoch_begin(ep, epochs);
+ *     mgr.emitEpochBegin(ep, epochs);
  *     for (uint32_t b = 0; b < batches; ++b) {
- *         mgr.emit_batch_begin(b, batches);
+ *         mgr.emitBatchBegin(b, batches);
  *         float loss = compute_loss(…);
- *         loss = mgr.emit_loss_computed(loss);
- *         mgr.emit_batch_end(b, loss, metrics_json);
+ *         loss = mgr.emitLossComputed(loss);
+ *         mgr.emitBatchEnd(b, loss, metrics_json);
  *     }
- *     if (mgr.emit_epoch_end(ep, metrics_json)) break; // early stop
+ *     if (mgr.emitEpochEnd(ep, metrics_json)) break; // early stop
  * }
- * mgr.emit_fit_end(final_metrics_json);
+ * mgr.emitFitEnd(final_metrics_json);
  * @endcode
  *
- * @see ttm::plugins::IDatasetSource  Extension point for URI-based data loading
+ * @see tmm::plugins::IDatasetSource  Extension point for URI-based data loading
  * @see abi.h                         C ABI that plugins implement
  */
 
-#ifndef TTM_PLUGINS_PLUGIN_MANAGER_HPP
-#define TTM_PLUGINS_PLUGIN_MANAGER_HPP
+#ifndef TMM_PLUGINS_PLUGIN_MANAGER_HPP
+#define TMM_PLUGINS_PLUGIN_MANAGER_HPP
 
-#include <ttm/plugins/abi.h>
-#include <ttm/plugins/extension.hpp>
-#include <ttm/trainer/callback.hpp>
-#include <ttm/trainer/interfaces.hpp>
+#include <tmm/plugins/abi.h>
+#include <tmm/plugins/extension.hpp>
+#include <tmm/trainer/callback.hpp>
+#include <tmm/trainer/interfaces.hpp>
 
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <ttm/compat/expected.hpp>
+#include <tmm/compat/expected.hpp>
 #include <unordered_map>
 #include <vector>
 
-namespace ttm::plugins {
+namespace tmm::plugins {
 
 	/**
-	 * @brief Central manager for TTM plugins.
+	 * @brief Central manager for TMM plugins.
 	 *
 	 * @details
 	 * Responsibilities:
 	 * - Initialise and own the WAMR runtime.
 	 * - Load WASM plugin modules from disk (load()).
 	 * - Maintain registries of extension objects (sources, transforms, tasks, metrics).
-	 * - Dispatch lifecycle events (emit_*()) to all loaded plugins.
+	 * - Dispatch lifecycle events (emit*()) to all loaded plugins.
 	 *
 	 * @note Non-copyable; movable.  After a move the source object is left in a
 	 *       safe but empty state and must not be used further.
 	 *
 	 * @see load           Load a plugin from a WASM file
-	 * @see find_source    Look up a registered data source by URI scheme
+	 * @see findSource     Look up a registered data source by URI scheme
 	 */
 	class PluginManager {
 	public:
@@ -84,7 +84,7 @@ namespace ttm::plugins {
 		[[nodiscard]] static std::expected<PluginManager, std::string> create();
 
 		/**
-		 * @brief Destroy all plugins (calling ttm_plugin_teardown on each) and
+		 * @brief Destroy all plugins (calling tmm_plugin_teardown on each) and
 		 *        shut down the WAMR runtime.
 		 */
 		~PluginManager();
@@ -109,15 +109,15 @@ namespace ttm::plugins {
 		 * Loading sequence:
 		 * 1. Read the `.wasm` file into memory.
 		 * 2. Compile/load via `wasm_runtime_load()`.
-		 * 3. Register host import functions (`ttm` module namespace).
+		 * 3. Register host import functions (`tmm` module namespace).
 		 * 4. Instantiate via `wasm_runtime_instantiate()`.
-		 * 5. Verify ABI version by calling `ttm_plugin_get_info`.
-		 * 6. Call `ttm_plugin_init(host_api, config_json, config_len)`.
+		 * 5. Verify ABI version by calling `tmm_plugin_get_info`.
+		 * 6. Call `tmm_plugin_init(host_api, config_json, config_len)`.
 		 * 7. Resolve optional lifecycle hook function pointers.
 		 *
 		 * @param[in] path         Path to the `.wasm` file.
 		 * @param[in] config_json  Plugin-specific JSON configuration passed verbatim
-		 *                         to `ttm_plugin_init()`.  Pass `"{}"` (the default)
+		 *                         to `tmm_plugin_init()`.  Pass `"{}"` (the default)
 		 *                         if the plugin requires no configuration.
 		 *
 		 * @return `{}` on success, or an error string if any loading step fails.
@@ -128,8 +128,8 @@ namespace ttm::plugins {
 		 * mgr.load("plugins/bpe-tokenizer.wasm", R"({"vocab":"bpe.json"})").value();
 		 * @endcode
 		 *
-		 * @see ttm_plugin_get_info  ABI entry-point queried in step 5
-		 * @see ttm_plugin_init      ABI entry-point called in step 6
+		 * @see tmm_plugin_get_info  ABI entry-point queried in step 5
+		 * @see tmm_plugin_init      ABI entry-point called in step 6
 		 */
 		[[nodiscard]] std::expected<void, std::string>
 		load(const std::filesystem::path& path, std::string_view config_json = "{}");
@@ -155,7 +155,7 @@ namespace ttm::plugins {
 		 *
 		 * @see IDatasetSource
 		 */
-		[[nodiscard]] IDatasetSource* find_source(std::string_view scheme) const;
+		[[nodiscard]] IDatasetSource* findSource(std::string_view scheme) const;
 
 		/**
 		 * @brief Look up a registered ML task by canonical name or alias.
@@ -166,7 +166,7 @@ namespace ttm::plugins {
 		 *
 		 * @see ITask
 		 */
-		[[nodiscard]] ITask* find_task(std::string_view name_or_alias) const;
+		[[nodiscard]] ITask* findTask(std::string_view name_or_alias) const;
 
 		/**
 		 * @brief Find a registered model loader that accepts the given file path.
@@ -182,7 +182,7 @@ namespace ttm::plugins {
 		 *
 		 * @see IModelLoader
 		 */
-		[[nodiscard]] IModelLoader* find_model_loader(std::string_view path) const;
+		[[nodiscard]] IModelLoader* findModelLoader(std::string_view path) const;
 
 		/**
 		 * @brief Look up a registered transform (preprocessor) by name.
@@ -190,13 +190,13 @@ namespace ttm::plugins {
 		 * @param[in] name  Transform name registered via register_transform.
 		 * @return Non-owning pointer to the transform, or `nullptr` if not found.
 		 */
-		[[nodiscard]] ITransform* find_transform(std::string_view name) const;
+		[[nodiscard]] ITransform* findTransform(std::string_view name) const;
 
 		/**
 		 * @brief Look up a registered transform vtable by name.
 		 *
 		 * @details
-		 * Unlike find_transform(), which returns a pre-created instance with
+		 * Unlike findTransform(), which returns a pre-created instance with
 		 * empty config, this returns the raw vtable so callers can create new
 		 * instances with per-invocation configuration.
 		 *
@@ -204,15 +204,15 @@ namespace ttm::plugins {
 		 * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
 		 *         Valid for the lifetime of this PluginManager.
 		 */
-		[[nodiscard]] const ttm_transform_vtable* find_transform_vtable(std::string_view name) const;
+		[[nodiscard]] const tmm_transform_vtable* findTransformVtable(std::string_view name) const;
 
 		/**
 		 * @brief Broadcast model-loaded metadata to all plugins that export
-		 *        #ttm_on_model_loaded.
+		 *        #tmm_on_model_loaded.
 		 *
 		 * @param[in] info_json  JSON-serialised model info string.
 		 */
-		void emit_model_loaded(std::string_view info_json);
+		void emitModelLoaded(std::string_view info_json);
 
 		/**
 		 * @brief Look up a registered LR scheduler vtable by name.
@@ -226,9 +226,9 @@ namespace ttm::plugins {
 		 * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
 		 *         Valid for the lifetime of this PluginManager.
 		 *
-		 * @see ttm_scheduler_vtable
+		 * @see tmm_scheduler_vtable
 		 */
-		[[nodiscard]] const ttm_scheduler_vtable* find_scheduler_vtable(std::string_view name) const;
+		[[nodiscard]] const tmm_scheduler_vtable* findSchedulerVtable(std::string_view name) const;
 
 		/**
 		 * @brief Look up a registered optimizer vtable by name.
@@ -237,9 +237,9 @@ namespace ttm::plugins {
 		 * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
 		 *         Valid for the lifetime of this PluginManager.
 		 *
-		 * @see ttm_optimizer_vtable
+		 * @see tmm_optimizer_vtable
 		 */
-		[[nodiscard]] const ttm_optimizer_vtable* find_optimizer_vtable(std::string_view name) const;
+		[[nodiscard]] const tmm_optimizer_vtable* findOptimizerVtable(std::string_view name) const;
 
 		/**
 		 * @brief Look up a registered trainer callback vtable by name.
@@ -249,9 +249,9 @@ namespace ttm::plugins {
 		 * @return Non-owning pointer to the vtable copy, or `nullptr` if not found.
 		 *         Valid for the lifetime of this PluginManager.
 		 *
-		 * @see ttm_trainer_callback_vtable
+		 * @see tmm_trainer_callback_vtable
 		 */
-		[[nodiscard]] const ttm_trainer_callback_vtable* find_callback_vtable(std::string_view name) const;
+		[[nodiscard]] const tmm_trainer_callback_vtable* findCallbackVtable(std::string_view name) const;
 
 		/**
 		 * @brief Create a trainer callback and wrap it as a trainer::Callback.
@@ -261,8 +261,8 @@ namespace ttm::plugins {
 		 * @param[out] out_error   If non-null, receives an error description on failure.
 		 * @return Owning pointer to the callback, or nullptr on failure.
 		 */
-		[[nodiscard]] std::unique_ptr<ttm::trainer::Callback>
-		make_callback(std::string_view name, std::string_view config_json, std::string* out_error = nullptr) const;
+		[[nodiscard]] std::unique_ptr<tmm::trainer::Callback>
+		makeCallback(std::string_view name, std::string_view config_json, std::string* out_error = nullptr) const;
 
 		/**
 		 * @brief Create an optimizer and wrap it as a trainer::IOptimizer.
@@ -283,8 +283,8 @@ namespace ttm::plugins {
 		 * @param[out] out_error    If non-null, receives an error description on failure.
 		 * @return Owning pointer to the optimizer, or nullptr on failure.
 		 */
-		[[nodiscard]] std::unique_ptr<ttm::trainer::IOptimizer> make_optimizer(
-				std::string_view name, ttm_handle model_h, const DLTensor* params, uint32_t param_count,
+		[[nodiscard]] std::unique_ptr<tmm::trainer::IOptimizer> makeOptimizer(
+				std::string_view name, tmm_handle model_h, const DLTensor* params, uint32_t param_count,
 				const DLTensor* grads, std::string_view cfg_json, std::string* out_error = nullptr
 		) const;
 
@@ -301,27 +301,27 @@ namespace ttm::plugins {
 		 * ================================================================== */
 
 		/**
-		 * @brief Dispatch #ttm_on_fit_begin to all plugins that export it.
+		 * @brief Dispatch #tmm_on_fit_begin to all plugins that export it.
 		 * @param[in] ctx_json  JSON object carrying run metadata (hyperparameters, etc.).
 		 */
-		void emit_fit_begin(std::string_view ctx_json);
+		void emitFitBegin(std::string_view ctx_json);
 
 		/**
-		 * @brief Dispatch #ttm_on_epoch_begin to all plugins that export it.
+		 * @brief Dispatch #tmm_on_epoch_begin to all plugins that export it.
 		 * @param[in] epoch  0-based current epoch index.
 		 * @param[in] total  Total number of planned epochs.
 		 */
-		void emit_epoch_begin(std::uint32_t epoch, std::uint32_t total);
+		void emitEpochBegin(std::uint32_t epoch, std::uint32_t total);
 
 		/**
-		 * @brief Dispatch #ttm_on_batch_begin to all plugins that export it.
+		 * @brief Dispatch #tmm_on_batch_begin to all plugins that export it.
 		 * @param[in] batch  0-based batch index within the current epoch.
 		 * @param[in] total  Total batches in the epoch.
 		 */
-		void emit_batch_begin(std::uint32_t batch, std::uint32_t total);
+		void emitBatchBegin(std::uint32_t batch, std::uint32_t total);
 
 		/**
-		 * @brief Chain the loss value through all plugins that export #ttm_on_loss_computed.
+		 * @brief Chain the loss value through all plugins that export #tmm_on_loss_computed.
 		 *
 		 * @details
 		 * Each plugin receives the output of the previous one, allowing plugins to
@@ -330,18 +330,18 @@ namespace ttm::plugins {
 		 * @param[in] loss  Loss value computed by the training loop.
 		 * @return Final loss after all plugins have processed it.
 		 */
-		float emit_loss_computed(float loss);
+		float emitLossComputed(float loss);
 
 		/**
-		 * @brief Dispatch #ttm_on_batch_end to all plugins that export it.
+		 * @brief Dispatch #tmm_on_batch_end to all plugins that export it.
 		 * @param[in] batch        0-based batch index.
 		 * @param[in] loss         Final loss for this batch.
 		 * @param[in] metrics_json JSON object containing live scalar metrics.
 		 */
-		void emit_batch_end(std::uint32_t batch, float loss, std::string_view metrics_json);
+		void emitBatchEnd(std::uint32_t batch, float loss, std::string_view metrics_json);
 
 		/**
-		 * @brief Dispatch #ttm_on_epoch_end to all plugins that export it.
+		 * @brief Dispatch #tmm_on_epoch_end to all plugins that export it.
 		 *
 		 * @details
 		 * All plugins are always called so that every plugin sees the epoch end.
@@ -351,35 +351,35 @@ namespace ttm::plugins {
 		 * @param[in] metrics_json JSON object containing epoch-level metrics.
 		 * @return `true` if any plugin requested early stopping.
 		 */
-		bool emit_epoch_end(std::uint32_t epoch, std::string_view metrics_json);
+		bool emitEpochEnd(std::uint32_t epoch, std::string_view metrics_json);
 
 		/**
-		 * @brief Dispatch #ttm_on_validation_end to all plugins that export it.
+		 * @brief Dispatch #tmm_on_validation_end to all plugins that export it.
 		 * @param[in] metrics_json JSON object containing validation metrics.
 		 */
-		void emit_validation_end(std::string_view metrics_json);
+		void emitValidationEnd(std::string_view metrics_json);
 
 		/**
-		 * @brief Dispatch #ttm_on_fit_end to all plugins that export it.
+		 * @brief Dispatch #tmm_on_fit_end to all plugins that export it.
 		 * @param[in] metrics_json JSON object containing final training metrics.
 		 */
-		void emit_fit_end(std::string_view metrics_json);
+		void emitFitEnd(std::string_view metrics_json);
 
 		/**
-		 * @brief Broadcast a log message to all plugins that export #ttm_on_log.
+		 * @brief Broadcast a log message to all plugins that export #tmm_on_log.
 		 *
 		 * @details
-		 * Dispatches to every loaded plugin that exported `ttm_on_log`.  Falls
+		 * Dispatches to every loaded plugin that exported `tmm_on_log`.  Falls
 		 * back to writing to `stderr` if no plugin handles the message, so that
 		 * log output is never silently dropped.
 		 *
 		 * @param[in] level  Severity level.
 		 * @param[in] msg    Message text (does not need to be NUL-terminated).
 		 */
-		void emit_log(ttm_log_level level, std::string_view msg);
+		void emitLog(tmm_log_level level, std::string_view msg);
 
 		/**
-		 * @brief Broadcast a named scalar metric to all plugins that export #ttm_on_metric.
+		 * @brief Broadcast a named scalar metric to all plugins that export #tmm_on_metric.
 		 *
 		 * @details
 		 * Dispatches to every loaded plugin except the one that originated the
@@ -390,7 +390,7 @@ namespace ttm::plugins {
 		 * @param[in] value  Scalar value.
 		 * @param[in] step   Global training step.
 		 */
-		void emit_metric(std::string_view key, float value, int32_t step);
+		void emitMetric(std::string_view key, float value, int32_t step);
 
 		/** @} */
 
@@ -431,7 +431,7 @@ namespace ttm::plugins {
 		 * @brief Model loader registry: ordered list of registered loaders.
 		 *
 		 * @details
-		 * find_model_loader() iterates this list in registration order and
+		 * findModelLoader() iterates this list in registration order and
 		 * returns the first loader whose probe() accepts the given path.
 		 * Ownership lives in the owning NativePlugin record.
 		 */
@@ -447,10 +447,10 @@ namespace ttm::plugins {
 		 *
 		 * @details
 		 * Stored by value so callers can create new instances with per-invocation
-		 * configuration via find_transform_vtable(). The function pointers remain
+		 * configuration via findTransformVtable(). The function pointers remain
 		 * valid as long as the plugin is loaded.
 		 */
-		std::unordered_map<std::string, ttm_transform_vtable> transformVtableRegistry;
+		std::unordered_map<std::string, tmm_transform_vtable> transformVtableRegistry;
 
 		/**
 		 * @brief Scheduler vtable registry: name → owned vtable copy.
@@ -459,20 +459,20 @@ namespace ttm::plugins {
 		 * The vtable struct is copied by value when the plugin registers it.
 		 * The function pointers within remain valid as long as the plugin is loaded.
 		 */
-		std::unordered_map<std::string, ttm_scheduler_vtable> schedulerVtableRegistry;
+		std::unordered_map<std::string, tmm_scheduler_vtable> schedulerVtableRegistry;
 
 		/**
 		 * @brief Optimizer vtable registry: name → owned vtable copy.
 		 * @details The function pointers remain valid as long as the plugin is loaded.
 		 */
-		std::unordered_map<std::string, ttm_optimizer_vtable> optimizerVtableRegistry;
+		std::unordered_map<std::string, tmm_optimizer_vtable> optimizerVtableRegistry;
 
 		/**
 		 * @brief Trainer callback vtable registry: name → owned vtable copy.
 		 * @details Stores both "name" (first-wins unqualified) and "plugin::name"
 		 *          (always stored, always wins for qualified lookup).
 		 */
-		std::unordered_map<std::string, ttm_trainer_callback_vtable> callbackVtableRegistry;
+		std::unordered_map<std::string, tmm_trainer_callback_vtable> callbackVtableRegistry;
 
 		/**
 		 * @brief True if this instance owns a WAMR runtime reference.
@@ -491,31 +491,31 @@ namespace ttm::plugins {
 		 * -------------------------------------------------------------- */
 
 		/// @private
-		static ttm_error s_register_model_loader(void* ctx, const ttm_model_loader_vtable* vt);
+		static tmm_error s_register_model_loader(void* ctx, const tmm_model_loader_vtable* vt);
 		/// @private
-		static void s_notify_model_info(void* ctx, const ttm_model_info_t* info);
+		static void s_notify_model_info(void* ctx, const tmm_model_info_t* info);
 		/// @private
-		static ttm_error s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt);
+		static tmm_error s_register_scheduler(void* ctx, const char* name, const tmm_scheduler_vtable* vt);
 		/// @private
-		static ttm_error s_register_optimizer(void* ctx, const char* name, const ttm_optimizer_vtable* vt);
+		static tmm_error s_register_optimizer(void* ctx, const char* name, const tmm_optimizer_vtable* vt);
 		/// @private
-		static ttm_error s_register_callback(void* ctx, const char* name, const ttm_trainer_callback_vtable* vt);
+		static tmm_error s_register_callback(void* ctx, const char* name, const tmm_trainer_callback_vtable* vt);
 		/// @private
 		void register_model_loader_impl(std::unique_ptr<IModelLoader> loader, PluginRegistrationCtx& ctx);
 		/// @private
 		void register_transform_impl(std::unique_ptr<ITransform> transform, PluginRegistrationCtx& ctx);
 		/// @private
-		static ttm_error s_register_source(void* ctx, const char** schemes, const ttm_source_vtable* vt);
+		static tmm_error s_register_source(void* ctx, const char** schemes, const tmm_source_vtable* vt);
 		/// @private
-		static ttm_error
-		s_register_transform(void* ctx, const char* name, const char** aliases, const ttm_transform_vtable* vt);
+		static tmm_error
+		s_register_transform(void* ctx, const char* name, const char** aliases, const tmm_transform_vtable* vt);
 		/// @private
-		static ttm_error s_register_task(void* ctx, const char* name, const char** aliases, const ttm_task_vtable* vt);
+		static tmm_error s_register_task(void* ctx, const char* name, const char** aliases, const tmm_task_vtable* vt);
 		/// @private
-		static ttm_error
-		s_register_metric(void* ctx, const char* name, const char** aliases, const ttm_metric_vtable* vt);
+		static tmm_error
+		s_register_metric(void* ctx, const char* name, const char** aliases, const tmm_metric_vtable* vt);
 		/// @private
-		static void s_log(void* ctx, ttm_log_level level, const char* msg, uint32_t len);
+		static void s_log(void* ctx, tmm_log_level level, const char* msg, uint32_t len);
 		/// @private
 		static void s_log_metric(void* ctx, const char* key, uint32_t key_len, float value, int32_t step);
 		/// @private
@@ -526,11 +526,11 @@ namespace ttm::plugins {
 		static void s_free(void* ctx, void* ptr);
 
 		/**
-		 * @brief Construct a #ttm_host_api struct pointing to the given ctx.
+		 * @brief Construct a #tmm_host_api struct pointing to the given ctx.
 		 * @param[in] ctx  Registration context for the plugin currently being loaded.
 		 * @return Fully populated host API struct.
 		 */
-		ttm_host_api make_host_api(PluginRegistrationCtx& ctx);
+		tmm_host_api make_host_api(PluginRegistrationCtx& ctx);
 
 		/**
 		 * @brief Register a source object into the scheme registry.
@@ -547,6 +547,6 @@ namespace ttm::plugins {
 		void register_task_impl(std::unique_ptr<ITask> task, PluginRegistrationCtx& ctx);
 	};
 
-} // namespace ttm::plugins
+} // namespace tmm::plugins
 
-#endif /* TTM_PLUGINS_PLUGIN_MANAGER_HPP */
+#endif /* TMM_PLUGINS_PLUGIN_MANAGER_HPP */

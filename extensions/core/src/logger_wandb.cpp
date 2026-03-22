@@ -10,7 +10,7 @@
  * spawned as a subprocess so the run appears in the wandb web UI.
  *
  * JSON config fields:
- *   project  (str)  — wandb project name (default: "ttm")
+ *   project  (str)  — wandb project name (default: "tmm")
  *   name     (str)  — run display name (default: auto-generated)
  *   logDir   (str)  — base directory for run dirs (default: "wandb")
  *   sync     (bool) — attempt `wandb sync` on fit end (default: true)
@@ -20,7 +20,7 @@
 
 #include "loggers.hpp"
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -89,7 +89,7 @@ namespace {
 	constexpr int kMaxWandbSlots = 64;
 
 	struct WandbState {
-		char project[128] = "ttm";
+		char project[128] = "tmm";
 		char name[128] = "";
 		char logDir[512] = "wandb";
 		char runDir[640] = "";
@@ -101,18 +101,18 @@ namespace {
 	static WandbState s_wb_slots[kMaxWandbSlots];
 	static bool s_wb_used[kMaxWandbSlots] = {};
 
-	static ttm_handle wbAlloc() {
+	static tmm_handle wbAlloc() {
 		for (int i = 0; i < kMaxWandbSlots; ++i) {
 			if (!s_wb_used[i]) {
 				s_wb_used[i] = true;
 				s_wb_slots[i] = WandbState{};
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	static WandbState* wbGet(ttm_handle h) {
+	static WandbState* wbGet(tmm_handle h) {
 		if (h < 0 || h >= kMaxWandbSlots || !s_wb_used[static_cast<int>(h)])
 			return nullptr;
 		return &s_wb_slots[static_cast<int>(h)];
@@ -122,13 +122,13 @@ namespace {
 	 * Callback implementation
 	 * ========================================================================== */
 
-	static ttm_handle wandbCreate(const char* cfg, uint32_t cfgLen) {
+	static tmm_handle wandbCreate(const char* cfg, uint32_t cfgLen) {
 		const auto h = wbAlloc();
-		if (h == TTM_INVALID_HANDLE)
-			return TTM_INVALID_HANDLE;
+		if (h == TMM_INVALID_HANDLE)
+			return TMM_INVALID_HANDLE;
 		auto* st = wbGet(h);
 		const std::string_view json{cfg, cfgLen};
-		const auto project = jsonGetStr(json, "project", "ttm");
+		const auto project = jsonGetStr(json, "project", "tmm");
 		const auto name = jsonGetStr(json, "name", "");
 		const auto logDir = jsonGetStr(json, "logDir", "wandb");
 		st->doSync = jsonGetBool(json, "sync", true);
@@ -138,7 +138,7 @@ namespace {
 		return h;
 	}
 
-	static void wandbOnFitBegin(ttm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
+	static void wandbOnFitBegin(tmm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
 		auto* st = wbGet(h);
 		if (st == nullptr)
 			return;
@@ -164,7 +164,7 @@ namespace {
 		st->histFile = std::fopen(histPath.c_str(), "w");
 	}
 
-	static int32_t wandbOnEpochEnd(ttm_handle h, int64_t epoch, const char* metricsJson, uint32_t len) {
+	static int32_t wandbOnEpochEnd(tmm_handle h, int64_t epoch, const char* metricsJson, uint32_t len) {
 		auto* st = wbGet(h);
 		if (st == nullptr || st->histFile == nullptr)
 			return 0;
@@ -185,7 +185,7 @@ namespace {
 		return 0;
 	}
 
-	static void wandbOnFitEnd(ttm_handle h, const char* metricsJson, uint32_t len) {
+	static void wandbOnFitEnd(tmm_handle h, const char* metricsJson, uint32_t len) {
 		auto* st = wbGet(h);
 		if (st == nullptr)
 			return;
@@ -223,7 +223,7 @@ namespace {
 		}
 	}
 
-	static void wandbDestroy(ttm_handle h) {
+	static void wandbDestroy(tmm_handle h) {
 		auto* st = wbGet(h);
 		if (st != nullptr && st->histFile != nullptr) {
 			std::fclose(st->histFile);
@@ -235,7 +235,7 @@ namespace {
 
 } // anonymous namespace
 
-ttm_trainer_callback_vtable g_cb_wandb = {
+tmm_trainer_callback_vtable g_cb_wandb = {
 		/* create         */ wandbCreate,
 		/* on_fit_begin   */ wandbOnFitBegin,
 		/* on_epoch_begin */ nullptr,
@@ -258,7 +258,7 @@ void wandbTeardownSlots() {
  * Combined registration / teardown for both loggers
  * ========================================================================== */
 
-void loggersRegister(const ttm_host_api* host) {
+void loggersRegister(const tmm_host_api* host) {
 	if (host == nullptr || host->register_callback == nullptr)
 		return;
 	host->register_callback(host->ctx, "tensorBoard", &g_cb_tensorBoard);

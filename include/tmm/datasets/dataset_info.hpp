@@ -31,17 +31,17 @@
  * @see find_split_files     Enumerate split data files
  */
 
-#ifndef TTM_DATASETS_DATASET_INFO_HPP
-#define TTM_DATASETS_DATASET_INFO_HPP
+#ifndef TMM_DATASETS_DATASET_INFO_HPP
+#define TMM_DATASETS_DATASET_INFO_HPP
 
-#include <ttm/compat/expected.hpp>
+#include <tmm/compat/expected.hpp>
 
 #include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
 
-namespace ttm::datasets {
+namespace tmm::datasets {
 
 	/* =========================================================================
 	 * Feature types
@@ -162,6 +162,6 @@ namespace ttm::datasets {
 	[[nodiscard]] std::vector<std::filesystem::path>
 	find_split_files(const DatasetInfo& info, std::string_view split, const std::filesystem::path& repo_root);
 
-} // namespace ttm::datasets
+} // namespace tmm::datasets
 
-#endif /* TTM_DATASETS_DATASET_INFO_HPP */
+#endif /* TMM_DATASETS_DATASET_INFO_HPP */

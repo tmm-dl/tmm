@@ -36,7 +36,7 @@ bool httpDownload(const std::string& url, const std::filesystem::path& dest, cha
  * @brief Resolve a git-lfs pointer to real file content.
  *
  * Downloads from `<git_url>/resolve/<ref>/<subpath>` and caches the result
- * at `<localRepo>/.ttm_lfs/<subpath>`.  Subsequent calls return the cached
+ * at `<localRepo>/.tmm_lfs/<subpath>`.  Subsequent calls return the cached
  * file directly without re-downloading.
  *
  * @return Opened `FILE*` on success, `nullptr` with @p err filled on failure.

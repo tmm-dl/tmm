@@ -1,6 +1,6 @@
 /**
  * @file extension.hpp
- * @brief C++ virtual interfaces for TTM plugin extension points.
+ * @brief C++ virtual interfaces for TMM plugin extension points.
  *
  * @details
  * These interfaces are what host-side code works with at runtime.  Plugins
@@ -8,15 +8,15 @@
  * that delegate to the C vtables declared in abi.h.  Native plugins may
  * subclass these interfaces directly.
  *
- * @see ttm::plugins::PluginManager  Maintains the registries of these objects
+ * @see tmm::plugins::PluginManager  Maintains the registries of these objects
  * @see abi.h                        Underlying C ABI that WASM plugins implement
  */
 
-#ifndef TTM_PLUGINS_EXTENSION_HPP
-#define TTM_PLUGINS_EXTENSION_HPP
+#ifndef TMM_PLUGINS_EXTENSION_HPP
+#define TMM_PLUGINS_EXTENSION_HPP
 
-#include <ttm/compat/expected.hpp>
-#include <ttm/plugins/abi.h>
+#include <tmm/compat/expected.hpp>
+#include <tmm/plugins/abi.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -32,11 +32,11 @@
 namespace arrow {
 	class RecordBatch;
 }
-namespace ttm::model {
+namespace tmm::model {
 	struct Device;
 }
 
-namespace ttm::plugins {
+namespace tmm::plugins {
 
 	/* =========================================================================
 	 * @defgroup ext_byte_reader IByteReader — sequential byte stream
@@ -157,7 +157,7 @@ namespace ttm::plugins {
 	 *
 	 * @par Example — implementing a custom source
 	 * @code{.cpp}
-	 * class S3Source : public ttm::plugins::IDatasetSource {
+	 * class S3Source : public tmm::plugins::IDatasetSource {
 	 * public:
 	 *     std::vector<std::string> schemes() const override {
 	 *         return {"s3:", "s3a:"};
@@ -170,13 +170,13 @@ namespace ttm::plugins {
 	 *
 	 * @par Example — using a source through the PluginManager
 	 * @code{.cpp}
-	 * auto* src = manager.find_source("s3:");
+	 * auto* src = manager.findSource("s3:");
 	 * if (!src) throw std::runtime_error("no handler for s3: URIs");
 	 * auto reader = src->open("s3://my-bucket/train.arrow");
 	 * @endcode
 	 *
 	 * @see IByteReader                   Returned by open()
-	 * @see PluginManager::find_source    Look up a source by scheme
+	 * @see PluginManager::findSource    Look up a source by scheme
 	 */
 	class IDatasetSource {
 	public:
@@ -221,8 +221,8 @@ namespace ttm::plugins {
 	 * @brief Transforms an Arrow RecordBatch (e.g. tokenisation, normalisation).
 	 *
 	 * @details
-	 * Implements ttm::model::IPreprocessor semantics via the C ABI
-	 * #ttm_transform_vtable.  Plugins register a transform vtable via
+	 * Implements tmm::model::IPreprocessor semantics via the C ABI
+	 * #tmm_transform_vtable.  Plugins register a transform vtable via
 	 * `host->register_transform(ctx, "my-transform", aliases, &vt)`.  The host
 	 * wraps the vtable in a CTransformAdapter and stores it in the transform
 	 * registry, keyed by name and aliases.
@@ -232,8 +232,8 @@ namespace ttm::plugins {
 	 * Arrow IPC RecordBatch buffers.  The host deserialises the input, calls
 	 * the IPreprocessor chain, and reserialises before passing to the model.
 	 *
-	 * @see ttm_transform_vtable  Underlying C vtable
-	 * @see ttm::model::IPreprocessor  C++ preprocessor interface
+	 * @see tmm_transform_vtable  Underlying C vtable
+	 * @see tmm::model::IPreprocessor  C++ preprocessor interface
 	 */
 	class ITransform {
 	public:
@@ -259,11 +259,11 @@ namespace ttm::plugins {
 		 * @param in_ipc   Serialised input Arrow IPC RecordBatch.
 		 * @param in_len   Length of in_ipc in bytes.
 		 * @param out_ipc  Set to a host-alloc'd buffer with the output batch.
-		 *                 Caller frees via ttm_host_api::free.
+		 *                 Caller frees via tmm_host_api::free.
 		 * @param out_len  Set to the length of *out_ipc in bytes.
-		 * @return #TTM_OK on success.
+		 * @return #TMM_OK on success.
 		 */
-		virtual ttm_error apply_ipc(const void* in_ipc, uint32_t in_len, void** out_ipc, uint32_t* out_len) = 0;
+		virtual tmm_error apply_ipc(const void* in_ipc, uint32_t in_len, void** out_ipc, uint32_t* out_len) = 0;
 	};
 
 	/* =========================================================================
@@ -272,17 +272,17 @@ namespace ttm::plugins {
 	 * ====================================================================== */
 
 	/**
-	 * @brief C++ wrapper around a #ttm_model_loader_vtable registered by a plugin.
+	 * @brief C++ wrapper around a #tmm_model_loader_vtable registered by a plugin.
 	 *
 	 * @details
 	 * When a plugin calls `host->register_model_loader(ctx, &g_vtable)` the
 	 * host creates a CModelLoaderAdapter (defined in plugin_manager.cpp) that
 	 * delegates all calls through the vtable.  This adapter is stored in the
 	 * model loader registry and is returned by
-	 * PluginManager::find_model_loader().
+	 * PluginManager::findModelLoader().
 	 *
-	 * @see ttm_model_loader_vtable  Underlying C ABI vtable
-	 * @see ttm::model::IModelLoader  Uses this via PluginManager
+	 * @see tmm_model_loader_vtable  Underlying C ABI vtable
+	 * @see tmm::model::IModelLoader  Uses this via PluginManager
 	 */
 	class IModelLoader {
 	public:
@@ -307,14 +307,14 @@ namespace ttm::plugins {
 		 * @param cfg_json  Plugin-specific JSON configuration.
 		 * @return Handle on success, or an error string on failure.
 		 */
-		[[nodiscard]] virtual std::expected<ttm_handle, std::string>
+		[[nodiscard]] virtual std::expected<tmm_handle, std::string>
 		open(std::string_view path, std::string_view cfg_json) = 0;
 
 		/**
 		 * @brief Return static metadata for a loaded model.
 		 * @param h  Handle returned by open().
 		 */
-		[[nodiscard]] virtual ttm_model_info_t get_info(ttm_handle h) const = 0;
+		[[nodiscard]] virtual tmm_model_info_t get_info(tmm_handle h) const = 0;
 
 		/**
 		 * @brief Describe the parameter layout for the loaded model.
@@ -322,7 +322,7 @@ namespace ttm::plugins {
 		 * @param out_descs  Set to an array of descriptors (plugin-owned).
 		 * @param out_count  Set to the number of descriptors.
 		 */
-		virtual ttm_error describe_params(ttm_handle h, const ttm_param_desc_t** out_descs, uint32_t* out_count) = 0;
+		virtual tmm_error describe_params(tmm_handle h, const tmm_param_desc_t** out_descs, uint32_t* out_count) = 0;
 
 		/**
 		 * @brief Bind host-allocated param/grad buffers to the model.
@@ -332,8 +332,8 @@ namespace ttm::plugins {
 		 * @param grads        Gradient DLTensors (host-owned, same layout as params).
 		 * @param grad_count   Number of gradient tensors.
 		 */
-		virtual ttm_error bind_params(
-				ttm_handle h, const DLTensor* params, uint32_t param_count, const DLTensor* grads, uint32_t grad_count
+		virtual tmm_error bind_params(
+				tmm_handle h, const DLTensor* params, uint32_t param_count, const DLTensor* grads, uint32_t grad_count
 		) = 0;
 
 		/**
@@ -341,7 +341,7 @@ namespace ttm::plugins {
 		 * @param h       Handle returned by open().
 		 * @param method  Either "random" or "checkpoint:<path>".
 		 */
-		virtual ttm_error init_params(ttm_handle h, std::string_view method) = 0;
+		virtual tmm_error init_params(tmm_handle h, std::string_view method) = 0;
 
 		/**
 		 * @brief Forward + backward pass.
@@ -350,7 +350,7 @@ namespace ttm::plugins {
 		 * @param n         Number of input tensors.
 		 * @param out_loss  Set to the scalar loss.
 		 */
-		virtual ttm_error step(ttm_handle h, const DLTensor* inputs, uint32_t n, float* out_loss) = 0;
+		virtual tmm_error step(tmm_handle h, const DLTensor* inputs, uint32_t n, float* out_loss) = 0;
 
 		/**
 		 * @brief Forward-only pass.
@@ -360,14 +360,14 @@ namespace ttm::plugins {
 		 * @param outputs    Output DLTensors to fill (host-owned).
 		 * @param out_count  In: capacity; out: filled count.
 		 */
-		virtual ttm_error
-		infer(ttm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outputs, uint32_t* out_count) = 0;
+		virtual tmm_error
+		infer(tmm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outputs, uint32_t* out_count) = 0;
 
 		/** @brief Zero all gradient buffers. */
-		virtual ttm_error zero_grad(ttm_handle h) = 0;
+		virtual tmm_error zeroGrad(tmm_handle h) = 0;
 
 		/** @brief Destroy the model and release plugin-side resources. */
-		virtual void destroy(ttm_handle h) = 0;
+		virtual void destroy(tmm_handle h) = 0;
 	};
 
 	/** @} */
@@ -387,7 +387,7 @@ namespace ttm::plugins {
 	 * The same task may be registered under multiple aliases (e.g.
 	 * `"ner"` and `"token-classification"`).  Full interface is TBD.
 	 *
-	 * @see ttm_task_vtable  Underlying C vtable
+	 * @see tmm_task_vtable  Underlying C vtable
 	 */
 	class ITask {
 	public:
@@ -428,7 +428,7 @@ namespace ttm::plugins {
 	 * @details
 	 * Metrics may be registered under multiple aliases.  Full interface is TBD.
 	 *
-	 * @see ttm_metric_vtable  Underlying C vtable
+	 * @see tmm_metric_vtable  Underlying C vtable
 	 */
 	class IMetric {
 	public:
@@ -445,6 +445,6 @@ namespace ttm::plugins {
 
 	/** @} */
 
-} // namespace ttm::plugins
+} // namespace tmm::plugins
 
-#endif /* TTM_PLUGINS_EXTENSION_HPP */
+#endif /* TMM_PLUGINS_EXTENSION_HPP */

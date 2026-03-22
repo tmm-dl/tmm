@@ -12,7 +12,7 @@
  * - Mixed-type schema
  */
 
-#include <ttm/model/collator.hpp>
+#include <tmm/model/collator.hpp>
 
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
@@ -67,13 +67,13 @@ namespace {
 
 TEST_CASE("make_default_collator returns non-null for a simple schema", "[model][collator]") {
 	auto schema = arrow::schema({arrow::field("x", arrow::float32())});
-	auto collator = ttm::model::make_default_collator(*schema);
+	auto collator = tmm::model::make_default_collator(*schema);
 	CHECK(collator != nullptr);
 }
 
 TEST_CASE("DefaultCollator output_schema matches input schema", "[model][collator]") {
 	auto schema = arrow::schema({arrow::field("a", arrow::int32()), arrow::field("b", arrow::float32())});
-	auto collator = ttm::model::make_default_collator(*schema);
+	auto collator = tmm::model::make_default_collator(*schema);
 	REQUIRE(collator != nullptr);
 	CHECK(collator->output_schema().Equals(*schema));
 }
@@ -84,7 +84,7 @@ TEST_CASE("DefaultCollator output_schema matches input schema", "[model][collato
 
 TEST_CASE("DefaultCollator maps float32 column to kDLFloat/32", "[model][collator]") {
 	auto batch = make_batch<arrow::FloatBuilder, float>("x", arrow::float32(), {1.0f, 2.0f, 3.0f});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	REQUIRE(result->inputs.size() == 1);
@@ -95,7 +95,7 @@ TEST_CASE("DefaultCollator maps float32 column to kDLFloat/32", "[model][collato
 
 TEST_CASE("DefaultCollator maps int32 column to kDLInt/32", "[model][collator]") {
 	auto batch = make_batch<arrow::Int32Builder, int32_t>("ids", arrow::int32(), {10, 20, 30});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	REQUIRE(result->inputs.size() == 1);
@@ -106,7 +106,7 @@ TEST_CASE("DefaultCollator maps int32 column to kDLInt/32", "[model][collator]")
 
 TEST_CASE("DefaultCollator maps int64 column to kDLInt/64", "[model][collator]") {
 	auto batch = make_batch<arrow::Int64Builder, int64_t>("ts", arrow::int64(), {100LL, 200LL});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	REQUIRE(result->inputs.size() == 1);
@@ -116,7 +116,7 @@ TEST_CASE("DefaultCollator maps int64 column to kDLInt/64", "[model][collator]")
 
 TEST_CASE("DefaultCollator maps float64 column to kDLFloat/64", "[model][collator]") {
 	auto batch = make_batch<arrow::DoubleBuilder, double>("score", arrow::float64(), {1.1, 2.2});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	REQUIRE(result->inputs.size() == 1);
@@ -130,7 +130,7 @@ TEST_CASE("DefaultCollator maps float64 column to kDLFloat/64", "[model][collato
 
 TEST_CASE("DefaultCollator produces shape [num_rows, 1]", "[model][collator]") {
 	auto batch = make_batch<arrow::Int32Builder, int32_t>("v", arrow::int32(), {1, 2, 3, 4, 5});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	REQUIRE(result->inputs.size() == 1);
@@ -152,7 +152,7 @@ TEST_CASE("DefaultCollator skips string columns", "[model][collator]") {
 	auto schema = arrow::schema({arrow::field("text", arrow::utf8())});
 	auto batch = arrow::RecordBatch::Make(schema, 2, {str_arr});
 
-	auto collator = ttm::model::make_default_collator(*schema);
+	auto collator = tmm::model::make_default_collator(*schema);
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	// String column is skipped — no tensors produced
@@ -174,7 +174,7 @@ TEST_CASE("DefaultCollator only includes numeric columns from mixed schema", "[m
 	auto schema = arrow::schema({arrow::field("x", arrow::float32()), arrow::field("label", arrow::utf8())});
 	auto batch = arrow::RecordBatch::Make(schema, 2, {float_arr, str_arr});
 
-	auto collator = ttm::model::make_default_collator(*schema);
+	auto collator = tmm::model::make_default_collator(*schema);
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	CHECK(result->inputs.size() == 1);
@@ -189,7 +189,7 @@ TEST_CASE("DefaultCollator collates two numeric columns independently", "[model]
 	auto batch = make_two_col_batch<arrow::Int32Builder, int32_t, arrow::FloatBuilder, float>(
 			"ids", arrow::int32(), {1, 2, 3}, "vals", arrow::float32(), {0.1f, 0.2f, 0.3f}
 	);
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	CHECK(result->inputs.size() == 2);
@@ -203,7 +203,7 @@ TEST_CASE("DefaultCollator collates two numeric columns independently", "[model]
 
 TEST_CASE("DefaultCollator handles zero-row batch", "[model][collator]") {
 	auto batch = make_batch<arrow::Int32Builder, int32_t>("x", arrow::int32(), {});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	REQUIRE(result->inputs.size() == 1);
@@ -217,7 +217,7 @@ TEST_CASE("DefaultCollator handles zero-row batch", "[model][collator]") {
 
 TEST_CASE("ModelBatch retains raw RecordBatch", "[model][collator]") {
 	auto batch = make_batch<arrow::FloatBuilder, float>("x", arrow::float32(), {1.0f, 2.0f});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	CHECK(result->raw != nullptr);
@@ -230,7 +230,7 @@ TEST_CASE("ModelBatch retains raw RecordBatch", "[model][collator]") {
 
 TEST_CASE("DLTensor shape pointer is valid within ModelBatch lifetime", "[model][collator]") {
 	auto batch = make_batch<arrow::Int32Builder, int32_t>("x", arrow::int32(), {10, 20, 30});
-	auto collator = ttm::model::make_default_collator(*batch->schema());
+	auto collator = tmm::model::make_default_collator(*batch->schema());
 	auto result = collator->collate(*batch);
 	REQUIRE(result.has_value());
 	const auto* shp = result->inputs[0].shape;

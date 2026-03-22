@@ -14,7 +14,7 @@
  * - Legacy `dataset_info:` format (single mapping or list of configs)
  */
 
-#include <ttm/datasets/dataset_info.hpp>
+#include <tmm/datasets/dataset_info.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -22,13 +22,13 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <ttm/compat/expected.hpp>
+#include <tmm/compat/expected.hpp>
 #include <utility>
 #include <vector>
 
 #include <yaml-cpp/yaml.h>
 
-namespace ttm::datasets {
+namespace tmm::datasets {
 
 	namespace {
 
@@ -376,4 +376,4 @@ namespace ttm::datasets {
 		return result;
 	}
 
-} // namespace ttm::datasets
+} // namespace tmm::datasets

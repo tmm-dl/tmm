@@ -1,6 +1,6 @@
 /**
  * @file docs.dox
- * @brief Doxygen narrative documentation for the TTM plugin system.
+ * @brief Doxygen narrative documentation for the TMM plugin system.
  *
  * @details
  * This file contains no compilable code.  It exists solely to hold Doxygen
@@ -13,16 +13,16 @@
  * ====================================================================== */
 
 /**
- * @defgroup ttm_plugins TTM Plugin System
+ * @defgroup tmm_plugins TMM Plugin System
  *
- * @brief Extensible plugin architecture for TTM — dataset sources, transforms,
+ * @brief Extensible plugin architecture for TMM — dataset sources, transforms,
  *        task types, evaluation metrics, and training lifecycle hooks.
  *
  * @details
- * The TTM plugin system lets third-party code extend the training runtime
+ * The TMM plugin system lets third-party code extend the training runtime
  * without modifying the core library.  Plugins are distributed as
  * **WebAssembly** (`.wasm`) binaries and are loaded at runtime by
- * ttm::plugins::PluginManager.
+ * tmm::plugins::PluginManager.
  *
  * The system has two distinct layers:
  *
@@ -33,10 +33,10 @@
  *
  * @par Quick start — host side
  * @code{.cpp}
- * #include <ttm/plugins/plugin_manager.hpp>
+ * #include <tmm/plugins/plugin_manager.hpp>
  *
  * // 1. Create the manager (initialises WAMR runtime).
- * auto mgr = ttm::plugins::PluginManager::create().value();
+ * auto mgr = tmm::plugins::PluginManager::create().value();
  *
  * // 2. Load one or more plugins.
  * mgr.load("plugins/hf-source.wasm").value();
@@ -64,28 +64,28 @@
  *
  * @par Quick start — plugin side (C, compiled to WASM)
  * @code{.c}
- * #include <ttm/plugins/abi.h>
+ * #include <tmm/plugins/abi.h>
  *
- * static ttm_plugin_info INFO = {
- *     .abiVersion = TTM_ABI_VERSION,
+ * static tmm_plugin_info INFO = {
+ *     .abiVersion = TMM_ABI_VERSION,
  *     .name       = "my-source",
  *     .version    = "1.0.0",
  *     .description = "Custom dataset source for my data format",
  * };
  *
- * ttm_plugin_info* ttm_plugin_get_info(void) { return &INFO; }
+ * tmm_plugin_info* tmm_plugin_get_info(void) { return &INFO; }
  *
- * static const ttm_source_vtable MY_VT = { .open=my_open, .read=my_read,
+ * static const tmm_source_vtable MY_VT = { .open=my_open, .read=my_read,
  *                                          .seek=my_seek, .close=my_close };
  * static const char* SCHEMES[] = { "myscheme:", NULL };
  *
- * ttm_error ttm_plugin_init(const ttm_host_api* host,
+ * tmm_error tmm_plugin_init(const tmm_host_api* host,
  *                           const char* cfg, uint32_t cfg_len)
  * {
  *     return host->register_source(host->ctx, SCHEMES, &MY_VT);
  * }
  *
- * void ttm_plugin_teardown(void) {}
+ * void tmm_plugin_teardown(void) {}
  * @endcode
  */
 
@@ -95,7 +95,7 @@
 
 /**
  * @defgroup abi_design ABI Design Rationale
- * @ingroup ttm_plugins
+ * @ingroup tmm_plugins
  *
  * @brief Why the ABI looks the way it does — fixed-width types, vtables,
  *        string conventions, and pointer rules.
@@ -116,7 +116,7 @@
  * |------|-------|----------|
  * | `uint32_t` | 32 bits everywhere | lengths, counts, capacities |
  * | `int32_t`  | 32 bits everywhere | `read()` return, `whence` |
- * | `int64_t`  | 64 bits everywhere | `ttm_handle`, seek offsets/positions |
+ * | `int64_t`  | 64 bits everywhere | `tmm_handle`, seek offsets/positions |
  *
  * **Why not `size_t`?**
  *
@@ -136,7 +136,7 @@
  *
  * @code{.c}
  * // GOOD — what abi.h actually does
- * int32_t (*read)(ttm_handle h, void* buf, int32_t len);
+ * int32_t (*read)(tmm_handle h, void* buf, int32_t len);
  * //  Plugin and host both see: (i64, ptr, i32) → i32
  * @endcode
  *
@@ -173,14 +173,14 @@
  *
  * @code{.c}
  * // Open returns a handle; all subsequent calls pass it back.
- * ttm_handle h = vt->open(uri, uri_len, err_buf, err_cap);
+ * tmm_handle h = vt->open(uri, uri_len, err_buf, err_cap);
  * vt->read(h, buf, len);
  * vt->seek(h, offset, SEEK_SET);
  * vt->close(h);
  * @endcode
  *
  * The vtable struct itself is **copied** into the host (it is not referenced
- * by pointer after `ttm_plugin_init` returns).  This means the plugin does
+ * by pointer after `tmm_plugin_init` returns).  This means the plugin does
  * not need to keep a stable vtable address — a local or stack-allocated
  * struct is fine.
  *
@@ -189,8 +189,8 @@
  * @section abi_design_posix No `_t` suffix
  *
  * POSIX reserves all identifiers ending in `_t` in the global namespace.
- * To avoid conflicts on POSIX systems, TTM ABI types are named without the
- * `_t` suffix: `ttm_handle`, `ttm_error`, `ttm_source_vtable`, etc.
+ * To avoid conflicts on POSIX systems, TMM ABI types are named without the
+ * `_t` suffix: `tmm_handle`, `tmm_error`, `tmm_source_vtable`, etc.
  *
  * ---
  *
@@ -201,9 +201,9 @@
  * - Host-allocated buffers (e.g. `err_buf` in `open()`, `in_ipc` in
  *   `apply()`) are freed by the host after the call returns.
  * - Plugin-allocated buffers returned through out-parameters (e.g. `out_ipc`
- *   in `ttm_transform_vtable::apply`) must be freed by the host via
- *   `ttm_host_api::free`.
- * - Inside WASM, `ttm_host_api::alloc` / `ttm_host_api::free` allocate and
+ *   in `tmm_transform_vtable::apply`) must be freed by the host via
+ *   `tmm_host_api::free`.
+ * - Inside WASM, `tmm_host_api::alloc` / `tmm_host_api::free` allocate and
  *   free within the plugin's own linear memory so that returned pointers are
  *   valid from the plugin's address space.
  */
@@ -214,7 +214,7 @@
 
 /**
  * @defgroup pm_guide PluginManager Usage Guide
- * @ingroup ttm_plugins
+ * @ingroup tmm_plugins
  *
  * @brief Step-by-step guide to constructing, loading plugins, and driving
  *        the training lifecycle through PluginManager.
@@ -228,7 +228,7 @@
  * constructor instead:
  *
  * @code{.cpp}
- * auto result = ttm::plugins::PluginManager::create();
+ * auto result = tmm::plugins::PluginManager::create();
  * if (!result) {
  *     std::cerr << "Failed to init plugin runtime: " << result.error() << '\n';
  *     return EXIT_FAILURE;
@@ -239,7 +239,7 @@
  * Or, if you prefer to propagate the error as an exception:
  *
  * @code{.cpp}
- * auto mgr = ttm::plugins::PluginManager::create().value(); // throws std::bad_expected_access on failure
+ * auto mgr = tmm::plugins::PluginManager::create().value(); // throws std::bad_expected_access on failure
  * @endcode
  *
  * The WAMR runtime is reference-counted internally.  Multiple PluginManager
@@ -249,14 +249,14 @@
  * @section pm_guide_load Loading plugins
  *
  * `load()` reads the `.wasm` file, compiles it, instantiates it, verifies
- * the ABI version, calls `ttm_plugin_init`, and resolves lifecycle hook
+ * the ABI version, calls `tmm_plugin_init`, and resolves lifecycle hook
  * pointers — all in one call:
  *
  * @code{.cpp}
  * // Load with default configuration.
  * mgr.load("plugins/hf-source.wasm").value();
  *
- * // Load with JSON configuration forwarded verbatim to ttm_plugin_init.
+ * // Load with JSON configuration forwarded verbatim to tmm_plugin_init.
  * mgr.load("plugins/bpe-tok.wasm", R"({"vocab":"bpe.json","merges":50000})").value();
  *
  * // Handle load failure explicitly.
@@ -339,9 +339,9 @@
 
 /**
  * @defgroup plugin_guide Writing a Plugin
- * @ingroup ttm_plugins
+ * @ingroup tmm_plugins
  *
- * @brief How to implement, compile, and distribute a TTM plugin.
+ * @brief How to implement, compile, and distribute a TMM plugin.
  *
  * @details
  *
@@ -351,23 +351,23 @@
  *
  * | Symbol | Purpose |
  * |--------|---------|
- * | `ttm_plugin_get_info` | Return static metadata; called before init |
- * | `ttm_plugin_init`     | Register extensions; called once on load |
- * | `ttm_plugin_teardown` | Clean up; called once on unload |
+ * | `tmm_plugin_get_info` | Return static metadata; called before init |
+ * | `tmm_plugin_init`     | Register extensions; called once on load |
+ * | `tmm_plugin_teardown` | Clean up; called once on unload |
  *
- * The host verifies `ttm_plugin_info::abiVersion == TTM_ABI_VERSION`
- * immediately after calling `ttm_plugin_get_info`.  A mismatch causes the
+ * The host verifies `tmm_plugin_info::abiVersion == TMM_ABI_VERSION`
+ * immediately after calling `tmm_plugin_get_info`.  A mismatch causes the
  * load to fail with an error message — **always keep `abiVersion` set to
- * `TTM_ABI_VERSION`** from the version of `abi.h` you compiled against.
+ * `TMM_ABI_VERSION`** from the version of `abi.h` you compiled against.
  *
  * @section plugin_guide_init Registering extensions
  *
- * All registration must happen inside `ttm_plugin_init`.  The host API
- * pointer is valid only until `ttm_plugin_teardown` returns; do not retain
+ * All registration must happen inside `tmm_plugin_init`.  The host API
+ * pointer is valid only until `tmm_plugin_teardown` returns; do not retain
  * it.
  *
  * @code{.c}
- * ttm_error ttm_plugin_init(const ttm_host_api* host,
+ * tmm_error tmm_plugin_init(const tmm_host_api* host,
  *                           const char* cfg, uint32_t cfg_len)
  * {
  *     // Parse config if needed (cfg is NOT NUL-terminated).
@@ -377,12 +377,12 @@
  *     buf[n] = '\0';
  *
  *     // Register a dataset source.
- *     static const ttm_source_vtable VT = { my_open, my_read, my_seek, my_close };
+ *     static const tmm_source_vtable VT = { my_open, my_read, my_seek, my_close };
  *     static const char* SCHEMES[] = { "myscheme:", "ms:", NULL };
- *     ttm_error err = host->register_source(host->ctx, SCHEMES, &VT);
- *     if (err != TTM_OK) return err;
+ *     tmm_error err = host->register_source(host->ctx, SCHEMES, &VT);
+ *     if (err != TMM_OK) return err;
  *
- *     return TTM_OK;
+ *     return TMM_OK;
  * }
  * @endcode
  *
@@ -393,33 +393,33 @@
  *
  * @code{.c}
  * // Called once before training starts.
- * void ttm_on_fit_begin(const char* ctx_json, uint32_t len) { /* ... */ }
+ * void tmm_on_fit_begin(const char* ctx_json, uint32_t len) { /* ... */ }
  *
  * // Called at the start of each epoch.
- * void ttm_on_epoch_begin(uint32_t epoch, uint32_t total_epochs) { /* ... */ }
+ * void tmm_on_epoch_begin(uint32_t epoch, uint32_t total_epochs) { /* ... */ }
  *
  * // Called at the start of each batch.
- * void ttm_on_batch_begin(uint32_t batch, uint32_t total_batches) { /* ... */ }
+ * void tmm_on_batch_begin(uint32_t batch, uint32_t total_batches) { /* ... */ }
  *
  * // May modify the loss (e.g. add an L2 term). Must return a valid float.
- * float ttm_on_loss_computed(float loss) { return loss + l2_penalty(); }
+ * float tmm_on_loss_computed(float loss) { return loss + l2_penalty(); }
  *
  * // Called after each batch completes.
- * void ttm_on_batch_end(uint32_t batch, float loss,
+ * void tmm_on_batch_end(uint32_t batch, float loss,
  *                       const char* metrics_json, uint32_t len) { /* ... */ }
  *
  * // Return non-zero to request early stopping.
- * int32_t ttm_on_epoch_end(uint32_t epoch,
+ * int32_t tmm_on_epoch_end(uint32_t epoch,
  *                          const char* metrics_json, uint32_t len)
  * {
  *     return patience_exceeded() ? 1 : 0;
  * }
  *
  * // Called after each validation pass.
- * void ttm_on_validation_end(const char* metrics_json, uint32_t len) { /* ... */ }
+ * void tmm_on_validation_end(const char* metrics_json, uint32_t len) { /* ... */ }
  *
  * // Called when the fit loop finishes (normally or via early stop).
- * void ttm_on_fit_end(const char* metrics_json, uint32_t len) { /* ... */ }
+ * void tmm_on_fit_end(const char* metrics_json, uint32_t len) { /* ... */ }
  * @endcode
  *
  * @section plugin_guide_source Implementing a dataset source
@@ -429,31 +429,31 @@
  * @code{.c}
  * // Each open() call returns a new independent handle.
  * // err_buf/err_cap: fill on failure; the host may log this.
- * ttm_handle my_open(const char* uri, uint32_t uri_len,
+ * tmm_handle my_open(const char* uri, uint32_t uri_len,
  *                    char* err_buf, uint32_t err_cap)
  * {
  *     MyStream* s = stream_open(uri, uri_len);
  *     if (!s) {
  *         snprintf(err_buf, err_cap, "cannot open URI");
- *         return TTM_INVALID_HANDLE;
+ *         return TMM_INVALID_HANDLE;
  *     }
- *     return (ttm_handle)(uintptr_t)s;
+ *     return (tmm_handle)(uintptr_t)s;
  * }
  *
  * // Return > 0: bytes read.  Return 0: EOF.  Return -1: error.
- * int32_t my_read(ttm_handle h, void* buf, int32_t len)
+ * int32_t my_read(tmm_handle h, void* buf, int32_t len)
  * {
  *     return stream_read((MyStream*)(uintptr_t)h, buf, len);
  * }
  *
  * // Return new byte offset >= 0.  Return -1 if unseekable or error.
  * // whence: 0 = SEEK_SET, 1 = SEEK_CUR, 2 = SEEK_END.
- * int64_t my_seek(ttm_handle h, int64_t offset, int32_t whence)
+ * int64_t my_seek(tmm_handle h, int64_t offset, int32_t whence)
  * {
  *     return stream_seek((MyStream*)(uintptr_t)h, offset, whence);
  * }
  *
- * void my_close(ttm_handle h)
+ * void my_close(tmm_handle h)
  * {
  *     stream_close((MyStream*)(uintptr_t)h);
  * }
@@ -477,13 +477,13 @@
  * zig cc -target wasm32-wasi -O2 -I include -o plugins/my-source.wasm my_source.c
  * @endcode
  *
- * The three required symbols (`ttm_plugin_get_info`, `ttm_plugin_init`,
- * `ttm_plugin_teardown`) are automatically exported by WASI toolchains when
+ * The three required symbols (`tmm_plugin_get_info`, `tmm_plugin_init`,
+ * `tmm_plugin_teardown`) are automatically exported by WASI toolchains when
  * they appear at file scope without `static`.  If your toolchain requires
  * explicit export attributes, annotate them with:
  *
  * @code{.c}
  * __attribute__((visibility("default")))
- * ttm_plugin_info* ttm_plugin_get_info(void) { ... }
+ * tmm_plugin_info* tmm_plugin_get_info(void) { ... }
  * @endcode
  */

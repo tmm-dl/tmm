@@ -6,12 +6,12 @@
  * Typical usage:
  * @code{.cpp}
  * // Single file
- * auto cfg = ttm::conf::load_config("train.yml").value();
+ * auto cfg = tmm::conf::load_config("train.yml").value();
  *
  * // Multiple files (deep-merged left-to-right) + CLI --set overrides
  * std::vector<std::filesystem::path> files = {"base.yml", "experiment.yml"};
  * std::vector<std::string> overrides = {"optimizer.lr=5e-5", "training.epochs=20"};
- * auto cfg = ttm::conf::load_config(files, overrides).value();
+ * auto cfg = tmm::conf::load_config(files, overrides).value();
  * @endcode
  *
  * ### Merge semantics
@@ -30,14 +30,14 @@
 
 #pragma once
 
-#include <ttm/compat/expected.hpp>
-#include <ttm/conf/config.hpp>
+#include <tmm/compat/expected.hpp>
+#include <tmm/conf/config.hpp>
 
 #include <filesystem>
 #include <span>
 #include <string>
 
-namespace ttm::conf {
+namespace tmm::conf {
 
 	/**
 	 * @brief Load and merge one or more YAML config files, then apply overrides.
@@ -53,4 +53,4 @@ namespace ttm::conf {
 	[[nodiscard]] std::expected<TrainingConfig, std::string>
 	load_config(const std::filesystem::path& file, std::span<const std::string> set_overrides = {});
 
-} // namespace ttm::conf
+} // namespace tmm::conf

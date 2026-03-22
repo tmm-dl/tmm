@@ -1,23 +1,23 @@
 /**
  * @file model.hpp
  * @brief C++ model interface and loader abstraction.
- * @ingroup ttm_model
+ * @ingroup tmm_model
  */
 
 #pragma once
 
-#include <ttm/compat/expected.hpp>
-#include <ttm/model/device.hpp>
-#include <ttm/model/params.hpp>
-#include <ttm/plugins/abi.h>
-#include <ttm/trainer/interfaces.hpp>
+#include <tmm/compat/expected.hpp>
+#include <tmm/model/device.hpp>
+#include <tmm/model/params.hpp>
+#include <tmm/plugins/abi.h>
+#include <tmm/trainer/interfaces.hpp>
 
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace ttm::model {
+namespace tmm::model {
 
 	/* =========================================================================
 	 * ModelInfo — metadata about a loaded model
@@ -28,11 +28,11 @@ namespace ttm::model {
 	 *
 	 * @details
 	 * Populated by the model loader and broadcast to all plugins via
-	 * PluginManager::emit_model_loaded() immediately after a successful load.
-	 * Plugins that export #ttm_on_model_loaded (e.g. console-ui) receive this
+	 * PluginManager::emitModelLoaded() immediately after a successful load.
+	 * Plugins that export #tmm_on_model_loaded (e.g. console-ui) receive this
 	 * data as a JSON string.
 	 *
-	 * @ingroup ttm_model
+	 * @ingroup tmm_model
 	 */
 	struct ModelInfo {
 		std::string name;			   ///< Human-readable model name.
@@ -52,19 +52,19 @@ namespace ttm::model {
 	 * @brief Extended model interface used inside the model subsystem.
 	 *
 	 * @details
-	 * This interface extends ttm::trainer::IModel with model-system-specific
+	 * This interface extends tmm::trainer::IModel with model-system-specific
 	 * methods (info(), bind_params()).  The Trainer works with the base
-	 * ttm::trainer::IModel interface; only the model subsystem itself uses
+	 * tmm::trainer::IModel interface; only the model subsystem itself uses
 	 * the richer methods here.
 	 *
 	 * Concrete implementations:
-	 * - ttm::model::ModelPipeline  — the end-to-end pipeline (preprocess → collate → model)
+	 * - tmm::model::ModelPipeline  — the end-to-end pipeline (preprocess → collate → model)
 	 *
-	 * @see ttm::trainer::IModel   Base interface used by the Trainer
-	 * @see ttm::model::ModelPipeline  Primary implementation
-	 * @ingroup ttm_model
+	 * @see tmm::trainer::IModel   Base interface used by the Trainer
+	 * @see tmm::model::ModelPipeline  Primary implementation
+	 * @ingroup tmm_model
 	 */
-	class IModel : public ttm::trainer::IModel {
+	class IModel : public tmm::trainer::IModel {
 	public:
 		IModel() = default;
 		~IModel() override = default;
@@ -99,7 +99,7 @@ namespace ttm::model {
 	 * @details
 	 * Plugins register a loader by calling
 	 * `host->register_model_loader(ctx, &g_my_vtable)` during
-	 * #ttm_plugin_init.  The host wraps the vtable in a CModelLoaderAdapter
+	 * #tmm_plugin_init.  The host wraps the vtable in a CModelLoaderAdapter
 	 * and adds it to the loader registry.
 	 *
 	 * ### Selection
@@ -107,7 +107,7 @@ namespace ttm::model {
 	 * order and calls probe() on each one.  The first loader that returns
 	 * `true` is used for the rest of the load sequence.
 	 *
-	 * @ingroup ttm_model
+	 * @ingroup tmm_model
 	 */
 	class IModelLoader {
 	public:
@@ -145,4 +145,4 @@ namespace ttm::model {
 		load(std::string_view path, std::string_view cfg_json, Device dev) = 0;
 	};
 
-} // namespace ttm::model
+} // namespace tmm::model

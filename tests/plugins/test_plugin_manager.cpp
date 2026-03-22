@@ -5,11 +5,11 @@
  *
  * @details
  * These tests do NOT load any WASM plugin.  They exercise the built-in
- * file: source and the lifecycle emit_* methods (which are no-ops when no
+ * file: source and the lifecycle emit* methods (which are no-ops when no
  * user plugins are loaded).
  */
 
-#include <ttm/plugins/plugin_manager.hpp>
+#include <tmm/plugins/plugin_manager.hpp>
 
 #include <array>
 #include <cstddef>
@@ -25,17 +25,17 @@
 // =============================================================================
 
 TEST_CASE("PluginManager constructs and destructs without error", "[plugin_manager]") {
-	CHECK_NOTHROW([]() { auto mgr = ttm::plugins::PluginManager::create().value(); }());
+	CHECK_NOTHROW([]() { auto mgr = tmm::plugins::PluginManager::create().value(); }());
 }
 
 TEST_CASE("Multiple sequential PluginManager instances are safe", "[plugin_manager]") {
 	{
-		auto mgr1 = ttm::plugins::PluginManager::create().value();
-		CHECK(mgr1.find_source("file:") != nullptr);
+		auto mgr1 = tmm::plugins::PluginManager::create().value();
+		CHECK(mgr1.findSource("file:") != nullptr);
 	}
 	{
-		auto mgr2 = ttm::plugins::PluginManager::create().value();
-		CHECK(mgr2.find_source("file:") != nullptr);
+		auto mgr2 = tmm::plugins::PluginManager::create().value();
+		CHECK(mgr2.findSource("file:") != nullptr);
 	}
 }
 
@@ -44,23 +44,23 @@ TEST_CASE("Multiple sequential PluginManager instances are safe", "[plugin_manag
 // =============================================================================
 
 TEST_CASE("Built-in file: source is always registered", "[plugin_manager][source]") {
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	CHECK(mgr.find_source("file:") != nullptr);
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	CHECK(mgr.findSource("file:") != nullptr);
 }
 
-TEST_CASE("find_source returns nullptr for unknown scheme", "[plugin_manager][source]") {
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	CHECK(mgr.find_source("hf:") == nullptr);
-	CHECK(mgr.find_source("gh:") == nullptr);
-	CHECK(mgr.find_source("") == nullptr);
-	CHECK(mgr.find_source("s3:") == nullptr);
+TEST_CASE("findSource returns nullptr for unknown scheme", "[plugin_manager][source]") {
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	CHECK(mgr.findSource("hf:") == nullptr);
+	CHECK(mgr.findSource("gh:") == nullptr);
+	CHECK(mgr.findSource("") == nullptr);
+	CHECK(mgr.findSource("s3:") == nullptr);
 }
 
-TEST_CASE("find_source is case-sensitive", "[plugin_manager][source]") {
-	auto mgr = ttm::plugins::PluginManager::create().value();
+TEST_CASE("findSource is case-sensitive", "[plugin_manager][source]") {
+	auto mgr = tmm::plugins::PluginManager::create().value();
 	// "file:" is registered; "FILE:" and "File:" are not
-	CHECK(mgr.find_source("FILE:") == nullptr);
-	CHECK(mgr.find_source("File:") == nullptr);
+	CHECK(mgr.findSource("FILE:") == nullptr);
+	CHECK(mgr.findSource("File:") == nullptr);
 }
 
 // =============================================================================
@@ -74,10 +74,10 @@ namespace {
 		std::filesystem::path path;
 
 		explicit TempFile(std::string_view content) {
-			path = std::filesystem::temp_directory_path() / "ttm_test_XXXXXX.bin";
+			path = std::filesystem::temp_directory_path() / "tmm_test_XXXXXX.bin";
 			// Use a fixed name derived from current time to avoid collisions.
 			path.replace_filename(
-					"ttm_plugin_test_" + std::to_string(std::hash<std::string>{}(std::string(content))) + ".bin"
+					"tmm_plugin_test_" + std::to_string(std::hash<std::string>{}(std::string(content))) + ".bin"
 			);
 			std::ofstream ofs(path, std::ios::binary);
 			ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
@@ -100,8 +100,8 @@ TEST_CASE("FileSource opens and reads a local file", "[plugin_manager][source][f
 	constexpr std::string_view content = "hello from file source";
 	const TempFile tmp{content};
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	auto* src = mgr.find_source("file:");
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	auto* src = mgr.findSource("file:");
 	REQUIRE(src != nullptr);
 
 	auto reader = src->open(tmp.uri());
@@ -117,8 +117,8 @@ TEST_CASE("FileSource opens and reads a local file", "[plugin_manager][source][f
 TEST_CASE("FileSource reaches EOF correctly", "[plugin_manager][source][file]") {
 	const TempFile tmp{"eof"};
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	auto* src = mgr.find_source("file:");
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	auto* src = mgr.findSource("file:");
 	auto reader = src->open(tmp.uri());
 	REQUIRE(reader != nullptr);
 
@@ -129,8 +129,8 @@ TEST_CASE("FileSource reaches EOF correctly", "[plugin_manager][source][file]") 
 }
 
 TEST_CASE("FileSource returns nullptr for a missing file", "[plugin_manager][source][file]") {
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	auto* src = mgr.find_source("file:");
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	auto* src = mgr.findSource("file:");
 	REQUIRE(src != nullptr);
 
 	auto reader = src->open("file:///this/path/does/not/exist/at/all.bin");
@@ -141,8 +141,8 @@ TEST_CASE("FileSource reader is seekable", "[plugin_manager][source][file]") {
 	constexpr std::string_view content = "0123456789";
 	const TempFile tmp{content};
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	auto reader = mgr.find_source("file:")->open(tmp.uri());
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	auto reader = mgr.findSource("file:")->open(tmp.uri());
 	REQUIRE(reader != nullptr);
 	CHECK(reader->seekable());
 
@@ -159,8 +159,8 @@ TEST_CASE("FileSource reader exposes contents via as_stream()", "[plugin_manager
 	constexpr std::string_view content = "stream test content";
 	const TempFile tmp{content};
 
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	auto reader = mgr.find_source("file:")->open(tmp.uri());
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	auto reader = mgr.findSource("file:")->open(tmp.uri());
 	REQUIRE(reader != nullptr);
 
 	auto& stream = reader->as_stream();
@@ -172,25 +172,25 @@ TEST_CASE("FileSource reader exposes contents via as_stream()", "[plugin_manager
 // Lifecycle event dispatch (no-op with zero user plugins)
 // =============================================================================
 
-TEST_CASE("Lifecycle emit_* methods are no-ops when no user plugins are loaded", "[plugin_manager][lifecycle]") {
-	auto mgr = ttm::plugins::PluginManager::create().value();
+TEST_CASE("Lifecycle emit* methods are no-ops when no user plugins are loaded", "[plugin_manager][lifecycle]") {
+	auto mgr = tmm::plugins::PluginManager::create().value();
 
-	CHECK_NOTHROW(mgr.emit_fit_begin("{}"));
-	CHECK_NOTHROW(mgr.emit_epoch_begin(0, 10));
-	CHECK_NOTHROW(mgr.emit_batch_begin(0, 100));
+	CHECK_NOTHROW(mgr.emitFitBegin("{}"));
+	CHECK_NOTHROW(mgr.emitEpochBegin(0, 10));
+	CHECK_NOTHROW(mgr.emitBatchBegin(0, 100));
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-	CHECK(mgr.emit_loss_computed(1.5f) == Catch::Approx(1.5f));
+	CHECK(mgr.emitLossComputed(1.5f) == Catch::Approx(1.5f));
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-	CHECK_NOTHROW(mgr.emit_batch_end(0, 1.5f, "{}"));
-	CHECK_FALSE(mgr.emit_epoch_end(0, "{}")); // no early stop requested
-	CHECK_NOTHROW(mgr.emit_validation_end("{}"));
-	CHECK_NOTHROW(mgr.emit_fit_end("{}"));
+	CHECK_NOTHROW(mgr.emitBatchEnd(0, 1.5f, "{}"));
+	CHECK_FALSE(mgr.emitEpochEnd(0, "{}")); // no early stop requested
+	CHECK_NOTHROW(mgr.emitValidationEnd("{}"));
+	CHECK_NOTHROW(mgr.emitFitEnd("{}"));
 }
 
-TEST_CASE("emit_loss_computed returns input unchanged with no user plugins", "[plugin_manager][lifecycle]") {
-	auto mgr = ttm::plugins::PluginManager::create().value();
-	CHECK(mgr.emit_loss_computed(0.0f) == Catch::Approx(0.0f));
+TEST_CASE("emitLossComputed returns input unchanged with no user plugins", "[plugin_manager][lifecycle]") {
+	auto mgr = tmm::plugins::PluginManager::create().value();
+	CHECK(mgr.emitLossComputed(0.0f) == Catch::Approx(0.0f));
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-	CHECK(mgr.emit_loss_computed(3.14f) == Catch::Approx(3.14f));
-	CHECK(mgr.emit_loss_computed(-1.0f) == Catch::Approx(-1.0f));
+	CHECK(mgr.emitLossComputed(3.14f) == Catch::Approx(3.14f));
+	CHECK(mgr.emitLossComputed(-1.0f) == Catch::Approx(-1.0f));
 }

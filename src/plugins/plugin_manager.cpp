@@ -6,12 +6,12 @@
  * This file contains:
  * - The Plugin struct definition (declared opaque in plugin_manager.hpp).
  * - The built-in local filesystem source (FileSource / FileReader).
- * - CSourceAdapter — wraps a C ttm_source_vtable into an IDatasetSource.
- * - CTaskAdapter   — wraps a C ttm_task_vtable into an ITask.
+ * - CSourceAdapter — wraps a C tmm_source_vtable into an IDatasetSource.
+ * - CTaskAdapter   — wraps a C tmm_task_vtable into an ITask.
  * - All PluginManager member function definitions.
  */
 
-#include <ttm/plugins/plugin_manager.hpp>
+#include <tmm/plugins/plugin_manager.hpp>
 
 #include "native_loader.hpp"
 #include "plugin_ctx.hpp"
@@ -31,7 +31,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <ttm/compat/expected.hpp>
+#include <tmm/compat/expected.hpp>
 #include <utility>
 #include <vector>
 
@@ -42,10 +42,10 @@
 
 #include <wasm_export.h>
 
-#include <ttm/plugins/abi.h>
-#include <ttm/plugins/extension.hpp>
+#include <tmm/plugins/abi.h>
+#include <tmm/plugins/extension.hpp>
 
-namespace ttm::plugins {
+namespace tmm::plugins {
 
 	/* =========================================================================
 	 * PluginManager::Plugin definition
@@ -60,19 +60,19 @@ namespace ttm::plugins {
 	 *
 	 * @see wasm_loader.hpp  Origin of the Plugin type
 	 */
-	struct PluginManager::Plugin : ::ttm::plugins::Plugin {};
+	struct PluginManager::Plugin : ::tmm::plugins::Plugin {};
 
 	/**
 	 * @brief Full definition of the opaque NativePlugin struct.
 	 * @see native_loader.hpp
 	 */
-	struct PluginManager::NativePlugin : ::ttm::plugins::NativePlugin {};
+	struct PluginManager::NativePlugin : ::tmm::plugins::NativePlugin {};
 
 	/**
 	 * @brief Full definition of PluginRegistrationCtx — mirrors plugin_ctx.hpp
 	 * but uses the manager-internal derived types.
 	 */
-	struct PluginManager::PluginRegistrationCtx : ::ttm::plugins::PluginRegistrationCtx {};
+	struct PluginManager::PluginRegistrationCtx : ::tmm::plugins::PluginRegistrationCtx {};
 
 	/* =========================================================================
 	 * Built-in local filesystem source
@@ -150,11 +150,11 @@ namespace ttm::plugins {
 		};
 
 		/* =========================================================================
-		 * CSourceAdapter — wraps a C ttm_source_vtable into IDatasetSource
+		 * CSourceAdapter — wraps a C tmm_source_vtable into IDatasetSource
 		 * ====================================================================== */
 
 		/**
-		 * @brief IByteReader backed by a plugin-provided C ttm_source_vtable handle.
+		 * @brief IByteReader backed by a plugin-provided C tmm_source_vtable handle.
 		 */
 		class CVtableReader final : public IByteReader {
 		public:
@@ -162,7 +162,7 @@ namespace ttm::plugins {
 			 * @param[in] vt      Source vtable provided by the plugin.
 			 * @param[in] handle  Handle returned by vt->open().
 			 */
-			CVtableReader(const ttm_source_vtable& vt, ttm_handle handle) : vt(vt), handle(handle) {}
+			CVtableReader(const tmm_source_vtable& vt, tmm_handle handle) : vt(vt), handle(handle) {}
 
 			CVtableReader(const CVtableReader&) = delete;
 			CVtableReader& operator=(const CVtableReader&) = delete;
@@ -170,7 +170,7 @@ namespace ttm::plugins {
 			CVtableReader& operator=(CVtableReader&&) = delete;
 
 			~CVtableReader() override {
-				if (handle != TTM_INVALID_HANDLE && vt.close != nullptr) {
+				if (handle != TMM_INVALID_HANDLE && vt.close != nullptr) {
 					vt.close(handle);
 				}
 			}
@@ -209,12 +209,12 @@ namespace ttm::plugins {
 			}
 
 		private:
-			const ttm_source_vtable vt;
-			ttm_handle handle;
+			const tmm_source_vtable vt;
+			tmm_handle handle;
 		};
 
 		/**
-		 * @brief IDatasetSource that wraps a plugin's ttm_source_vtable.
+		 * @brief IDatasetSource that wraps a plugin's tmm_source_vtable.
 		 *
 		 * @details
 		 * Created by PluginManager::s_register_source() and stored in the owning
@@ -226,7 +226,7 @@ namespace ttm::plugins {
 			 * @param[in] schemeList  Schemes this source handles (copied).
 			 * @param[in] vt          Source vtable (must remain valid for this object's lifetime).
 			 */
-			CSourceAdapter(std::vector<std::string> schemeList, const ttm_source_vtable* vt)
+			CSourceAdapter(std::vector<std::string> schemeList, const tmm_source_vtable* vt)
 					: schemeList(std::move(schemeList)), vt(*vt) {}
 
 			[[nodiscard]] std::vector<std::string> schemes() const override { return schemeList; }
@@ -237,8 +237,8 @@ namespace ttm::plugins {
 				const auto handle =
 						vt.open(uri.data(), static_cast<uint32_t>(uri.size()), errBuf.data(), errBuf.size());
 
-				if (handle == TTM_INVALID_HANDLE) {
-					std::cerr << "[ttm] CSourceAdapter::open error: " << errBuf.data() << '\n';
+				if (handle == TMM_INVALID_HANDLE) {
+					std::cerr << "[tmm] CSourceAdapter::open error: " << errBuf.data() << '\n';
 					return nullptr;
 				}
 				return std::make_unique<CVtableReader>(vt, handle);
@@ -246,11 +246,11 @@ namespace ttm::plugins {
 
 		private:
 			std::vector<std::string> schemeList;
-			ttm_source_vtable vt; /* Copy of the vtable struct */
+			tmm_source_vtable vt; /* Copy of the vtable struct */
 		};
 
 		/* =========================================================================
-		 * CTaskAdapter — wraps a C ttm_task_vtable into ITask
+		 * CTaskAdapter — wraps a C tmm_task_vtable into ITask
 		 * ====================================================================== */
 
 		/**
@@ -270,7 +270,7 @@ namespace ttm::plugins {
 		}
 
 		/**
-		 * @brief ITask that wraps a plugin's ttm_task_vtable.
+		 * @brief ITask that wraps a plugin's tmm_task_vtable.
 		 *
 		 * @details
 		 * The vtable function pointers return pointers into plugin-owned static
@@ -280,7 +280,7 @@ namespace ttm::plugins {
 		 */
 		class CTaskAdapter final : public ITask {
 		public:
-			explicit CTaskAdapter(const ttm_task_vtable& vt) : vt(vt) {
+			explicit CTaskAdapter(const tmm_task_vtable& vt) : vt(vt) {
 				if (vt.name != nullptr) {
 					nameStr = vt.name();
 				}
@@ -336,7 +336,7 @@ namespace ttm::plugins {
 			}
 
 		private:
-			ttm_task_vtable vt;
+			tmm_task_vtable vt;
 			std::string nameStr;
 			std::string labelStr;
 			std::vector<std::string> aliasStrs;
@@ -345,7 +345,7 @@ namespace ttm::plugins {
 		};
 
 		/* =========================================================================
-		 * CModelLoaderAdapter — wraps a C ttm_model_loader_vtable into IModelLoader
+		 * CModelLoaderAdapter — wraps a C tmm_model_loader_vtable into IModelLoader
 		 * ====================================================================== */
 
 		/**
@@ -357,7 +357,7 @@ namespace ttm::plugins {
 		 */
 		class CModelLoaderAdapter final : public IModelLoader {
 		public:
-			explicit CModelLoaderAdapter(const ttm_model_loader_vtable* vt) : vt_(*vt) {}
+			explicit CModelLoaderAdapter(const tmm_model_loader_vtable* vt) : vt_(*vt) {}
 
 			[[nodiscard]] bool probe(std::string_view path) const override {
 				if (vt_.probe == nullptr)
@@ -365,7 +365,7 @@ namespace ttm::plugins {
 				return vt_.probe(path.data(), static_cast<uint32_t>(path.size())) != 0;
 			}
 
-			[[nodiscard]] std::expected<ttm_handle, std::string>
+			[[nodiscard]] std::expected<tmm_handle, std::string>
 			open(std::string_view path, std::string_view cfg_json) override {
 				if (vt_.load == nullptr)
 					return std::unexpected("model loader vtable has no load()");
@@ -375,7 +375,7 @@ namespace ttm::plugins {
 						path.data(), static_cast<uint32_t>(path.size()), cfg_json.data(),
 						static_cast<uint32_t>(cfg_json.size()), errBuf.data(), kErrBufSize
 				);
-				if (h == TTM_INVALID_HANDLE) {
+				if (h == TMM_INVALID_HANDLE) {
 					return std::unexpected(
 							errBuf[0] != '\0' ? std::string(errBuf.data()) : "model load failed (no error message)"
 					);
@@ -383,82 +383,82 @@ namespace ttm::plugins {
 				return h;
 			}
 
-			[[nodiscard]] ttm_model_info_t get_info(ttm_handle h) const override {
+			[[nodiscard]] tmm_model_info_t get_info(tmm_handle h) const override {
 				if (vt_.get_info == nullptr)
-					return ttm_model_info_t{};
+					return tmm_model_info_t{};
 				return vt_.get_info(h);
 			}
 
-			ttm_error describe_params(ttm_handle h, const ttm_param_desc_t** out_descs, uint32_t* out_count) override {
+			tmm_error describe_params(tmm_handle h, const tmm_param_desc_t** out_descs, uint32_t* out_count) override {
 				if (vt_.describe_params == nullptr) {
 					if (out_count != nullptr)
 						*out_count = 0;
-					return TTM_ERR_UNSUPPORTED;
+					return TMM_ERR_UNSUPPORTED;
 				}
 				return vt_.describe_params(h, out_descs, out_count);
 			}
 
-			ttm_error bind_params(
-					ttm_handle h, const DLTensor* params, uint32_t param_count, const DLTensor* grads,
+			tmm_error bind_params(
+					tmm_handle h, const DLTensor* params, uint32_t param_count, const DLTensor* grads,
 					uint32_t grad_count
 			) override {
 				if (vt_.bind_params == nullptr)
-					return TTM_ERR_UNSUPPORTED;
+					return TMM_ERR_UNSUPPORTED;
 				return vt_.bind_params(h, params, param_count, grads, grad_count);
 			}
 
-			ttm_error init_params(ttm_handle h, std::string_view method) override {
+			tmm_error init_params(tmm_handle h, std::string_view method) override {
 				if (vt_.init_params == nullptr)
-					return TTM_OK;
+					return TMM_OK;
 				return vt_.init_params(h, method.data(), static_cast<uint32_t>(method.size()));
 			}
 
-			ttm_error step(ttm_handle h, const DLTensor* inputs, uint32_t n, float* out_loss) override {
+			tmm_error step(tmm_handle h, const DLTensor* inputs, uint32_t n, float* out_loss) override {
 				if (vt_.step == nullptr)
-					return TTM_ERR_UNSUPPORTED;
+					return TMM_ERR_UNSUPPORTED;
 				return vt_.step(h, inputs, n, out_loss);
 			}
 
-			ttm_error
-			infer(ttm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outputs,
+			tmm_error
+			infer(tmm_handle h, const DLTensor* inputs, uint32_t in_count, DLTensor* outputs,
 				  uint32_t* out_count) override {
 				if (vt_.infer == nullptr)
-					return TTM_ERR_UNSUPPORTED;
+					return TMM_ERR_UNSUPPORTED;
 				return vt_.infer(h, inputs, in_count, outputs, out_count);
 			}
 
-			ttm_error zero_grad(ttm_handle h) override {
+			tmm_error zeroGrad(tmm_handle h) override {
 				if (vt_.zero_grad == nullptr)
-					return TTM_OK;
+					return TMM_OK;
 				return vt_.zero_grad(h);
 			}
 
-			void destroy(ttm_handle h) override {
+			void destroy(tmm_handle h) override {
 				if (vt_.destroy != nullptr)
 					vt_.destroy(h);
 			}
 
 		private:
-			ttm_model_loader_vtable vt_;
+			tmm_model_loader_vtable vt_;
 		};
 
 		/* =========================================================================
-		 * COptimizerAdapter — wraps a C ttm_optimizer_vtable into trainer::IOptimizer
+		 * COptimizerAdapter — wraps a C tmm_optimizer_vtable into trainer::IOptimizer
 		 * ====================================================================== */
 
 		/**
 		 * @brief trainer::IOptimizer that delegates all calls through a plugin vtable.
 		 *
 		 * @details
-		 * Created by PluginManager::make_optimizer().  Owns the vtable handle and
+		 * Created by PluginManager::makeOptimizer().  Owns the vtable handle and
 		 * calls vtable->destroy() on destruction.
 		 */
-		class COptimizerAdapter final : public ttm::trainer::IOptimizer {
+		class COptimizerAdapter final : public tmm::trainer::IOptimizer {
 		public:
-			COptimizerAdapter(const ttm_optimizer_vtable& vt, ttm_handle h) : vt_(vt), h_(h) {}
+			COptimizerAdapter(const tmm_optimizer_vtable& vt, tmm_handle h) : vt_(vt), h_(h) {}
 
 			~COptimizerAdapter() override {
-				if (h_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+				if (h_ != TMM_INVALID_HANDLE && vt_.destroy != nullptr) {
 					vt_.destroy(h_);
 				}
 			}
@@ -468,59 +468,59 @@ namespace ttm::plugins {
 					vt_.step(h_);
 			}
 
-			void zero_grad() override {
+			void zeroGrad() override {
 				if (vt_.zero_grad != nullptr)
 					vt_.zero_grad(h_);
 			}
 
-			[[nodiscard]] float learning_rate() const override {
+			[[nodiscard]] float learningRate() const override {
 				return (vt_.get_lr != nullptr) ? vt_.get_lr(h_) : 0.0f;
 			}
 
-			void set_learning_rate(float lr) override {
+			void setLearningRate(float lr) override {
 				if (vt_.set_lr != nullptr)
 					vt_.set_lr(h_, lr);
 			}
 
 		private:
-			ttm_optimizer_vtable vt_;
-			ttm_handle h_;
+			tmm_optimizer_vtable vt_;
+			tmm_handle h_;
 		};
 
 		/* =========================================================================
-		 * CVtableCallback — wraps a C ttm_trainer_callback_vtable into trainer::Callback
+		 * CVtableCallback — wraps a C tmm_trainer_callback_vtable into trainer::Callback
 		 * ====================================================================== */
 
 		/**
 		 * @brief trainer::Callback that delegates all calls through a plugin vtable.
 		 *
 		 * @details
-		 * Created by PluginManager::make_callback().  Owns the vtable handle and
+		 * Created by PluginManager::makeCallback().  Owns the vtable handle and
 		 * calls vtable->destroy() on destruction.
 		 */
-		class CVtableCallback final : public ttm::trainer::Callback {
+		class CVtableCallback final : public tmm::trainer::Callback {
 		public:
-			CVtableCallback(const ttm_trainer_callback_vtable& vt, ttm_handle h) : vt_(vt), h_(h) {}
+			CVtableCallback(const tmm_trainer_callback_vtable& vt, tmm_handle h) : vt_(vt), h_(h) {}
 
 			~CVtableCallback() override {
-				if (h_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+				if (h_ != TMM_INVALID_HANDLE && vt_.destroy != nullptr) {
 					vt_.destroy(h_);
 				}
 			}
 
-			void on_fit_begin(ttm::trainer::Trainer&, const ttm::trainer::CallbackMetrics& m) override {
+			void on_fit_begin(tmm::trainer::Trainer&, const tmm::trainer::CallbackMetrics& m) override {
 				if (vt_.on_fit_begin != nullptr) {
 					const auto j = metrics_to_json(m);
 					vt_.on_fit_begin(h_, j.c_str(), static_cast<uint32_t>(j.size()));
 				}
 			}
 
-			void on_epoch_begin(ttm::trainer::Trainer&, int64_t epoch, int64_t total) override {
+			void on_epoch_begin(tmm::trainer::Trainer&, int64_t epoch, int64_t total) override {
 				if (vt_.on_epoch_begin != nullptr)
 					vt_.on_epoch_begin(h_, epoch, total);
 			}
 
-			bool on_epoch_end(ttm::trainer::Trainer&, int64_t epoch, const ttm::trainer::CallbackMetrics& m) override {
+			bool on_epoch_end(tmm::trainer::Trainer&, int64_t epoch, const tmm::trainer::CallbackMetrics& m) override {
 				if (vt_.on_epoch_end != nullptr) {
 					const auto j = metrics_to_json(m);
 					return vt_.on_epoch_end(h_, epoch, j.c_str(), static_cast<uint32_t>(j.size())) != 0;
@@ -528,7 +528,7 @@ namespace ttm::plugins {
 				return false;
 			}
 
-			void on_fit_end(ttm::trainer::Trainer&, const ttm::trainer::CallbackMetrics& m) override {
+			void on_fit_end(tmm::trainer::Trainer&, const tmm::trainer::CallbackMetrics& m) override {
 				if (vt_.on_fit_end != nullptr) {
 					const auto j = metrics_to_json(m);
 					vt_.on_fit_end(h_, j.c_str(), static_cast<uint32_t>(j.size()));
@@ -536,7 +536,7 @@ namespace ttm::plugins {
 			}
 
 		private:
-			static std::string metrics_to_json(const ttm::trainer::CallbackMetrics& m) {
+			static std::string metrics_to_json(const tmm::trainer::CallbackMetrics& m) {
 				std::string out = "{";
 				bool first = true;
 				for (const auto& [k, v] : m.all()) {
@@ -552,8 +552,8 @@ namespace ttm::plugins {
 				return out;
 			}
 
-			ttm_trainer_callback_vtable vt_;
-			ttm_handle h_;
+			tmm_trainer_callback_vtable vt_;
+			tmm_handle h_;
 		};
 
 	} // anonymous namespace
@@ -565,7 +565,7 @@ namespace ttm::plugins {
 	std::expected<PluginManager, std::string> PluginManager::create() {
 		PluginManager mgr;
 
-		if (auto r = wasm_loader_init(); !r) {
+		if (auto r = wasmLoaderInit(); !r) {
 			return std::unexpected(r.error());
 		}
 		mgr.wamrRefOwned = true;
@@ -594,13 +594,13 @@ namespace ttm::plugins {
 
 		/* Unload native plugins first */
 		for (auto& p : nativePlugins) {
-			native_loader_unload(*p);
+			nativeLoaderUnload(*p);
 		}
 		nativePlugins.clear();
 
 		/* Unload WASM plugins (index 0 is the built-in, no WASM handles to release) */
 		for (auto& p : plugins) {
-			wasm_loader_unload(*p);
+			wasmLoaderUnload(*p);
 		}
 		plugins.clear();
 
@@ -610,7 +610,7 @@ namespace ttm::plugins {
 		transformRegistry.clear();
 		transformVtableRegistry.clear();
 
-		wasm_loader_destroy();
+		wasmLoaderDestroy();
 	}
 
 	PluginManager::PluginManager(PluginManager&& other) noexcept
@@ -661,7 +661,7 @@ namespace ttm::plugins {
 			ctx.wasmPlugin = p.get();
 			auto hostApi = make_host_api(ctx);
 
-			if (auto r = wasm_loader_load(path, config_json, hostApi, *p); !r) {
+			if (auto r = wasmLoaderLoad(path, config_json, hostApi, *p); !r) {
 				return std::unexpected(r.error());
 			}
 			/* Switch persistentApi.ctx from the (now-stale) PluginRegistrationCtx*
@@ -674,14 +674,14 @@ namespace ttm::plugins {
 			PluginRegistrationCtx ctx;
 			ctx.manager = this;
 			ctx.nativePlugin = p.get();
-			// Derive plugin name from filename: "ttm_core.so" → "core"
+			// Derive plugin name from filename: "tmm_core.so" → "core"
 			{
 				const std::string stem = path.stem().string();
-				ctx.plugin_name = stem.starts_with("ttm_") ? stem.substr(4) : stem;
+				ctx.plugin_name = stem.starts_with("tmm_") ? stem.substr(4) : stem;
 			}
 			auto hostApi = make_host_api(ctx);
 
-			if (auto r = native_loader_load(path, config_json, hostApi, *p); !r) {
+			if (auto r = nativeLoaderLoad(path, config_json, hostApi, *p); !r) {
 				return std::unexpected(r.error());
 			}
 			/* Switch persistentApi.ctx from the (now-stale) PluginRegistrationCtx*
@@ -698,17 +698,17 @@ namespace ttm::plugins {
 	 * Source and task registries
 	 * ====================================================================== */
 
-	IDatasetSource* PluginManager::find_source(std::string_view scheme) const {
+	IDatasetSource* PluginManager::findSource(std::string_view scheme) const {
 		const auto it = sourceRegistry.find(std::string(scheme));
 		return (it != sourceRegistry.end()) ? it->second : nullptr;
 	}
 
-	ITask* PluginManager::find_task(std::string_view name_or_alias) const {
+	ITask* PluginManager::findTask(std::string_view name_or_alias) const {
 		const auto it = taskRegistry.find(std::string(name_or_alias));
 		return (it != taskRegistry.end()) ? it->second : nullptr;
 	}
 
-	IModelLoader* PluginManager::find_model_loader(std::string_view path) const {
+	IModelLoader* PluginManager::findModelLoader(std::string_view path) const {
 		for (auto* loader : modelLoaderRegistry) {
 			if (loader->probe(path))
 				return loader;
@@ -716,25 +716,25 @@ namespace ttm::plugins {
 		return nullptr;
 	}
 
-	ITransform* PluginManager::find_transform(std::string_view name) const {
+	ITransform* PluginManager::findTransform(std::string_view name) const {
 		const auto it = transformRegistry.find(std::string(name));
 		return (it != transformRegistry.end()) ? it->second : nullptr;
 	}
 
-	void PluginManager::emit_model_loaded(std::string_view info_json) {
+	void PluginManager::emitModelLoaded(std::string_view info_json) {
 		for (auto& p : nativePlugins) {
 			if (p->fnOnModelLoaded != nullptr) {
 				p->fnOnModelLoaded(info_json.data(), static_cast<uint32_t>(info_json.size()));
 			}
 		}
-		// WASM plugins: would need wasm_push_string like other hooks — future work
+		// WASM plugins: would need wasmPushString like other hooks — future work
 	}
 
 	/* =========================================================================
 	 * Host API construction
 	 * ====================================================================== */
 
-	ttm_host_api PluginManager::make_host_api(PluginRegistrationCtx& ctx) {
+	tmm_host_api PluginManager::make_host_api(PluginRegistrationCtx& ctx) {
 		/* Populate the C++ registration callbacks (called by WASM host callbacks) */
 		ctx.attach_source = [this, &ctx](std::unique_ptr<IDatasetSource> src) {
 			register_source_impl(std::move(src), ctx);
@@ -747,7 +747,7 @@ namespace ttm::plugins {
 			register_transform_impl(std::move(transform), ctx);
 		};
 
-		ttm_host_api api{};
+		tmm_host_api api{};
 		api.ctx = &ctx;
 		api.register_source = &PluginManager::s_register_source;
 		api.register_transform = &PluginManager::s_register_transform;
@@ -770,9 +770,9 @@ namespace ttm::plugins {
 	 * Host API static callbacks
 	 * ====================================================================== */
 
-	ttm_error PluginManager::s_register_source(void* ctx, const char** schemes, const ttm_source_vtable* vt) {
+	tmm_error PluginManager::s_register_source(void* ctx, const char** schemes, const tmm_source_vtable* vt) {
 		if (ctx == nullptr || schemes == nullptr || vt == nullptr) {
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		}
 
 		std::vector<std::string> schemeList;
@@ -782,19 +782,19 @@ namespace ttm::plugins {
 			schemeList.emplace_back(*sch);
 		}
 		if (schemeList.empty()) {
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		}
 
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 		auto adapter = std::make_unique<CSourceAdapter>(std::move(schemeList), vt);
 		regCtx->manager->register_source_impl(std::move(adapter), *regCtx);
-		return TTM_OK;
+		return TMM_OK;
 	}
 
 	void PluginManager::register_source_impl(std::unique_ptr<IDatasetSource> src, PluginRegistrationCtx& ctx) {
 		for (const auto& scheme : src->schemes()) {
 			if (sourceRegistry.contains(scheme)) {
-				std::cerr << "[ttm] warning: source scheme '" << scheme << "' already registered; overriding.\n";
+				std::cerr << "[tmm] warning: source scheme '" << scheme << "' already registered; overriding.\n";
 			}
 			sourceRegistry[scheme] = src.get();
 		}
@@ -809,17 +809,17 @@ namespace ttm::plugins {
 		}
 	}
 
-	ttm_error PluginManager::s_register_task(
-			void* ctx, const char* name, const char** /*aliases_unused*/, const ttm_task_vtable* vt
+	tmm_error PluginManager::s_register_task(
+			void* ctx, const char* name, const char** /*aliases_unused*/, const tmm_task_vtable* vt
 	) {
 		if (ctx == nullptr || name == nullptr || vt == nullptr) {
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		}
 		/* name and aliases come from the vtable itself; aliases_unused param is ignored */
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 		auto adapter = std::make_unique<CTaskAdapter>(*vt);
 		regCtx->manager->register_task_impl(std::move(adapter), *regCtx);
-		return TTM_OK;
+		return TMM_OK;
 	}
 
 	void PluginManager::register_task_impl(std::unique_ptr<ITask> task, PluginRegistrationCtx& ctx) {
@@ -828,7 +828,7 @@ namespace ttm::plugins {
 		/* Register canonical name */
 		const auto taskName = std::string(task->name());
 		if (taskRegistry.contains(taskName)) {
-			std::cerr << "[ttm] warning: task '" << taskName << "' already registered; overriding.\n";
+			std::cerr << "[tmm] warning: task '" << taskName << "' already registered; overriding.\n";
 		}
 		taskRegistry[taskName] = raw;
 
@@ -849,14 +849,14 @@ namespace ttm::plugins {
 		}
 	}
 
-	ttm_error PluginManager::s_register_transform(
-			void* ctx, const char* name, const char** /*aliases*/, const ttm_transform_vtable* vt
+	tmm_error PluginManager::s_register_transform(
+			void* ctx, const char* name, const char** /*aliases*/, const tmm_transform_vtable* vt
 	) {
 		if (ctx == nullptr || name == nullptr || vt == nullptr)
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 
-		// Store vtable copy for per-config instantiation via find_transform_vtable()
+		// Store vtable copy for per-config instantiation via findTransformVtable()
 		// Always register qualified name (plugin::name); unqualified is first-wins
 		auto& tvReg = regCtx->manager->transformVtableRegistry;
 		if (!regCtx->plugin_name.empty()) {
@@ -867,36 +867,36 @@ namespace ttm::plugins {
 		// Build a minimal ITransform adapter
 		class CVtableTransform final : public ITransform {
 		public:
-			CVtableTransform(std::string n, const ttm_transform_vtable& v)
-					: name_(std::move(n)), vt_(v), handle_(TTM_INVALID_HANDLE) {
+			CVtableTransform(std::string n, const tmm_transform_vtable& v)
+					: name_(std::move(n)), vt_(v), handle_(TMM_INVALID_HANDLE) {
 				if (vt_.create != nullptr) {
 					handle_ = vt_.create("{}", 2);
 				}
 			}
 			~CVtableTransform() override {
-				if (handle_ != TTM_INVALID_HANDLE && vt_.destroy != nullptr) {
+				if (handle_ != TMM_INVALID_HANDLE && vt_.destroy != nullptr) {
 					vt_.destroy(handle_);
 				}
 			}
 			[[nodiscard]] std::string_view name() const override { return name_; }
-			ttm_error apply_ipc(const void* in_ipc, uint32_t in_len, void** out_ipc, uint32_t* out_len) override {
-				if (vt_.apply == nullptr || handle_ == TTM_INVALID_HANDLE)
-					return TTM_ERR_UNSUPPORTED;
+			tmm_error apply_ipc(const void* in_ipc, uint32_t in_len, void** out_ipc, uint32_t* out_len) override {
+				if (vt_.apply == nullptr || handle_ == TMM_INVALID_HANDLE)
+					return TMM_ERR_UNSUPPORTED;
 				return vt_.apply(handle_, in_ipc, in_len, out_ipc, out_len);
 			}
 
 		private:
 			std::string name_;
-			ttm_transform_vtable vt_;
-			ttm_handle handle_;
+			tmm_transform_vtable vt_;
+			tmm_handle handle_;
 		};
 
 		auto adapter = std::make_unique<CVtableTransform>(name, *vt);
 		regCtx->manager->register_transform_impl(std::move(adapter), *regCtx);
-		return TTM_OK;
+		return TMM_OK;
 	}
 
-	const ttm_transform_vtable* PluginManager::find_transform_vtable(std::string_view name) const {
+	const tmm_transform_vtable* PluginManager::findTransformVtable(std::string_view name) const {
 		const auto it = transformVtableRegistry.find(std::string(name));
 		return (it != transformVtableRegistry.end()) ? &it->second : nullptr;
 	}
@@ -904,7 +904,7 @@ namespace ttm::plugins {
 	void PluginManager::register_transform_impl(std::unique_ptr<ITransform> transform, PluginRegistrationCtx& ctx) {
 		const auto key = std::string(transform->name());
 		if (transformRegistry.contains(key)) {
-			std::cerr << "[ttm] warning: transform '" << key << "' already registered; overriding.\n";
+			std::cerr << "[tmm] warning: transform '" << key << "' already registered; overriding.\n";
 		}
 		transformRegistry[key] = transform.get();
 		if (ctx.nativePlugin != nullptr) {
@@ -917,13 +917,13 @@ namespace ttm::plugins {
 		}
 	}
 
-	ttm_error PluginManager::s_register_model_loader(void* ctx, const ttm_model_loader_vtable* vt) {
+	tmm_error PluginManager::s_register_model_loader(void* ctx, const tmm_model_loader_vtable* vt) {
 		if (ctx == nullptr || vt == nullptr)
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 		auto adapter = std::make_unique<CModelLoaderAdapter>(vt);
 		regCtx->manager->register_model_loader_impl(std::move(adapter), *regCtx);
-		return TTM_OK;
+		return TMM_OK;
 	}
 
 	void PluginManager::register_model_loader_impl(std::unique_ptr<IModelLoader> loader, PluginRegistrationCtx& ctx) {
@@ -940,10 +940,10 @@ namespace ttm::plugins {
 		}
 	}
 
-	void PluginManager::s_notify_model_info(void* ctx, const ttm_model_info_t* info) {
+	void PluginManager::s_notify_model_info(void* ctx, const tmm_model_info_t* info) {
 		if (ctx == nullptr || info == nullptr)
 			return;
-		// Serialise to JSON and broadcast via emit_model_loaded
+		// Serialise to JSON and broadcast via emitModelLoaded
 		char buf[512];
 		std::snprintf(
 				buf, sizeof(buf),
@@ -954,12 +954,12 @@ namespace ttm::plugins {
 				static_cast<unsigned long long>(info->bytes_on_device), static_cast<int>(info->device_type),
 				static_cast<int>(info->device_id)
 		);
-		static_cast<PluginManager*>(ctx)->emit_model_loaded(std::string_view{buf});
+		static_cast<PluginManager*>(ctx)->emitModelLoaded(std::string_view{buf});
 	}
 
-	ttm_error PluginManager::s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt) {
+	tmm_error PluginManager::s_register_scheduler(void* ctx, const char* name, const tmm_scheduler_vtable* vt) {
 		if (ctx == nullptr || name == nullptr || vt == nullptr)
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 		auto& reg = regCtx->manager->schedulerVtableRegistry;
 		// Always register qualified name (plugin::name); unqualified is first-wins
@@ -967,17 +967,17 @@ namespace ttm::plugins {
 			reg.insert_or_assign(regCtx->plugin_name + "::" + name, *vt);
 		}
 		reg.try_emplace(std::string(name), *vt);
-		return TTM_OK;
+		return TMM_OK;
 	}
 
-	const ttm_scheduler_vtable* PluginManager::find_scheduler_vtable(std::string_view name) const {
+	const tmm_scheduler_vtable* PluginManager::findSchedulerVtable(std::string_view name) const {
 		const auto it = schedulerVtableRegistry.find(std::string(name));
 		return (it != schedulerVtableRegistry.end()) ? &it->second : nullptr;
 	}
 
-	ttm_error PluginManager::s_register_optimizer(void* ctx, const char* name, const ttm_optimizer_vtable* vt) {
+	tmm_error PluginManager::s_register_optimizer(void* ctx, const char* name, const tmm_optimizer_vtable* vt) {
 		if (ctx == nullptr || name == nullptr || vt == nullptr)
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 		auto& reg = regCtx->manager->optimizerVtableRegistry;
 		// Always register qualified name (plugin::name); unqualified is first-wins
@@ -985,19 +985,19 @@ namespace ttm::plugins {
 			reg.insert_or_assign(regCtx->plugin_name + "::" + name, *vt);
 		}
 		reg.try_emplace(std::string(name), *vt);
-		return TTM_OK;
+		return TMM_OK;
 	}
 
-	const ttm_optimizer_vtable* PluginManager::find_optimizer_vtable(std::string_view name) const {
+	const tmm_optimizer_vtable* PluginManager::findOptimizerVtable(std::string_view name) const {
 		const auto it = optimizerVtableRegistry.find(std::string(name));
 		return (it != optimizerVtableRegistry.end()) ? &it->second : nullptr;
 	}
 
-	std::unique_ptr<ttm::trainer::IOptimizer> PluginManager::make_optimizer(
-			std::string_view name, ttm_handle model_h, const DLTensor* params, uint32_t param_count,
+	std::unique_ptr<tmm::trainer::IOptimizer> PluginManager::makeOptimizer(
+			std::string_view name, tmm_handle model_h, const DLTensor* params, uint32_t param_count,
 			const DLTensor* grads, std::string_view cfg_json, std::string* out_error
 	) const {
-		const ttm_optimizer_vtable* vt = find_optimizer_vtable(name);
+		const tmm_optimizer_vtable* vt = findOptimizerVtable(name);
 		if (vt == nullptr) {
 			if (out_error != nullptr)
 				*out_error = "optimizer not found: " + std::string(name);
@@ -1010,11 +1010,11 @@ namespace ttm::plugins {
 		}
 		constexpr std::size_t kErrCap = 512;
 		std::array<char, kErrCap> errBuf{};
-		const ttm_handle h = vt->create(
+		const tmm_handle h = vt->create(
 				model_h, params, param_count, grads, cfg_json.data(), static_cast<uint32_t>(cfg_json.size()),
 				errBuf.data(), kErrCap
 		);
-		if (h == TTM_INVALID_HANDLE) {
+		if (h == TMM_INVALID_HANDLE) {
 			if (out_error != nullptr) {
 				*out_error =
 						errBuf[0] != '\0' ? std::string(errBuf.data()) : "optimizer create failed (no error message)";
@@ -1024,9 +1024,9 @@ namespace ttm::plugins {
 		return std::make_unique<COptimizerAdapter>(*vt, h);
 	}
 
-	ttm_error PluginManager::s_register_callback(void* ctx, const char* name, const ttm_trainer_callback_vtable* vt) {
+	tmm_error PluginManager::s_register_callback(void* ctx, const char* name, const tmm_trainer_callback_vtable* vt) {
 		if (ctx == nullptr || name == nullptr || vt == nullptr)
-			return TTM_ERR_ARGS;
+			return TMM_ERR_ARGS;
 		auto* regCtx = static_cast<PluginRegistrationCtx*>(ctx);
 		auto& reg = regCtx->manager->callbackVtableRegistry;
 		// Always register qualified name (plugin::name); unqualified is first-wins
@@ -1034,17 +1034,17 @@ namespace ttm::plugins {
 			reg.insert_or_assign(regCtx->plugin_name + "::" + name, *vt);
 		}
 		reg.try_emplace(std::string(name), *vt);
-		return TTM_OK;
+		return TMM_OK;
 	}
 
-	const ttm_trainer_callback_vtable* PluginManager::find_callback_vtable(std::string_view name) const {
+	const tmm_trainer_callback_vtable* PluginManager::findCallbackVtable(std::string_view name) const {
 		const auto it = callbackVtableRegistry.find(std::string(name));
 		return (it != callbackVtableRegistry.end()) ? &it->second : nullptr;
 	}
 
-	std::unique_ptr<ttm::trainer::Callback>
-	PluginManager::make_callback(std::string_view name, std::string_view config_json, std::string* out_error) const {
-		const ttm_trainer_callback_vtable* vt = find_callback_vtable(name);
+	std::unique_ptr<tmm::trainer::Callback>
+	PluginManager::makeCallback(std::string_view name, std::string_view config_json, std::string* out_error) const {
+		const tmm_trainer_callback_vtable* vt = findCallbackVtable(name);
 		if (vt == nullptr) {
 			if (out_error != nullptr)
 				*out_error = "callback not found: " + std::string(name);
@@ -1055,8 +1055,8 @@ namespace ttm::plugins {
 				*out_error = "callback vtable has no create() for: " + std::string(name);
 			return nullptr;
 		}
-		const ttm_handle h = vt->create(config_json.data(), static_cast<uint32_t>(config_json.size()));
-		if (h == TTM_INVALID_HANDLE) {
+		const tmm_handle h = vt->create(config_json.data(), static_cast<uint32_t>(config_json.size()));
+		if (h == TMM_INVALID_HANDLE) {
 			if (out_error != nullptr)
 				*out_error = "callback create() failed for: " + std::string(name);
 			return nullptr;
@@ -1064,38 +1064,38 @@ namespace ttm::plugins {
 		return std::make_unique<CVtableCallback>(*vt, h);
 	}
 
-	ttm_error PluginManager::s_register_metric(
-			void* /*ctx*/, const char* /*name*/, const char** /*aliases*/, const ttm_metric_vtable* /*vt*/
+	tmm_error PluginManager::s_register_metric(
+			void* /*ctx*/, const char* /*name*/, const char** /*aliases*/, const tmm_metric_vtable* /*vt*/
 	) {
 		/* TODO: implement metric registry */
-		return TTM_ERR_UNSUPPORTED;
+		return TMM_ERR_UNSUPPORTED;
 	}
 
-	void PluginManager::s_log(void* /*ctx*/, ttm_log_level level, const char* msg, uint32_t len) {
+	void PluginManager::s_log(void* /*ctx*/, tmm_log_level level, const char* msg, uint32_t len) {
 		// NOLINTNEXTLINE(cppcoreguidelines-init-variables) -- always set by the switch below; initializing here would
 		// generate a clang-analyzer-deadcode.DeadStores warning
 		const char* prefix;
 		switch (level) {
-		case TTM_LOG_TRACE:
+		case TMM_LOG_TRACE:
 			prefix = "[TRACE] ";
 			break;
-		case TTM_LOG_DEBUG:
+		case TMM_LOG_DEBUG:
 			prefix = "[DEBUG] ";
 			break;
-		case TTM_LOG_INFO:
+		case TMM_LOG_INFO:
 			prefix = "[INFO]  ";
 			break;
-		case TTM_LOG_WARN:
+		case TMM_LOG_WARN:
 			prefix = "[WARN]  ";
 			break;
-		case TTM_LOG_ERROR:
+		case TMM_LOG_ERROR:
 			prefix = "[ERROR] ";
 			break;
 		default:
 			prefix = "";
 			break;
 		}
-		std::cerr << "[ttm plugin] " << prefix;
+		std::cerr << "[tmm plugin] " << prefix;
 		std::cerr.write(msg, static_cast<std::streamsize>(len));
 		std::cerr << '\n';
 	}
@@ -1122,7 +1122,7 @@ namespace ttm::plugins {
 		}
 		uint32_t wasmPtr = 0;
 		uint32_t wasmLen = 0;
-		if (!wasm_push_string(plug.inst, str, wasmPtr, wasmLen)) {
+		if (!wasmPushString(plug.inst, str, wasmPtr, wasmLen)) {
 			return;
 		}
 		std::array<uint32_t, 2> args{wasmPtr, wasmLen};
@@ -1130,7 +1130,7 @@ namespace ttm::plugins {
 		wasm_runtime_module_free(plug.inst, wasmPtr);
 	}
 
-	void PluginManager::emit_fit_begin(std::string_view ctx_json) {
+	void PluginManager::emitFitBegin(std::string_view ctx_json) {
 		for (auto& p : plugins) {
 			call_with_string(*p, p->fnFitBegin, ctx_json);
 		}
@@ -1141,7 +1141,7 @@ namespace ttm::plugins {
 		}
 	}
 
-	void PluginManager::emit_epoch_begin(std::uint32_t epoch, std::uint32_t total) {
+	void PluginManager::emitEpochBegin(std::uint32_t epoch, std::uint32_t total) {
 		for (auto& p : plugins) {
 			if (p->fnEpochBegin == nullptr) {
 				continue;
@@ -1156,7 +1156,7 @@ namespace ttm::plugins {
 		}
 	}
 
-	void PluginManager::emit_batch_begin(std::uint32_t batch, std::uint32_t total) {
+	void PluginManager::emitBatchBegin(std::uint32_t batch, std::uint32_t total) {
 		for (auto& p : plugins) {
 			if (p->fnBatchBegin == nullptr) {
 				continue;
@@ -1171,7 +1171,7 @@ namespace ttm::plugins {
 		}
 	}
 
-	float PluginManager::emit_loss_computed(float loss) {
+	float PluginManager::emitLossComputed(float loss) {
 		for (auto& p : plugins) {
 			if (p->fnLossComputed == nullptr) {
 				continue;
@@ -1192,14 +1192,14 @@ namespace ttm::plugins {
 
 	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- batch(uint32_t) and loss(float) are different types;
 	// semantics are clear from names
-	void PluginManager::emit_batch_end(std::uint32_t batch, float loss, std::string_view metrics_json) {
+	void PluginManager::emitBatchEnd(std::uint32_t batch, float loss, std::string_view metrics_json) {
 		for (auto& p : plugins) {
 			if (p->fnBatchEnd == nullptr) {
 				continue;
 			}
 			uint32_t metricsPtr = 0;
 			uint32_t metricsLen = 0;
-			if (!wasm_push_string(p->inst, metrics_json, metricsPtr, metricsLen)) {
+			if (!wasmPushString(p->inst, metrics_json, metricsPtr, metricsLen)) {
 				continue;
 			}
 			uint32_t lossBits = 0;
@@ -1215,7 +1215,7 @@ namespace ttm::plugins {
 		}
 	}
 
-	bool PluginManager::emit_epoch_end(std::uint32_t epoch, std::string_view metrics_json) {
+	bool PluginManager::emitEpochEnd(std::uint32_t epoch, std::string_view metrics_json) {
 		bool stop = false;
 		for (auto& p : plugins) {
 			if (p->fnEpochEnd == nullptr) {
@@ -1223,7 +1223,7 @@ namespace ttm::plugins {
 			}
 			uint32_t metricsPtr = 0;
 			uint32_t metricsLen = 0;
-			if (!wasm_push_string(p->inst, metrics_json, metricsPtr, metricsLen)) {
+			if (!wasmPushString(p->inst, metrics_json, metricsPtr, metricsLen)) {
 				continue;
 			}
 			std::array<uint32_t, 3> args{epoch, metricsPtr, metricsLen};
@@ -1243,7 +1243,7 @@ namespace ttm::plugins {
 		return stop;
 	}
 
-	void PluginManager::emit_validation_end(std::string_view metrics_json) {
+	void PluginManager::emitValidationEnd(std::string_view metrics_json) {
 		for (auto& p : plugins) {
 			call_with_string(*p, p->fnValidationEnd, metrics_json);
 		}
@@ -1254,7 +1254,7 @@ namespace ttm::plugins {
 		}
 	}
 
-	void PluginManager::emit_fit_end(std::string_view metrics_json) {
+	void PluginManager::emitFitEnd(std::string_view metrics_json) {
 		for (auto& p : plugins) {
 			call_with_string(*p, p->fnFitEnd, metrics_json);
 		}
@@ -1265,7 +1265,7 @@ namespace ttm::plugins {
 		}
 	}
 
-	void PluginManager::emit_log(ttm_log_level level, std::string_view msg) {
+	void PluginManager::emitLog(tmm_log_level level, std::string_view msg) {
 		bool handled = false;
 
 		/* Dispatch to WASM plugins */
@@ -1273,7 +1273,7 @@ namespace ttm::plugins {
 			if (p->fnOnLog == nullptr)
 				continue;
 			uint32_t wasmPtr = 0, wasmLen = 0;
-			if (!wasm_push_string(p->inst, msg, wasmPtr, wasmLen))
+			if (!wasmPushString(p->inst, msg, wasmPtr, wasmLen))
 				continue;
 			std::array<uint32_t, 3> args{static_cast<uint32_t>(level), wasmPtr, wasmLen};
 			wasm_runtime_call_wasm(p->env, p->fnOnLog, args.size(), args.data());
@@ -1295,13 +1295,13 @@ namespace ttm::plugins {
 		}
 	}
 
-	void PluginManager::emit_metric(std::string_view key, float value, int32_t step) {
+	void PluginManager::emitMetric(std::string_view key, float value, int32_t step) {
 		/* Dispatch to WASM plugins */
 		for (auto& p : plugins) {
 			if (p->fnOnMetric == nullptr)
 				continue;
 			uint32_t keyPtr = 0, keyLen = 0;
-			if (!wasm_push_string(p->inst, key, keyPtr, keyLen))
+			if (!wasmPushString(p->inst, key, keyPtr, keyLen))
 				continue;
 			uint32_t valueBits = 0;
 			std::memcpy(&valueBits, &value, sizeof(float));
@@ -1321,7 +1321,7 @@ namespace ttm::plugins {
 	void PluginManager::s_log_metric(void* ctx, const char* key, uint32_t key_len, float value, int32_t step) {
 		if (ctx == nullptr || key == nullptr || key_len == 0)
 			return;
-		static_cast<PluginManager*>(ctx)->emit_metric({key, key_len}, value, step);
+		static_cast<PluginManager*>(ctx)->emitMetric({key, key_len}, value, step);
 	}
 
 	void PluginManager::s_terminal_size(void* /*ctx*/, uint32_t* out_width, uint32_t* out_height) {
@@ -1342,4 +1342,4 @@ namespace ttm::plugins {
 			*out_height = height;
 	}
 
-} // namespace ttm::plugins
+} // namespace tmm::plugins

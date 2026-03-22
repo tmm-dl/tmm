@@ -1,17 +1,17 @@
 /**
  * @file test_scheduler_vtables.cpp
- * @brief Integration tests for the built-in LR scheduler vtables in ttm_core.
+ * @brief Integration tests for the built-in LR scheduler vtables in tmm_core.
  *
  * @details
- * These tests load `ttm_core.so` via dlopen (or LoadLibrary on Windows),
- * call `ttm_plugin_init` with a mock host API that captures all registered
+ * These tests load `tmm_core.so` via dlopen (or LoadLibrary on Windows),
+ * call `tmm_plugin_init` with a mock host API that captures all registered
  * scheduler vtables, and then exercise the scheduler math through the vtable
  * function pointers.
  *
  * ### Running standalone
- * Build with `-DTTM_BUILD_EXTENSIONS=ON` then:
+ * Build with `-DTMM_BUILD_EXTENSIONS=ON` then:
  * @code
- *   ctest --test-dir build --output-on-failure -R "^ttm_core"
+ *   ctest --test-dir build --output-on-failure -R "^tmm_core"
  * @endcode
  *
  * ### Scheduler coverage
@@ -23,7 +23,7 @@
  */
 
 #define PY_SSIZE_T_CLEAN // suppress Python.h warning if Python is found
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -82,29 +82,29 @@ namespace {
 	// Plugin fixture
 	// =============================================================================
 
-	/// Return the path to ttm_core.so, from environment or CMake compile-def.
+	/// Return the path to tmm_core.so, from environment or CMake compile-def.
 	std::filesystem::path core_plugin_path() {
-		if (const char* env = std::getenv("TTM_CORE_PLUGIN"); env != nullptr) {
+		if (const char* env = std::getenv("TMM_CORE_PLUGIN"); env != nullptr) {
 			return env;
 		}
-#ifdef TTM_CORE_PLUGIN_PATH
-		return TTM_CORE_PLUGIN_PATH;
+#ifdef TMM_CORE_PLUGIN_PATH
+		return TMM_CORE_PLUGIN_PATH;
 #else
 		return {};
 #endif
 	}
 
 	/**
-	 * @brief RAII guard that loads ttm_core.so and collects registered schedulers.
+	 * @brief RAII guard that loads tmm_core.so and collects registered schedulers.
 	 *
 	 * @details
-	 * On construction: opens the shared library, calls ttm_plugin_init with a mock
+	 * On construction: opens the shared library, calls tmm_plugin_init with a mock
 	 * host API that records each `register_scheduler` call.  On destruction: calls
-	 * ttm_plugin_teardown and closes the library.
+	 * tmm_plugin_teardown and closes the library.
 	 */
 	class CorePlugin {
 	public:
-		std::unordered_map<std::string, ttm_scheduler_vtable> schedulers;
+		std::unordered_map<std::string, tmm_scheduler_vtable> schedulers;
 		bool loaded = false;
 
 		CorePlugin() {
@@ -118,9 +118,9 @@ namespace {
 
 			// Resolve required entry points
 			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-			fnInit_ = reinterpret_cast<decltype(fnInit_)>(lib_sym(lib_, "ttm_plugin_init"));
+			fnInit_ = reinterpret_cast<decltype(fnInit_)>(lib_sym(lib_, "tmm_plugin_init"));
 			// NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-			fnTeardown_ = reinterpret_cast<decltype(fnTeardown_)>(lib_sym(lib_, "ttm_plugin_teardown"));
+			fnTeardown_ = reinterpret_cast<decltype(fnTeardown_)>(lib_sym(lib_, "tmm_plugin_teardown"));
 
 			if (fnInit_ == nullptr) {
 				lib_close(lib_);
@@ -129,7 +129,7 @@ namespace {
 			}
 
 			// Build mock host API — only register_scheduler is exercised here
-			ttm_host_api api{};
+			tmm_host_api api{};
 			api.ctx = this;
 			api.register_source = &s_noop_register_source;
 			api.register_transform = &s_noop_register_transform;
@@ -144,7 +144,7 @@ namespace {
 			api.alloc = &s_alloc;
 			api.free = &s_free;
 
-			if (fnInit_(&api, "{}", 2) == TTM_OK) {
+			if (fnInit_(&api, "{}", 2) == TMM_OK) {
 				loaded = true;
 			}
 		}
@@ -160,29 +160,29 @@ namespace {
 
 	private:
 		void* lib_ = nullptr;
-		ttm_error (*fnInit_)(const ttm_host_api*, const char*, uint32_t) = nullptr;
+		tmm_error (*fnInit_)(const tmm_host_api*, const char*, uint32_t) = nullptr;
 		void (*fnTeardown_)() = nullptr;
 
 		// --- mock callbacks ---
-		static ttm_error s_register_scheduler(void* ctx, const char* name, const ttm_scheduler_vtable* vt) {
+		static tmm_error s_register_scheduler(void* ctx, const char* name, const tmm_scheduler_vtable* vt) {
 			if (ctx == nullptr || name == nullptr || vt == nullptr)
-				return TTM_ERR_ARGS;
+				return TMM_ERR_ARGS;
 			static_cast<CorePlugin*>(ctx)->schedulers.insert_or_assign(std::string(name), *vt);
-			return TTM_OK;
+			return TMM_OK;
 		}
-		static ttm_error s_noop_register_source(void*, const char**, const ttm_source_vtable*) { return TTM_OK; }
-		static ttm_error s_noop_register_transform(void*, const char*, const char**, const ttm_transform_vtable*) {
-			return TTM_OK;
+		static tmm_error s_noop_register_source(void*, const char**, const tmm_source_vtable*) { return TMM_OK; }
+		static tmm_error s_noop_register_transform(void*, const char*, const char**, const tmm_transform_vtable*) {
+			return TMM_OK;
 		}
-		static ttm_error s_noop_register_task(void*, const char*, const char**, const ttm_task_vtable*) {
-			return TTM_OK;
+		static tmm_error s_noop_register_task(void*, const char*, const char**, const tmm_task_vtable*) {
+			return TMM_OK;
 		}
-		static ttm_error s_noop_register_metric(void*, const char*, const char**, const ttm_metric_vtable*) {
-			return TTM_OK;
+		static tmm_error s_noop_register_metric(void*, const char*, const char**, const tmm_metric_vtable*) {
+			return TMM_OK;
 		}
-		static ttm_error s_noop_register_model_loader(void*, const ttm_model_loader_vtable*) { return TTM_OK; }
-		static void s_noop_notify_model_info(void*, const ttm_model_info_t*) {}
-		static void s_noop_log(void*, ttm_log_level, const char*, uint32_t) {}
+		static tmm_error s_noop_register_model_loader(void*, const tmm_model_loader_vtable*) { return TMM_OK; }
+		static void s_noop_notify_model_info(void*, const tmm_model_info_t*) {}
+		static void s_noop_log(void*, tmm_log_level, const char*, uint32_t) {}
 		static void s_noop_log_metric(void*, const char*, uint32_t, float, int32_t) {}
 		static void s_noop_terminal_size(void*, uint32_t* w, uint32_t* h) {
 			if (w)
@@ -222,10 +222,10 @@ namespace {
 // Tests
 // =============================================================================
 
-TEST_CASE("ttm_core plugin loads and registers schedulers", "[core][scheduler]") {
+TEST_CASE("tmm_core plugin loads and registers schedulers", "[core][scheduler]") {
 	CorePlugin p;
 	if (!p.loaded) {
-		WARN("ttm_core.so not found — skipping core plugin scheduler tests");
+		WARN("tmm_core.so not found — skipping core plugin scheduler tests");
 		return;
 	}
 
@@ -255,7 +255,7 @@ TEST_CASE("constant scheduler returns base_lr at every step", "[core][scheduler]
 	const auto& vt = p.schedulers.at("constant");
 	const float base = 1e-3f;
 	const auto h = vt.create(base, "{}", 2);
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(base, kEps));
 	CHECK_THAT(vt.step(h, 100), Catch::Matchers::WithinAbs(base, kEps));
@@ -274,7 +274,7 @@ TEST_CASE("step scheduler decays by gamma every step_size steps", "[core][schedu
 	const float gamma = 0.5f;
 	const auto cfg = make_cfg(0, 0.0f, 3, gamma, 0);
 	const auto h = vt.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	// Steps 0–2: no decay yet
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(1.0f, kEps));
@@ -295,7 +295,7 @@ TEST_CASE("step scheduler respects min_lr floor", "[core][scheduler]") {
 	const auto& vt = p.schedulers.at("step");
 	const auto cfg = make_cfg(0, 0.1f, 1, 0.1f, 0); // decay every step, floor=0.1
 	const auto h = vt.create(1.0f, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	// After many steps the LR should not go below min_lr=0.1
 	const float lr_late = vt.step(h, 100);
@@ -314,7 +314,7 @@ TEST_CASE("linear scheduler: full decay from base_lr to min_lr", "[core][schedul
 	const float minl = 0.0f;
 	const auto cfg = make_cfg(0, minl, 1, 0.1f, 100); // total_steps=100
 	const auto h = vt.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	// Step 0: full base LR
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(1.0f, kEps));
@@ -335,7 +335,7 @@ TEST_CASE("linear scheduler with warmup", "[core][scheduler]") {
 	const float base = 1.0f;
 	const auto cfg = make_cfg(10, 0.0f, 1, 0.1f, 110); // warmup=10, total=110
 	const auto h = vt.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	// During warmup: linear ramp 0→base_lr
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(0.0f, kEps));
@@ -355,7 +355,7 @@ TEST_CASE("cosine scheduler: base_lr at step 0, min_lr at total_steps", "[core][
 	const float minl = 0.0f;
 	const auto cfg = make_cfg(0, minl, 1, 0.1f, 100);
 	const auto h = vt.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	// At step 0: LR = base_lr
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(base, kEps));
@@ -377,7 +377,7 @@ TEST_CASE("cosine scheduler with non-zero min_lr", "[core][scheduler]") {
 	const float minl = 0.2f;
 	const auto cfg = make_cfg(0, minl, 1, 0.1f, 100);
 	const auto h = vt.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(base, kEps));
 	CHECK_THAT(vt.step(h, 100), Catch::Matchers::WithinAbs(minl, kEps));
@@ -394,7 +394,7 @@ TEST_CASE("cosine with total_steps=0 returns base_lr", "[core][scheduler]") {
 
 	const auto& vt = p.schedulers.at("cosine");
 	const auto h = vt.create(0.5f, "{}", 2);
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(0.5f, kEps));
 	CHECK_THAT(vt.step(h, 999), Catch::Matchers::WithinAbs(0.5f, kEps));
@@ -413,7 +413,7 @@ TEST_CASE("cosine_warmup: ramp during warmup then cosine decay", "[core][schedul
 	// warmup_steps=20, total_steps=120 → 100 decay steps
 	const auto cfg = make_cfg(20, minl, 1, 0.1f, 120);
 	const auto h = vt.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h != TTM_INVALID_HANDLE);
+	REQUIRE(h != TMM_INVALID_HANDLE);
 
 	// Warmup: step 0 → LR=0
 	CHECK_THAT(vt.step(h, 0), Catch::Matchers::WithinAbs(0.0f, kEps));
@@ -442,8 +442,8 @@ TEST_CASE("cosine_warmup with zero warmup acts like plain cosine", "[core][sched
 
 	const auto h_cw = vt_cw.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
 	const auto h_c = vt_c.create(base, cfg.c_str(), static_cast<uint32_t>(cfg.size()));
-	REQUIRE(h_cw != TTM_INVALID_HANDLE);
-	REQUIRE(h_c != TTM_INVALID_HANDLE);
+	REQUIRE(h_cw != TMM_INVALID_HANDLE);
+	REQUIRE(h_c != TMM_INVALID_HANDLE);
 
 	for (int64_t step : {0, 1, 50, 100, 150, 200}) {
 		INFO("step=" << step);
@@ -462,8 +462,8 @@ TEST_CASE("multiple scheduler handles are independent", "[core][scheduler]") {
 	const auto& vt = p.schedulers.at("constant");
 	const auto h1 = vt.create(0.1f, "{}", 2);
 	const auto h2 = vt.create(0.9f, "{}", 2);
-	REQUIRE(h1 != TTM_INVALID_HANDLE);
-	REQUIRE(h2 != TTM_INVALID_HANDLE);
+	REQUIRE(h1 != TMM_INVALID_HANDLE);
+	REQUIRE(h2 != TMM_INVALID_HANDLE);
 	REQUIRE(h1 != h2);
 
 	CHECK_THAT(vt.step(h1, 0), Catch::Matchers::WithinAbs(0.1f, kEps));
@@ -480,6 +480,6 @@ TEST_CASE("destroy on invalid handle is safe", "[core][scheduler]") {
 
 	// Should not crash
 	const auto& vt = p.schedulers.at("constant");
-	vt.destroy(TTM_INVALID_HANDLE);
-	vt.destroy(static_cast<ttm_handle>(-2));
+	vt.destroy(TMM_INVALID_HANDLE);
+	vt.destroy(static_cast<tmm_handle>(-2));
 }

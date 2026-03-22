@@ -3,7 +3,7 @@
  * @brief Git-based dataset source implementation.
  *
  * @details
- * Implements `ttm_source_vtable` for the following URI schemes:
+ * Implements `tmm_source_vtable` for the following URI schemes:
  *   - `gh:`  — GitHub repositories  (https://github.com/<owner>/<repo>)
  *   - `gl:`  — GitLab repositories  (https://gitlab.com/<owner>/<repo>)
  *   - `bb:`  — Bitbucket repos      (https://bitbucket.org/<owner>/<repo>)
@@ -14,7 +14,7 @@
  *   `<scheme><owner>/<repo>[@<ref>][/<subpath>]`
  *
  * Repositories are shallow-cloned / fetched into a local cache:
- *   `$XDG_CACHE_HOME/ttm/datasets/<fnv1a_hex_of_url_plus_ref>/`
+ *   `$XDG_CACHE_HOME/tmm/datasets/<fnv1a_hex_of_url_plus_ref>/`
  *
  * Files are opened directly from disk using standard C FILE I/O.
  * git-lfs pointer files are transparently resolved via lfsOpen().
@@ -23,7 +23,7 @@
 #include "git_source.hpp"
 #include "netutils.hpp"
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <git2.h>
 
@@ -132,7 +132,7 @@ namespace {
 	 * @brief Compute a stable cache directory for a (url, ref) pair.
 	 *
 	 * Uses FNV-1a 64-bit hash of "url#ref" as the directory name.
-	 * Stores under $XDG_CACHE_HOME/ttm/datasets/ or ~/.cache/ttm/datasets/.
+	 * Stores under $XDG_CACHE_HOME/tmm/datasets/ or ~/.cache/tmm/datasets/.
 	 */
 	std::filesystem::path cachePathFor(const std::string& git_url, const std::string& ref) {
 		const std::string key = git_url + "#" + ref;
@@ -154,7 +154,7 @@ namespace {
 			base = std::filesystem::temp_directory_path();
 		}
 
-		return base / "ttm" / "datasets" / hexBuf.data();
+		return base / "tmm" / "datasets" / hexBuf.data();
 	}
 
 	/* -------------------------------------------------------------------------
@@ -232,17 +232,17 @@ namespace {
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- plugin-level open-file table
 	std::FILE* g_handles[kMaxHandles]{};
 
-	ttm_handle allocHandle(std::FILE* fp) {
+	tmm_handle allocHandle(std::FILE* fp) {
 		for (int i = 0; i < kMaxHandles; ++i) {
 			if (g_handles[i] == nullptr) {
 				g_handles[i] = fp;
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	std::FILE* getHandle(ttm_handle h) {
+	std::FILE* getHandle(tmm_handle h) {
 		if (h < 0 || h >= kMaxHandles)
 			return nullptr;
 		return g_handles[static_cast<int>(h)];
@@ -252,21 +252,21 @@ namespace {
 	 * Source vtable implementations
 	 * ====================================================================== */
 
-	ttm_handle coreOpen(const char* uri, uint32_t /*uri_len*/, char* err, uint32_t err_cap) {
+	tmm_handle coreOpen(const char* uri, uint32_t /*uri_len*/, char* err, uint32_t err_cap) {
 		auto parsed = expandUri(std::string_view(uri));
 		if (!parsed) {
 			std::snprintf(err, err_cap, "coreOpen: unrecognised URI scheme in '%s'", uri);
-			return TTM_INVALID_HANDLE;
+			return TMM_INVALID_HANDLE;
 		}
 
 		const auto localRepo = gitEnsureRepo(parsed->git_url, parsed->ref, err, err_cap);
 		if (localRepo.empty()) {
-			return TTM_INVALID_HANDLE;
+			return TMM_INVALID_HANDLE;
 		}
 
 		if (parsed->subpath.empty()) {
 			std::snprintf(err, err_cap, "coreOpen: URI '%s' has no subpath", uri);
-			return TTM_INVALID_HANDLE;
+			return TMM_INVALID_HANDLE;
 		}
 
 		const auto filePath = localRepo / parsed->subpath;
@@ -275,32 +275,32 @@ namespace {
 			std::snprintf(
 					err, err_cap, "coreOpen: cannot open '%s': %s", filePath.string().c_str(), std::strerror(errno)
 			);
-			return TTM_INVALID_HANDLE;
+			return TMM_INVALID_HANDLE;
 		}
 
 		if (isLfsPointer(fp)) {
 			std::fclose(fp);
 			fp = lfsOpen(parsed->git_url, parsed->ref, parsed->subpath, localRepo, err, err_cap);
 			if (fp == nullptr)
-				return TTM_INVALID_HANDLE;
+				return TMM_INVALID_HANDLE;
 		}
 
 		const auto handle = allocHandle(fp);
-		if (handle == TTM_INVALID_HANDLE) {
+		if (handle == TMM_INVALID_HANDLE) {
 			std::fclose(fp);
 			std::snprintf(err, err_cap, "coreOpen: too many open file handles");
 		}
 		return handle;
 	}
 
-	int32_t coreRead(ttm_handle h, void* buf, int32_t len) {
+	int32_t coreRead(tmm_handle h, void* buf, int32_t len) {
 		std::FILE* fp = getHandle(h);
 		if (fp == nullptr)
 			return -1;
 		return static_cast<int32_t>(std::fread(buf, 1, static_cast<std::size_t>(len), fp));
 	}
 
-	int64_t coreSeek(ttm_handle h, int64_t offset, int32_t whence) {
+	int64_t coreSeek(tmm_handle h, int64_t offset, int32_t whence) {
 		std::FILE* fp = getHandle(h);
 		if (fp == nullptr)
 			return -1;
@@ -320,7 +320,7 @@ namespace {
 #endif
 	}
 
-	void coreClose(ttm_handle h) {
+	void coreClose(tmm_handle h) {
 		if (h < 0 || h >= kMaxHandles)
 			return;
 		if (g_handles[h] != nullptr) {
@@ -330,7 +330,7 @@ namespace {
 	}
 
 	// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast) -- C vtable requires function pointer assignment
-	ttm_source_vtable g_vtable = {coreOpen, coreRead, coreSeek, coreClose};
+	tmm_source_vtable g_vtable = {coreOpen, coreRead, coreSeek, coreClose};
 	// NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
 
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,hicpp-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -338,7 +338,7 @@ namespace {
 
 } // anonymous namespace
 
-ttm_error gitSourceRegister(const ttm_host_api* host) {
+tmm_error gitSourceRegister(const tmm_host_api* host) {
 	git_libgit2_init();
 	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
 	return host->register_source(host->ctx, g_schemes, &g_vtable);

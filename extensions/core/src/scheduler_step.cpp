@@ -7,18 +7,18 @@
 
 #include "scheduler_state.hpp"
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <algorithm>
 #include <cstdint>
 
 namespace {
 
-	ttm_handle stepCreate(float base_lr, const char* cfg, uint32_t cfg_len) {
+	tmm_handle stepCreate(float base_lr, const char* cfg, uint32_t cfg_len) {
 		return allocSched(parseSchedCfg(base_lr, cfg, cfg_len));
 	}
 
-	float stepStep(ttm_handle h, int64_t global_step) {
+	float stepStep(tmm_handle h, int64_t global_step) {
 		const auto* s = getSched(h);
 		if (!s)
 			return 0.0f;
@@ -33,4 +33,4 @@ namespace {
 } // anonymous namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-ttm_scheduler_vtable g_sched_step = {stepCreate, stepStep, schedDestroy};
+tmm_scheduler_vtable g_sched_step = {stepCreate, stepStep, schedDestroy};

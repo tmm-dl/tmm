@@ -1,6 +1,6 @@
 /**
  * @file python_transform.cpp
- * @brief TTM Python plugin — "hf-tokenize" Arrow IPC transform.
+ * @brief TMM Python plugin — "hf-tokenize" Arrow IPC transform.
  *
  * @details
  * Registers the "hf-tokenize" transform vtable with the host.  Each handle
@@ -30,8 +30,8 @@
 
 #include "python_plugin.hpp"
 
-#include <ttm/plugins/abi.h>
-#include <ttm_python_export.h>
+#include <tmm/plugins/abi.h>
+#include <tmm_python_export.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
@@ -62,17 +62,17 @@ namespace {
 	// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 	PyTransformState g_transforms[kMaxTransforms]{};
 
-	ttm_handle alloc_transform_slot(PyObject* tok, PyObject* helper) {
+	tmm_handle alloc_transform_slot(PyObject* tok, PyObject* helper) {
 		for (int i = 0; i < kMaxTransforms; ++i) {
 			if (!g_transforms[i].used) {
 				g_transforms[i] = {tok, helper, true};
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	PyTransformState* get_transform(ttm_handle h) {
+	PyTransformState* get_transform(tmm_handle h) {
 		if (h < 0 || h >= kMaxTransforms)
 			return nullptr;
 		return g_transforms[static_cast<int>(h)].used ? &g_transforms[static_cast<int>(h)] : nullptr;
@@ -145,7 +145,7 @@ def apply_tokenize(tokenizer, ipc_bytes, text_col, label_col, max_length):
  * vtable implementation
  * ========================================================================= */
 
-static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_len) {
+static tmm_handle hf_tokenize_create(const char* config_json, uint32_t config_len) {
 	if (!Py_IsInitialized()) {
 		Py_Initialize();
 	}
@@ -154,7 +154,7 @@ static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_le
 	PyObject* json_mod = PyImport_ImportModule("json");
 	if (json_mod == nullptr) {
 		PyErr_Print();
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	PyObject* cfg_str = PyUnicode_FromStringAndSize(config_json, static_cast<Py_ssize_t>(config_len));
@@ -163,7 +163,7 @@ static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_le
 	Py_DECREF(json_mod);
 	if (cfg == nullptr) {
 		PyErr_Print();
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	// Extract fields
@@ -195,13 +195,13 @@ static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_le
 		Py_DECREF(model_name);
 		Py_DECREF(text_col);
 		Py_DECREF(label_col);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 	PyObject* auto_tok_cls = PyObject_GetAttrString(transformers, "AutoTokenizer");
 	Py_DECREF(transformers);
 	if (auto_tok_cls == nullptr) {
 		PyErr_Print();
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	PyObject* tokenizer = PyObject_CallMethod(auto_tok_cls, "from_pretrained", "O", model_name);
@@ -211,7 +211,7 @@ static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_le
 		PyErr_Print();
 		Py_DECREF(text_col);
 		Py_DECREF(label_col);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	// Compile and exec the helper code into a fresh dict
@@ -228,7 +228,7 @@ static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_le
 		Py_DECREF(text_col);
 		Py_DECREF(label_col);
 		Py_DECREF(helper_dict);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 	PyObject* exec_result = PyEval_EvalCode(code_obj, helper_dict, helper_dict);
 	Py_DECREF(code_obj);
@@ -239,7 +239,7 @@ static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_le
 		Py_DECREF(text_col);
 		Py_DECREF(label_col);
 		Py_DECREF(helper_dict);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
 	// Store text_col, label_col, max_length in a tuple alongside helper_dict
@@ -253,22 +253,22 @@ static ttm_handle hf_tokenize_create(const char* config_json, uint32_t config_le
 	if (state_tuple == nullptr) {
 		PyErr_Print();
 		Py_DECREF(tokenizer);
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	ttm_handle h = alloc_transform_slot(tokenizer, state_tuple);
-	if (h == TTM_INVALID_HANDLE) {
+	tmm_handle h = alloc_transform_slot(tokenizer, state_tuple);
+	if (h == TMM_INVALID_HANDLE) {
 		Py_DECREF(tokenizer);
 		Py_DECREF(state_tuple);
 	}
 	return h;
 }
 
-static ttm_error
-hf_tokenize_apply(ttm_handle h, const void* in_ipc, uint32_t in_len, void** out_ipc, uint32_t* out_len) {
+static tmm_error
+hf_tokenize_apply(tmm_handle h, const void* in_ipc, uint32_t in_len, void** out_ipc, uint32_t* out_len) {
 	auto* st = get_transform(h);
 	if (st == nullptr)
-		return TTM_ERR_NOT_FOUND;
+		return TMM_ERR_NOT_FOUND;
 
 	// Unpack state: (helper_dict, text_col, label_col, max_length)
 	PyObject* helper_dict = PyTuple_GET_ITEM(st->helper, 0); // borrowed
@@ -280,7 +280,7 @@ hf_tokenize_apply(ttm_handle h, const void* in_ipc, uint32_t in_len, void** out_
 	PyObject* ipc_bytes = PyBytes_FromStringAndSize(static_cast<const char*>(in_ipc), static_cast<Py_ssize_t>(in_len));
 	if (ipc_bytes == nullptr) {
 		PyErr_Print();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 
 	// Call apply_tokenize(tokenizer, ipc_bytes, text_col, label_col, max_length)
@@ -288,7 +288,7 @@ hf_tokenize_apply(ttm_handle h, const void* in_ipc, uint32_t in_len, void** out_
 	if (fn == nullptr) {
 		PyErr_Print();
 		Py_DECREF(ipc_bytes);
-		return TTM_ERR_NOT_FOUND;
+		return TMM_ERR_NOT_FOUND;
 	}
 
 	PyObject* result = PyObject_CallFunctionObjArgs(fn, st->tokenizer, ipc_bytes, text_col, label_col, ml_obj, nullptr);
@@ -296,11 +296,11 @@ hf_tokenize_apply(ttm_handle h, const void* in_ipc, uint32_t in_len, void** out_
 
 	if (result == nullptr) {
 		PyErr_Print();
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 	if (!PyBytes_Check(result)) {
 		Py_DECREF(result);
-		return TTM_ERR_IO;
+		return TMM_ERR_IO;
 	}
 
 	// Copy result bytes to malloc buffer (host will free via std::free)
@@ -309,17 +309,17 @@ hf_tokenize_apply(ttm_handle h, const void* in_ipc, uint32_t in_len, void** out_
 	void* buf = std::malloc(static_cast<std::size_t>(sz));
 	if (buf == nullptr) {
 		Py_DECREF(result);
-		return TTM_ERR_OOM;
+		return TMM_ERR_OOM;
 	}
 	std::memcpy(buf, src, static_cast<std::size_t>(sz));
 	Py_DECREF(result);
 
 	*out_ipc = buf;
 	*out_len = static_cast<uint32_t>(sz);
-	return TTM_OK;
+	return TMM_OK;
 }
 
-static void hf_tokenize_destroy(ttm_handle h) {
+static void hf_tokenize_destroy(tmm_handle h) {
 	auto* st = get_transform(h);
 	if (st == nullptr)
 		return;
@@ -328,7 +328,7 @@ static void hf_tokenize_destroy(ttm_handle h) {
 	*st = {};
 }
 
-static ttm_transform_vtable g_hf_tokenize_vtable = {
+static tmm_transform_vtable g_hf_tokenize_vtable = {
 		hf_tokenize_create,
 		hf_tokenize_apply,
 		hf_tokenize_destroy,
@@ -338,9 +338,9 @@ static ttm_transform_vtable g_hf_tokenize_vtable = {
  * Public registration / teardown
  * ========================================================================= */
 
-ttm_error pyTransformRegister(const ttm_host_api* host) {
+tmm_error pyTransformRegister(const tmm_host_api* host) {
 	if (host->register_transform == nullptr)
-		return TTM_OK;
+		return TMM_OK;
 	return host->register_transform(host->ctx, "hf-tokenize", nullptr, &g_hf_tokenize_vtable);
 }
 

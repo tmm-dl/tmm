@@ -19,7 +19,7 @@
 
 #include "loggers.hpp"
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <array>
 #include <cmath>
@@ -243,18 +243,18 @@ namespace {
 	static TensorBoardState s_tb_slots[kMaxTbSlots];
 	static bool s_tb_used[kMaxTbSlots] = {};
 
-	static ttm_handle tbAlloc() {
+	static tmm_handle tbAlloc() {
 		for (int i = 0; i < kMaxTbSlots; ++i) {
 			if (!s_tb_used[i]) {
 				s_tb_used[i] = true;
 				s_tb_slots[i] = TensorBoardState{};
-				return static_cast<ttm_handle>(i);
+				return static_cast<tmm_handle>(i);
 			}
 		}
-		return TTM_INVALID_HANDLE;
+		return TMM_INVALID_HANDLE;
 	}
 
-	static TensorBoardState* tbGet(ttm_handle h) {
+	static TensorBoardState* tbGet(tmm_handle h) {
 		if (h < 0 || h >= kMaxTbSlots || !s_tb_used[static_cast<int>(h)])
 			return nullptr;
 		return &s_tb_slots[static_cast<int>(h)];
@@ -264,17 +264,17 @@ namespace {
 	 * Callback implementation
 	 * ========================================================================== */
 
-	static ttm_handle tensorBoardCreate(const char* cfg, uint32_t cfgLen) {
+	static tmm_handle tensorBoardCreate(const char* cfg, uint32_t cfgLen) {
 		const auto h = tbAlloc();
-		if (h == TTM_INVALID_HANDLE)
-			return TTM_INVALID_HANDLE;
+		if (h == TMM_INVALID_HANDLE)
+			return TMM_INVALID_HANDLE;
 		auto* st = tbGet(h);
 		const auto dir = jsonGetStr(std::string_view{cfg, cfgLen}, "logDir", "runs");
 		std::strncpy(st->logDir, dir.c_str(), sizeof(st->logDir) - 1);
 		return h;
 	}
 
-	static void tensorBoardOnFitBegin(ttm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
+	static void tensorBoardOnFitBegin(tmm_handle h, const char* /*metrics*/, uint32_t /*len*/) {
 		auto* st = tbGet(h);
 		if (st == nullptr)
 			return;
@@ -306,7 +306,7 @@ namespace {
 		tfWriteRecord(ctx->f, rec);
 	}
 
-	static int32_t tensorBoardOnEpochEnd(ttm_handle h, int64_t epoch, const char* metricsJson, uint32_t len) {
+	static int32_t tensorBoardOnEpochEnd(tmm_handle h, int64_t epoch, const char* metricsJson, uint32_t len) {
 		auto* st = tbGet(h);
 		if (st == nullptr || st->eventsFile == nullptr)
 			return 0;
@@ -318,7 +318,7 @@ namespace {
 		return 0;
 	}
 
-	static void tensorBoardOnFitEnd(ttm_handle h, const char* metricsJson, uint32_t len) {
+	static void tensorBoardOnFitEnd(tmm_handle h, const char* metricsJson, uint32_t len) {
 		auto* st = tbGet(h);
 		if (st == nullptr || st->eventsFile == nullptr)
 			return;
@@ -330,7 +330,7 @@ namespace {
 		st->eventsFile = nullptr;
 	}
 
-	static void tensorBoardDestroy(ttm_handle h) {
+	static void tensorBoardDestroy(tmm_handle h) {
 		auto* st = tbGet(h);
 		if (st != nullptr && st->eventsFile != nullptr) {
 			std::fclose(st->eventsFile);
@@ -342,7 +342,7 @@ namespace {
 
 } // anonymous namespace
 
-ttm_trainer_callback_vtable g_cb_tensorBoard = {
+tmm_trainer_callback_vtable g_cb_tensorBoard = {
 		/* create         */ tensorBoardCreate,
 		/* on_fit_begin   */ tensorBoardOnFitBegin,
 		/* on_epoch_begin */ nullptr,

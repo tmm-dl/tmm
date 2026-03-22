@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include <ttm/plugins/abi.h>
+#include <tmm/plugins/abi.h>
 
 #include <cstdint>
 
@@ -31,16 +31,16 @@ struct SchedulerState {
 extern SchedulerState g_scheds[kMaxScheds];
 
 /** @brief Allocate a scheduler slot and return its handle. */
-ttm_handle allocSched(SchedulerState s);
+tmm_handle allocSched(SchedulerState s);
 
 /** @brief Return a pointer to the scheduler state for handle @p h, or nullptr. */
-SchedulerState* getSched(ttm_handle h);
+SchedulerState* getSched(tmm_handle h);
 
 /** @brief Free the scheduler slot for handle @p h. */
-void freeSched(ttm_handle h);
+void freeSched(tmm_handle h);
 
 /** @brief Vtable-compatible destroy callback — calls freeSched(). */
-void schedDestroy(ttm_handle h);
+void schedDestroy(tmm_handle h);
 
 /** @brief Parse scheduler config from the JSON blob passed to create(). */
 SchedulerState parseSchedCfg(float base_lr, const char* cfg, uint32_t cfg_len);
