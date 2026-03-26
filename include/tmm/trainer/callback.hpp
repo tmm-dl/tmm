@@ -11,7 +11,6 @@
  * ### Typical usage
  * @code{.cpp}
  * #include <tmm/trainer/trainer.hpp>
- * #include <tmm/callbacks/early_stopping.hpp>   // from extensions/core
  *
  * trainer.addCallback(
  *     std::make_unique<EarlyStopping>("val_loss", 5));

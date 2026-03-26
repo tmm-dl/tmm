@@ -1,0 +1,54 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 24,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "conf-common",
+            "description": "General settings that apply to all configurations",
+            "hidden": true
+        },
+        {
+            "name": "conf-release-common",
+            "description": "General settings that apply to all configurations",
+            "hidden": true,
+            "inherits": "conf-common",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "conf-release-static-deps",
+            "description": "Settings for building ttm and its plugins statically linked dependencies",
+            "inherits": "conf-release-common",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": "OFF",
+                "TMM_BUILD_TESTS": "OFF",
+                "TMM_BUILD_EXTENSIONS": "ON",
+                "TMM_BUILD_PACKAGE": "ON"
+            }
+        },
+        {
+            "name": "conf-dev",
+            "description": "Settings for development",
+            "inherits": "conf-common",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "BUILD_SHARED_LIBS": "ON",
+                "TMM_BUILD_TESTS": "ON",
+                "TMM_BUILD_EXTENSIONS": "ON",
+                "TMM_BUILD_PACKAGE": "ON"
+            }
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "conf-tests",
+            "description": "",
+            "configurePreset": "conf-dev"
+        }
+    ]
+}
