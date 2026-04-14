@@ -338,10 +338,10 @@ namespace {
 
 } // anonymous namespace
 
-tmm_error gitSourceRegister(const tmm_host_api* host) {
+tmm_error gitSourceRegister(const tmm_host_api& host) {
 	git_libgit2_init();
 	// NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay,hicpp-no-array-decay)
-	return host->register_source(host->ctx, g_schemes, &g_vtable);
+	return host.register_source(host.ctx, g_schemes, &g_vtable);
 }
 
 void gitSourceTeardown() {

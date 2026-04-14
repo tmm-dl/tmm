@@ -269,10 +269,8 @@ namespace {
 #ifdef __EMSCRIPTEN__
 		tmm_terminal_size(&w, &h);
 #endif
-		if (w < 20)
-			w = 20;
-		if (h < 8)
-			h = 8;
+		w = std::max(w, 20u);
+		h = std::max(h, 8u);
 		const int cols = static_cast<int>(w);
 		const int rows = static_cast<int>(h);
 

@@ -22,7 +22,7 @@ bool isLfsPointer(std::FILE* fp) {
 	return n == kLfsMagic.size() && std::memcmp(buf.data(), kLfsMagic.data(), kLfsMagic.size()) == 0;
 }
 
-bool httpDownload(const std::string& url, const std::filesystem::path& dest, char* err, uint32_t err_cap) {
+bool httpDownload(const std::string_view& url, const std::filesystem::path& dest, char* err, uint32_t err_cap) {
 	std::filesystem::create_directories(dest.parent_path());
 
 	std::ofstream ofs(dest, std::ios::binary);
@@ -38,12 +38,12 @@ bool httpDownload(const std::string& url, const std::filesystem::path& dest, cha
 
 	if (r.error) {
 		std::filesystem::remove(dest);
-		std::snprintf(err, err_cap, "httpDownload: %s: %s", url.c_str(), r.error.message.c_str());
+		std::snprintf(err, err_cap, "httpDownload: %s: %s", url.data(), r.error.message.c_str());
 		return false;
 	}
 	if (r.status_code >= 400) {
 		std::filesystem::remove(dest);
-		std::snprintf(err, err_cap, "httpDownload: %s: HTTP %ld", url.c_str(), r.status_code);
+		std::snprintf(err, err_cap, "httpDownload: %s: HTTP %ld", url.data(), r.status_code);
 		return false;
 	}
 	return true;

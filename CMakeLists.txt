@@ -15,20 +15,31 @@ set(TMM_WASM_TOOLCHAIN "" CACHE FILEPATH
 if(TMM_BUILD_EXTENSIONS AND NOT TMM_WASM_TOOLCHAIN)
     set(_wasi_version "32")
     set(_wasi_base "wasi-sdk-${_wasi_version}.0")
-    # Resolve the platform-specific asset name
+    # Resolve the platform-specific asset name.
+    # CMAKE_HOST_SYSTEM_PROCESSOR is not set before the first project() call,
+    # so query the host architecture via uname on Unix or WMIC on Windows.
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+        execute_process(COMMAND wmic os get osarchitecture
+            OUTPUT_VARIABLE _host_arch OUTPUT_STRIP_TRAILING_WHITESPACE)
+    else()
+        execute_process(COMMAND uname -m
+            OUTPUT_VARIABLE _host_arch OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
+
     if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        if(_host_arch MATCHES "arm64|aarch64")
             set(_wasi_asset "${_wasi_base}-arm64-macos")
         else()
             set(_wasi_asset "${_wasi_base}-x86_64-macos")
         endif()
     else()  # Linux (and other Unix)
-        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        if(_host_arch MATCHES "aarch64|arm64")
             set(_wasi_asset "${_wasi_base}-arm64-linux")
         else()
             set(_wasi_asset "${_wasi_base}-x86_64-linux")
         endif()
     endif()
+    unset(_host_arch)
 
     include(FetchContent)
     FetchContent_Declare(wasi_sdk
@@ -181,6 +192,7 @@ if(TMM_BUILD_EXTENSIONS)
                 -DCMAKE_TOOLCHAIN_FILE=${TMM_WASM_TOOLCHAIN}
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/extensions
+                -DDLPACK_INCLUDE_DIR=${dlpack_SOURCE_DIR}/include
             BUILD_ALWAYS YES
             INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
         )

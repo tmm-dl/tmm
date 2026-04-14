@@ -33,10 +33,8 @@ extern "C" {
 
 TMM_CORE_EXPORT tmm_plugin_info* tmm_plugin_get_info(void) { return &g_info; }
 
-TMM_CORE_EXPORT tmm_error tmm_plugin_init(
-		const tmm_host_api* host, const char* /*cfg*/, uint32_t /*len*/
-) {
-	const tmm_error src_err = gitSourceRegister(host);
+TMM_CORE_EXPORT tmm_error tmm_plugin_init(const tmm_host_api* host, const char* cfg, uint32_t cfglen) {
+	const tmm_error src_err = gitSourceRegister(*host);
 	if (src_err != TMM_OK)
 		return src_err;
 

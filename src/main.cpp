@@ -42,6 +42,7 @@
  * @endcode
  */
 
+#include <tmm/compat/format.hpp>
 #include <tmm/conf/config.hpp>
 #include <tmm/conf/loader.hpp>
 #include <tmm/datasets/dataset_loader.hpp>
@@ -137,6 +138,19 @@ static std::string pluginFilename(const std::string& name) {
 #endif
 }
 
+static std::vector<std::string> pluginFilenameCandidates(const std::string& name) {
+	return {
+#ifdef _WIN32
+			std::format("tmm_{}.dll", name),
+#elif defined(__APPLE__)
+			std::format("tmm_{}.dylib", name),
+#else
+			std::format("tmm_{}.so", name),
+#endif
+			std::format("tmm_{}.wasm", name)
+	};
+}
+
 /// Resolve a plugin name to an absolute path.
 /// Search order: exe dir, then each dir in TMM_PLUGIN_PATH (colon-separated).
 /// Within each directory, also checks the `<name>/` subdirectory so that a
@@ -148,7 +162,7 @@ static std::expected<std::filesystem::path, std::string> resolvePluginName(const
 
 	// Check `base/filename` and `base/<name>/filename` for both native and WASM.
 	auto try_dir = [&](const std::filesystem::path& base) -> std::optional<std::filesystem::path> {
-		for (const auto& fn : {filename, filenameWasm}) {
+		for (const auto& fn : pluginFilenameCandidates(name)) {
 			if (auto c = base / fn; std::filesystem::exists(c))
 				return c;
 			if (auto c = base / name / fn; std::filesystem::exists(c))
@@ -186,12 +200,16 @@ static std::expected<std::filesystem::path, std::string> resolvePluginName(const
 		}
 	}
 
-	return std::unexpected(
-			"plugin '" + name + "' not found (looked for '" + filename + "' or '" + filenameWasm +
-			"').\n"
-			"  Place " +
-			filename + " (or .wasm) next to the tmm binary, or set TMM_PLUGIN_PATH."
-	);
+	constexpr auto msgFmt = "plugin '{}' not found (looked for '{}' or '{}').\n Place {} (or .wasm) next to the tmm "
+							"binary, or set TMM_PLUGIN_PATH";
+	return std::unexpected(std::format(msgFmt, name, filename, filenameWasm, filename));
+
+	// return std::unexpected(
+	// 		"plugin '" + name + "' not found (looked for '" + filename + "' or '" + filenameWasm +
+	// 		"').\n"
+	// 		"  Place " +
+	// 		filename + " (or .wasm) next to the tmm binary, or set TMM_PLUGIN_PATH."
+	// );
 }
 
 /// Load all plugins listed in the config into a fresh PluginManager.

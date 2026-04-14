@@ -27,10 +27,12 @@ target_link_libraries(tmm_trainer
 # Propagated PUBLIC so that consumers of tmm_trainer can use Arrow types without
 # having to add their own include_directories.
 if(arrow_SOURCE_DIR)
-    target_include_directories(tmm_trainer PUBLIC
-        "${arrow_SOURCE_DIR}/src"
-        "${CMAKE_BINARY_DIR}/_deps/arrow-build/src"
-    )
+    #target_include_directories(tmm_trainer PUBLIC
+    #    "${arrow_SOURCE_DIR}/src"
+    #    "${CMAKE_BINARY_DIR}/_deps/arrow-build/src"
+    #)
+    # arrow_static is prepared by dataset
+    target_link_libraries(tmm_trainer PUBLIC arrow_static)
 endif()
 
 # spdlog — kept PRIVATE; the trainer uses it internally for structured logging.

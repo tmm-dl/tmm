@@ -1,10 +1,14 @@
-FROM mcr.microsoft.com/devcontainers/cpp:1-ubuntu-24.04
+FROM mcr.microsoft.com/devcontainers/cpp:ubuntu
 
 RUN <<EOF
+set -e
 apt update
 
 # Dev Tools
-apt install -y cmake git cppcheck gdb clang-format-19 clang-tidy-19
+apt install -y cmake cppcheck gdb clang-format-19 clang-tidy-19
+
+# Dependencies
+apt install -y libssl-dev
 
 # PyTorch Integration
 apt install -y python3-pip
